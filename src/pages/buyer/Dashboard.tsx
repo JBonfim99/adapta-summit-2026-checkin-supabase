@@ -64,22 +64,30 @@ export default function BuyerDashboard() {
   const filledCount = tickets.filter((t) => t.status !== 'pendente').length
   const totalCount = tickets.length
 
-  const getInviteToken = async (ticketId: string) => {
-    const data = await pb.send(`/backend/v1/buyer/tickets/${ticketId}/invite`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${buyer.token}` },
-    })
+  const [loadingTicketId, setLoadingTicketId] = useState<string | null>(null)
+
+  const getInviteToken = async (ticketId: string, force: boolean = false) => {
+    const data = await pb.send(
+      `/backend/v1/buyer/tickets/${ticketId}/invite${force ? '?force=true' : ''}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${buyer.token}` },
+      },
+    )
     return data.token
   }
 
   const handleFill = async (ticket: Ticket) => {
     try {
-      const token = ticket.pendingLink || (await getInviteToken(ticket.id))
+      setLoadingTicketId(ticket.id)
+      const token = await getInviteToken(ticket.id, true)
       navigate(
         `/participante?token=${token}&nome=${encodeURIComponent(buyer.nome)}&email=${encodeURIComponent(buyer.email)}`,
       )
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message, variant: 'destructive' })
+    } finally {
+      setLoadingTicketId(null)
     }
   }
 
@@ -127,6 +135,7 @@ export default function BuyerDashboard() {
             ticket={ticket}
             onFill={() => handleFill(ticket)}
             onInvite={() => handleInvite(ticket)}
+            isLoadingFill={loadingTicketId === ticket.id}
           />
         ))}
       </div>

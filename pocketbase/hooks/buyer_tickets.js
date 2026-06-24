@@ -30,7 +30,7 @@ routerAdd('GET', '/backend/v1/buyer/tickets', (e) => {
       try {
         const pl = $app.findFirstRecordByFilter(
           'links_participante',
-          'ingresso_id = {:id} && expira_em > {:now}',
+          'ingresso_id = {:id} && expira_em > {:now} && usado = false',
           { id: t.id, now: new Date().toISOString() },
         )
         exported.pending_link = pl.getString('token')
@@ -79,21 +79,27 @@ routerAdd('POST', '/backend/v1/buyer/tickets/{id}/invite', (e) => {
     return e.forbiddenError('Not your ticket')
   }
 
+  const force = e.request.url.query().get('force') === 'true'
   let inviteToken
-  try {
-    const pl = $app.findFirstRecordByFilter(
-      'links_participante',
-      'ingresso_id = {:id} && expira_em > {:now}',
-      { id: ticketId, now: new Date().toISOString() },
-    )
-    inviteToken = pl.getString('token')
-  } catch (err) {
+
+  if (!force) {
+    try {
+      const pl = $app.findFirstRecordByFilter(
+        'links_participante',
+        'ingresso_id = {:id} && expira_em > {:now} && usado = false',
+        { id: ticketId, now: new Date().toISOString() },
+      )
+      inviteToken = pl.getString('token')
+    } catch (err) {}
+  }
+
+  if (!inviteToken) {
     const linksCollection = $app.findCollectionByNameOrId('links_participante')
     const newLink = new Record(linksCollection)
     newLink.set('ingresso_id', ticketId)
     newLink.set('token', $security.randomString(32))
     const exp = new Date()
-    exp.setDate(exp.getDate() + 30)
+    exp.setTime(exp.getTime() + 24 * 60 * 60 * 1000)
     newLink.set('expira_em', exp.toISOString())
     newLink.set('usado', false)
     $app.save(newLink)

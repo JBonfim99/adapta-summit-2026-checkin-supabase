@@ -2,16 +2,17 @@ import { Ticket } from '@/types'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Mail, PenSquare, CheckCircle2, UserPlus } from 'lucide-react'
+import { Mail, PenSquare, CheckCircle2, UserPlus, Loader2 } from 'lucide-react'
 import { StatusBadge } from '@/components/StatusBadge'
 
 interface TicketCardProps {
   ticket: Ticket
   onFill: () => void
   onInvite: () => void
+  isLoadingFill?: boolean
 }
 
-export function TicketCard({ ticket, onFill, onInvite }: TicketCardProps) {
+export function TicketCard({ ticket, onFill, onInvite, isLoadingFill }: TicketCardProps) {
   const isPendente = ticket.status === 'pendente'
   const isEnviado = ticket.status === 'enviado'
 
@@ -61,9 +62,14 @@ export function TicketCard({ ticket, onFill, onInvite }: TicketCardProps) {
             <Button
               variant="outline"
               onClick={onFill}
-              className="w-full hover:bg-primary hover:text-primary-foreground transition-all duration-300 hover:shadow-md hover:scale-[1.02]"
+              disabled={isLoadingFill}
+              className="w-full hover:bg-primary hover:text-primary-foreground transition-all duration-300 hover:shadow-md hover:scale-[1.02] disabled:opacity-70 disabled:cursor-not-allowed"
             >
-              <PenSquare className="w-4 h-4 mr-2" />
+              {isLoadingFill ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <PenSquare className="w-4 h-4 mr-2" />
+              )}
               Preencher
             </Button>
             <Button
