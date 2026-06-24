@@ -1,72 +1,106 @@
 routerAdd('GET', '/backend/v1/participant/link/{token}', (e) => {
   const token = e.request.pathValue('token')
-  try {
-    const record = $app.findFirstRecordByData('links_participante', 'token', token)
-    if (record.getBool('usado')) return e.badRequestError('Link já foi utilizado')
-    if (new Date(record.getString('expira_em')) < new Date())
-      return e.badRequestError('Link expirado')
 
-    const ingresso = $app.findRecordById('ingressos', record.getString('ingresso_id'))
+  try {
+    const link = $app.findFirstRecordByData('links_participante', 'token', token)
+    if (link.getBool('usado')) {
+      return e.badRequestError('Este link já foi usado.')
+    }
+    const now = new Date()
+    const expiresAt = new Date(link.getString('expira_em'))
+    if (now > expiresAt) {
+      return e.badRequestError('Este link expirou.')
+    }
+
+    const ingresso = $app.findRecordById('ingressos', link.getString('ingresso_id'))
 
     return e.json(200, {
-      ingresso_id: ingresso.id,
+      id: ingresso.id,
       tipo_ingresso: ingresso.getString('tipo_ingresso'),
       status: ingresso.getString('status'),
     })
-  } catch (_) {
-    return e.badRequestError('Link inválido')
+  } catch (err) {
+    return e.badRequestError('Link inválido ou não encontrado.')
   }
 })
 
 routerAdd('POST', '/backend/v1/participant/submit', (e) => {
-  const body = e.requestInfo().body
-  const token = body.token
+  const body = e.requestInfo().body || {}
+  const {
+    token,
+    nome_completo,
+    email,
+    cpf,
+    telefone,
+    nome_empresa,
+    cargo,
+    nicho,
+    num_funcionarios,
+    faturamento_anual,
+    areas_ajuda,
+    expectativa_aprendizado,
+    expectativa_experiencia,
+  } = body
+
+  if (!token) return e.badRequestError('Token não fornecido.')
 
   try {
-    const link = $app.findFirstRecordByData('links_participante', 'token', token)
-    if (link.getBool('usado')) return e.badRequestError('Link já utilizado')
-    if (new Date(link.getString('expira_em')) < new Date())
-      return e.badRequestError('Link expirado')
+    return $app.runInTransaction((txApp) => {
+      const link = txApp.findFirstRecordByData('links_participante', 'token', token)
 
-    const ingresso = $app.findRecordById('ingressos', link.getString('ingresso_id'))
-    if (
-      ingresso.getString('status') !== 'pendente' &&
-      ingresso.getString('status') !== 'erro_webhook'
-    ) {
-      return e.badRequestError('Ingresso já processado')
-    }
+      if (link.getBool('usado')) {
+        throw new BadRequestError('Este link já foi utilizado.')
+      }
 
-    const partColl = $app.findCollectionByNameOrId('participantes')
-    const part = new Record(partColl)
+      const now = new Date()
+      const expiresAt = new Date(link.getString('expira_em'))
+      if (now > expiresAt) {
+        throw new BadRequestError('Este link expirou.')
+      }
 
-    part.set('ingresso_id', ingresso.id)
-    part.set('nome_completo', body.nome_completo)
-    part.set('email', body.email)
-    part.set('cpf', body.cpf)
-    part.set('telefone', body.telefone)
-    part.set('nome_empresa', body.nome_empresa)
-    part.set('cargo', body.cargo)
-    part.set('nicho', body.nicho)
-    part.set('num_funcionarios', body.num_funcionarios)
-    part.set('faturamento_anual', body.faturamento_anual)
-    part.set('areas_ajuda', body.areas_ajuda || [])
-    part.set('expectativa_aprendizado', body.expectativa_aprendizado || '')
-    part.set('expectativa_experiencia', body.expectativa_experiencia || '')
+      const ingresso = txApp.findRecordById('ingressos', link.getString('ingresso_id'))
 
-    $app.runInTransaction((txApp) => {
-      txApp.save(part)
+      if (ingresso.getString('status') === 'preenchido') {
+        throw new BadRequestError('Este ingresso já foi preenchido.')
+      }
 
-      ingresso.set('participante_id', part.id)
+      // Create the participant
+      const participantesCol = txApp.findCollectionByNameOrId('participantes')
+      const participante = new Record(participantesCol)
+
+      participante.set('nome_completo', nome_completo)
+      participante.set('email', email)
+      participante.set('cpf', cpf)
+      participante.set('telefone', telefone)
+      participante.set('nome_empresa', nome_empresa)
+      participante.set('cargo', cargo)
+      participante.set('nicho', nicho)
+      participante.set('num_funcionarios', num_funcionarios)
+      participante.set('faturamento_anual', faturamento_anual)
+      participante.set('areas_ajuda', areas_ajuda || [])
+      participante.set('expectativa_aprendizado', expectativa_aprendizado)
+      participante.set('expectativa_experiencia', expectativa_experiencia)
+      participante.set('ingresso_id', ingresso.id)
+
+      txApp.save(participante)
+
+      // Update the ticket to lock it
       ingresso.set('status', 'preenchido')
+      ingresso.set('participante_id', participante.id)
       ingresso.set('preenchido_em', new Date().toISOString())
       txApp.save(ingresso)
 
+      // Invalidate the token
       link.set('usado', true)
       txApp.save(link)
-    })
 
-    return e.json(200, { success: true })
+      return e.json(200, { success: true })
+    })
   } catch (err) {
-    return e.badRequestError('Falha ao salvar dados: ' + err.message)
+    if (err instanceof BadRequestError) {
+      throw err
+    }
+    $app.logger().error('Erro ao salvar participante', 'error', err.message)
+    return e.internalServerError('Ocorreu um erro ao processar seus dados.')
   }
 })

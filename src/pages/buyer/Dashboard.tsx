@@ -111,6 +111,13 @@ export default function BuyerDashboard() {
     <div className="space-y-8 animate-fade-in-up pb-12">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b pb-6">
         <div>
+          <div className="mb-6">
+            <img
+              src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
+              alt="Adapta Summit 2026"
+              className="h-10 md:h-12 w-auto object-contain"
+            />
+          </div>
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-3xl font-bold tracking-tight">Meus Ingressos</h1>
             <Button
@@ -126,7 +133,7 @@ export default function BuyerDashboard() {
             Olá, {buyer.nome}. Gerencie os participantes do seu pedido.
           </p>
         </div>
-        <div className="bg-slate-100 px-4 py-2 rounded-lg flex items-center gap-3">
+        <div className="bg-slate-100 px-4 py-2 rounded-lg flex items-center gap-3 mt-4 md:mt-0">
           <span className="text-sm font-medium">Progresso</span>
           <div className="text-lg font-bold text-primary">
             {filledCount} / {totalCount}

@@ -27,7 +27,11 @@ export function FormInput({
   options,
   mask,
 }: FormInputProps) {
-  const { control } = useFormContext()
+  const {
+    control,
+    formState: { errors },
+  } = useFormContext()
+  const error = errors[name]
 
   return (
     <FormField
@@ -38,11 +42,17 @@ export function FormInput({
           <FormLabel className="text-foreground">{label}</FormLabel>
           <FormControl>
             {type === 'textarea' ? (
-              <Textarea placeholder={placeholder} className="resize-none" {...field} />
+              <Textarea
+                placeholder={placeholder}
+                className={`resize-none bg-white ${error ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                {...field}
+              />
             ) : type === 'select' ? (
               <Select onValueChange={field.onChange} defaultValue={field.value}>
                 <FormControl>
-                  <SelectTrigger className="bg-white">
+                  <SelectTrigger
+                    className={`bg-white ${error ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  >
                     <SelectValue placeholder={placeholder} />
                   </SelectTrigger>
                 </FormControl>
@@ -58,7 +68,7 @@ export function FormInput({
               <Input
                 type={type}
                 placeholder={placeholder}
-                className="bg-white"
+                className={`bg-white ${error ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                 {...field}
                 onChange={(e) => {
                   let val = e.target.value

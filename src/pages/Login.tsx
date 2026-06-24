@@ -81,7 +81,7 @@ export default function Login() {
     <div className="flex flex-col items-center justify-center min-h-[70vh] gap-8 animate-fade-in">
       <div className="text-center space-y-4 max-w-lg flex flex-col items-center">
         <img
-          src="https://drive.google.com/uc?export=view&id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs"
+          src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
           alt="Adapta Summit 2026"
           className="h-16 md:h-20 w-auto object-contain mb-2"
         />

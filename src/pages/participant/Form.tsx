@@ -164,7 +164,7 @@ export default function ParticipantForm() {
     <div className="max-w-2xl mx-auto py-8 px-4 animate-fade-in">
       <div className="mb-8 text-center space-y-2 flex flex-col items-center">
         <img
-          src="https://drive.google.com/uc?export=view&id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs"
+          src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
           alt="Adapta Summit 2026"
           className="h-12 md:h-16 w-auto object-contain mb-4"
         />
@@ -278,7 +278,9 @@ export default function ParticipantForm() {
                             Onde você mais precisa de ajuda? (Máx. 2)
                           </FormLabel>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div
+                          className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${methods.formState.errors.areas_ajuda ? 'p-2 border border-red-500 rounded-md bg-red-50/50' : ''}`}
+                        >
                           {HELP_AREAS.map((item) => (
                             <FormField
                               key={item}
