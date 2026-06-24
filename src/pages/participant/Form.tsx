@@ -1,30 +1,30 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm, FormProvider } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
-import { useApp } from '@/contexts/app-context'
 import { Button } from '@/components/ui/button'
 import { FormInput } from '@/components/FormInput'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form'
-import { ArrowRight, ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { ArrowRight, ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import pb from '@/lib/pocketbase/client'
 
 const formSchema = z.object({
-  name: z.string().min(3, 'Nome é obrigatório'),
+  nome_completo: z.string().min(3, 'Nome é obrigatório'),
   email: z.string().email('E-mail inválido'),
   cpf: z.string().min(11, 'CPF inválido'),
-  phone: z.string().min(10, 'Telefone inválido'),
-  company: z.string().min(2, 'Empresa é obrigatória'),
-  role: z.string().min(1, 'Selecione um cargo'),
-  niche: z.string().min(1, 'Selecione um nicho'),
-  employees: z.string().min(1, 'Selecione o tamanho'),
-  revenue: z.string().min(1, 'Selecione o faturamento'),
-  helpAreas: z.array(z.string()).min(1).max(2, 'Selecione até 2 áreas'),
-  learning: z.string().optional(),
-  experience: z.string().optional(),
+  telefone: z.string().min(10, 'Telefone inválido'),
+  nome_empresa: z.string().min(2, 'Empresa é obrigatória'),
+  cargo: z.string().min(1, 'Selecione um cargo'),
+  nicho: z.string().min(1, 'Selecione um nicho'),
+  num_funcionarios: z.string().min(1, 'Selecione o tamanho'),
+  faturamento_anual: z.string().min(1, 'Selecione o faturamento'),
+  areas_ajuda: z.array(z.string()).min(1).max(2, 'Selecione até 2 áreas'),
+  expectativa_aprendizado: z.string().optional(),
+  expectativa_experiencia: z.string().optional(),
 })
 
 type FormValues = z.infer<typeof formSchema>
@@ -51,60 +51,90 @@ const HELP_AREAS = [
 ]
 
 export default function ParticipantForm() {
-  const { ticketId } = useParams()
-  const { tickets, updateTicket, addParticipant } = useApp()
+  const [searchParams] = useSearchParams()
+  const token = searchParams.get('token')
   const navigate = useNavigate()
   const { toast } = useToast()
-  const [step, setStep] = useState(1)
 
-  const ticket = tickets.find((t) => t.id === ticketId)
+  const [step, setStep] = useState(1)
+  const [ticketInfo, setTicketInfo] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    if (!ticket || ticket.status === 'filled') {
+    if (!token) {
       navigate('/participante/expirado')
+      return
     }
-  }, [ticket, navigate])
+    pb.send(`/backend/v1/participant/link/${token}`)
+      .then((data) => {
+        setTicketInfo(data)
+        setLoading(false)
+      })
+      .catch(() => {
+        navigate('/participante/expirado')
+      })
+  }, [token, navigate])
 
   const methods = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: { helpAreas: [] },
+    defaultValues: { areas_ajuda: [] },
   })
 
-  const onSubmit = (data: FormValues) => {
-    if (!ticketId) return
-    const newParticipant = { id: `P-${Date.now()}`, ticketId, ...data }
-    addParticipant(newParticipant)
-    updateTicket(ticketId, { status: 'filled', participantName: data.name })
-    toast({ title: 'Dados salvos com sucesso!' })
-    navigate('/participante/obrigado')
+  const onSubmit = async (data: FormValues) => {
+    setSubmitting(true)
+    try {
+      await pb.send('/backend/v1/participant/submit', {
+        method: 'POST',
+        body: JSON.stringify({ token, ...data }),
+      })
+      toast({ title: 'Dados salvos com sucesso!' })
+      navigate('/participante/obrigado')
+    } catch (e: any) {
+      toast({ title: 'Erro', description: e.message, variant: 'destructive' })
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const nextStep = async () => {
-    const fieldsToValidate = step === 1 ? (['name', 'email', 'cpf', 'phone'] as const) : []
+    const fieldsToValidate =
+      step === 1 ? (['nome_completo', 'email', 'cpf', 'telefone'] as const) : []
     const isValid = await methods.trigger(fieldsToValidate)
     if (isValid) setStep(2)
   }
 
-  if (!ticket) return null
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[50vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    )
+  }
 
   return (
-    <div className="max-w-2xl mx-auto py-8 animate-fade-in">
+    <div className="max-w-2xl mx-auto py-8 px-4 animate-fade-in">
       <div className="mb-8 text-center space-y-2">
         <h1 className="text-3xl font-bold">Pré-Credenciamento</h1>
         <p className="text-muted-foreground">
-          Ingresso: {ticket.id} ({ticket.type})
+          Ingresso:{' '}
+          <span className="font-mono text-foreground font-semibold">
+            {ticketInfo?.tipo_ingresso}
+          </span>
         </p>
       </div>
 
       <div className="flex items-center justify-center gap-4 mb-8">
         <div
-          className={`flex items-center justify-center w-8 h-8 rounded-full font-bold ${step >= 1 ? 'bg-primary text-white' : 'bg-slate-200'}`}
+          className={`flex items-center justify-center w-8 h-8 rounded-full font-bold transition-colors ${step >= 1 ? 'bg-primary text-white' : 'bg-slate-200'}`}
         >
           1
         </div>
-        <div className={`h-1 w-16 rounded ${step === 2 ? 'bg-primary' : 'bg-slate-200'}`} />
         <div
-          className={`flex items-center justify-center w-8 h-8 rounded-full font-bold ${step === 2 ? 'bg-primary text-white' : 'bg-slate-200'}`}
+          className={`h-1 w-16 rounded transition-colors ${step === 2 ? 'bg-primary' : 'bg-slate-200'}`}
+        />
+        <div
+          className={`flex items-center justify-center w-8 h-8 rounded-full font-bold transition-colors ${step === 2 ? 'bg-primary text-white' : 'bg-slate-200'}`}
         >
           2
         </div>
@@ -115,16 +145,20 @@ export default function ParticipantForm() {
           <CardTitle>{step === 1 ? 'Identificação Básica' : 'Perfil Profissional'}</CardTitle>
           <CardDescription>
             {step === 1
-              ? 'Como você será identificado no evento.'
-              : 'Ajude-nos a personalizar sua experiência.'}
+              ? 'Como você será identificado no evento e credencial.'
+              : 'Ajude-nos a personalizar sua experiência e direcionamento.'}
           </CardDescription>
         </CardHeader>
         <CardContent className="pt-6">
           <FormProvider {...methods}>
             <form onSubmit={methods.handleSubmit(onSubmit)} className="space-y-6">
-              {step === 1 && (
-                <div className="space-y-4 animate-slide-in-right">
-                  <FormInput name="name" label="Nome Completo" placeholder="João da Silva" />
+              <div className={step === 1 ? 'block animate-slide-in-right' : 'hidden'}>
+                <div className="space-y-4">
+                  <FormInput
+                    name="nome_completo"
+                    label="Nome Completo"
+                    placeholder="João da Silva"
+                  />
                   <FormInput
                     name="email"
                     label="E-mail"
@@ -133,42 +167,42 @@ export default function ParticipantForm() {
                   />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormInput name="cpf" label="CPF" placeholder="000.000.000-00" />
-                    <FormInput name="phone" label="WhatsApp" placeholder="(00) 90000-0000" />
+                    <FormInput name="telefone" label="WhatsApp" placeholder="(00) 90000-0000" />
                   </div>
                 </div>
-              )}
+              </div>
 
-              {step === 2 && (
-                <div className="space-y-6 animate-slide-in-right">
+              <div className={step === 2 ? 'block animate-slide-in-right' : 'hidden'}>
+                <div className="space-y-6">
                   <FormInput
-                    name="company"
+                    name="nome_empresa"
                     label="Nome da Empresa"
                     placeholder="Sua Empresa Ltda"
                   />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormInput
-                      name="role"
+                      name="cargo"
                       label="Cargo"
                       type="select"
                       options={ROLES}
                       placeholder="Selecione..."
                     />
                     <FormInput
-                      name="niche"
+                      name="nicho"
                       label="Nicho"
                       type="select"
                       options={NICHES}
                       placeholder="Selecione..."
                     />
                     <FormInput
-                      name="employees"
+                      name="num_funcionarios"
                       label="Funcionários"
                       type="select"
                       options={EMPLOYEES}
                       placeholder="Selecione..."
                     />
                     <FormInput
-                      name="revenue"
+                      name="faturamento_anual"
                       label="Faturamento"
                       type="select"
                       options={REVENUE}
@@ -178,7 +212,7 @@ export default function ParticipantForm() {
 
                   <FormField
                     control={methods.control}
-                    name="helpAreas"
+                    name="areas_ajuda"
                     render={() => (
                       <FormItem>
                         <div className="mb-4">
@@ -186,12 +220,12 @@ export default function ParticipantForm() {
                             Onde você mais precisa de ajuda? (Máx. 2)
                           </FormLabel>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {HELP_AREAS.map((item) => (
                             <FormField
                               key={item}
                               control={methods.control}
-                              name="helpAreas"
+                              name="areas_ajuda"
                               render={({ field }) => (
                                 <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3 shadow-sm hover:bg-slate-50 transition-colors">
                                   <FormControl>
@@ -206,7 +240,7 @@ export default function ParticipantForm() {
                                       }}
                                     />
                                   </FormControl>
-                                  <FormLabel className="font-normal cursor-pointer">
+                                  <FormLabel className="font-normal cursor-pointer w-full">
                                     {item}
                                   </FormLabel>
                                 </FormItem>
@@ -219,16 +253,22 @@ export default function ParticipantForm() {
                     )}
                   />
                   <FormInput
-                    name="learning"
+                    name="expectativa_aprendizado"
                     type="textarea"
                     label="Expectativa de Aprendizado (Opcional)"
+                    placeholder="O que você espera levar do evento?"
                   />
                 </div>
-              )}
+              </div>
 
               <div className="flex justify-between pt-6 border-t mt-8">
                 {step === 2 ? (
-                  <Button type="button" variant="outline" onClick={() => setStep(1)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setStep(1)}
+                    disabled={submitting}
+                  >
                     <ArrowLeft className="w-4 h-4 mr-2" /> Voltar
                   </Button>
                 ) : (
@@ -240,8 +280,13 @@ export default function ParticipantForm() {
                     Próximo <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
                 ) : (
-                  <Button type="submit" className="bg-accent hover:bg-accent/90 px-8 text-white">
-                    Finalizar <CheckCircle2 className="w-4 h-4 ml-2" />
+                  <Button
+                    type="submit"
+                    className="bg-accent hover:bg-accent/90 px-8 text-white"
+                    disabled={submitting}
+                  >
+                    {submitting ? 'Enviando...' : 'Finalizar'}{' '}
+                    {!submitting && <CheckCircle2 className="w-4 h-4 ml-2" />}
                   </Button>
                 )}
               </div>

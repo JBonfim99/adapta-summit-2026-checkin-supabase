@@ -4,21 +4,38 @@ import { Mail, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import pb from '@/lib/pocketbase/client'
+import { useToast } from '@/hooks/use-toast'
 
 export default function Login() {
   const [email, setEmail] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const { toast } = useToast()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email) return
-    setSubmitted(true)
+    setLoading(true)
 
-    // Simulate email send and redirect for demo purposes
-    setTimeout(() => {
-      navigate(`/acesso?token=mock&email=${encodeURIComponent(email)}`)
-    }, 2000)
+    try {
+      const res = await pb.send('/backend/v1/auth/magic-link', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      })
+      setSubmitted(true)
+      // Simulate the email click for the demo flow
+      setTimeout(() => navigate(`/acesso?token=${res.token}`), 2500)
+    } catch (err: any) {
+      toast({
+        title: 'Não encontrado',
+        description: err.message || 'Verifique o e-mail digitado.',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (submitted) {
@@ -26,13 +43,13 @@ export default function Login() {
       <div className="flex items-center justify-center min-h-[60vh]">
         <Card className="w-full max-w-md animate-fade-in-up text-center border-none shadow-elevation">
           <CardHeader>
-            <div className="mx-auto bg-green-100 text-green-600 p-4 rounded-full w-20 h-20 flex items-center justify-center mb-4">
+            <div className="mx-auto bg-emerald-100 text-emerald-600 p-4 rounded-full w-20 h-20 flex items-center justify-center mb-4">
               <CheckCircle2 className="w-10 h-10" />
             </div>
             <CardTitle className="text-2xl">Link Enviado!</CardTitle>
             <CardDescription className="text-base mt-2">
               Enviamos um link de acesso mágico para <strong>{email}</strong>. Verifique sua caixa
-              de entrada.
+              de entrada. (Redirecionando na demo...)
             </CardDescription>
           </CardHeader>
         </Card>
@@ -41,7 +58,7 @@ export default function Login() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-[70vh] gap-8">
+    <div className="flex flex-col items-center justify-center min-h-[70vh] gap-8 animate-fade-in">
       <div className="text-center space-y-4 max-w-lg">
         <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-primary">
           Acesse seus Ingressos
@@ -65,20 +82,23 @@ export default function Login() {
                 <Input
                   type="email"
                   placeholder="seu@email.com"
-                  className="pl-10 h-12 text-base"
+                  className="pl-10 h-12 text-base bg-slate-50"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
                 />
               </div>
             </div>
-            <Button type="submit" className="w-full h-12 text-base bg-accent hover:bg-accent/90">
-              Enviar Link de Acesso
+            <Button
+              type="submit"
+              className="w-full h-12 text-base bg-accent hover:bg-accent/90"
+              disabled={loading}
+            >
+              {loading ? 'Enviando...' : 'Enviar Link de Acesso'}
             </Button>
           </form>
           <div className="mt-6 text-center text-sm text-muted-foreground">
-            Dica: use <span className="font-semibold text-foreground">buyer@test.com</span> ou{' '}
-            <span className="font-semibold text-foreground">admin@test.com</span> para testar.
+            Dica: use <span className="font-semibold text-foreground">buyer@test.com</span>
           </div>
         </CardContent>
       </Card>

@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/hooks/use-toast'
+import pb from '@/lib/pocketbase/client'
 
 export default function AdminImport() {
   const [isDragging, setIsDragging] = useState(false)
@@ -11,30 +12,71 @@ export default function AdminImport() {
   const [progress, setProgress] = useState(0)
   const { toast } = useToast()
 
-  const handleSimulateUpload = () => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
     setIsUploading(true)
-    setProgress(0)
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval)
-          setTimeout(() => {
-            setIsUploading(false)
-            setProgress(0)
-            toast({
-              title: 'Importação concluída',
-              description: '50 ingressos foram importados com sucesso.',
-            })
-          }, 500)
-          return 100
-        }
-        return prev + 10
+    setProgress(20)
+
+    try {
+      const text = await file.text()
+      setProgress(50)
+
+      const lines = text
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
+      const headers = lines[0].toLowerCase().split(',')
+
+      const emailIdx = headers.findIndex((h) => h.includes('email'))
+      const pedidoIdx = headers.findIndex((h) => h.includes('pedido') || h.includes('id'))
+      const nomeIdx = headers.findIndex((h) => h.includes('nome'))
+      const tipoIdx = headers.findIndex((h) => h.includes('tipo'))
+
+      if (emailIdx === -1 || pedidoIdx === -1) {
+        throw new Error('Colunas obrigatórias não encontradas no CSV (email, pedido).')
+      }
+
+      const rows = lines
+        .slice(1)
+        .map((l) => {
+          const cols = l.split(',')
+          return {
+            email_comprador: cols[emailIdx],
+            pedido_id: cols[pedidoIdx],
+            nome_comprador: nomeIdx !== -1 ? cols[nomeIdx] : '',
+            tipo_ingresso: tipoIdx !== -1 ? cols[tipoIdx] : 'Standard',
+          }
+        })
+        .filter((r) => r.email_comprador && r.pedido_id)
+
+      setProgress(80)
+
+      const res = await pb.send('/backend/v1/admin/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows }),
       })
-    }, 200)
+
+      setProgress(100)
+      setTimeout(() => {
+        setIsUploading(false)
+        setProgress(0)
+        toast({
+          title: 'Importação concluída',
+          description: `${res.imported} novos ingressos importados com sucesso.`,
+        })
+      }, 500)
+    } catch (err: any) {
+      setIsUploading(false)
+      toast({ title: 'Erro na Importação', description: err.message, variant: 'destructive' })
+    }
+    e.target.value = '' // reset input
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6 animate-fade-in-up">
       <div>
         <h2 className="text-2xl font-bold">Importar Ingressos</h2>
         <p className="text-muted-foreground">
@@ -57,7 +99,7 @@ export default function AdminImport() {
             </div>
           ) : (
             <div
-              className={`space-y-4 p-8 w-full rounded-xl transition-colors ${isDragging ? 'bg-primary/5 border-primary' : ''}`}
+              className={`space-y-4 p-8 w-full rounded-xl transition-colors relative ${isDragging ? 'bg-primary/5 border-primary' : ''}`}
               onDragOver={(e) => {
                 e.preventDefault()
                 setIsDragging(true)
@@ -65,18 +107,25 @@ export default function AdminImport() {
               onDragLeave={() => setIsDragging(false)}
               onDrop={(e) => {
                 e.preventDefault()
-                setIsDragging(false)
-                handleSimulateUpload()
+                setIsDragging(false) /* handle drop logic here if needed */
               }}
             >
-              <div className="bg-white p-4 rounded-full shadow-sm inline-block mb-2">
+              <input
+                type="file"
+                accept=".csv"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                onChange={handleFileUpload}
+              />
+              <div className="bg-white p-4 rounded-full shadow-sm inline-block mb-2 pointer-events-none">
                 <UploadCloud className="h-10 w-10 text-accent" />
               </div>
-              <h3 className="text-lg font-semibold">Arraste seu arquivo aqui</h3>
-              <p className="text-sm text-muted-foreground mb-6">
-                Suporta .csv, .xls, .xlsx até 10MB
+              <h3 className="text-lg font-semibold pointer-events-none">
+                Selecione ou Arraste seu CSV
+              </h3>
+              <p className="text-sm text-muted-foreground mb-6 pointer-events-none">
+                Suporta .csv até 10MB
               </p>
-              <Button onClick={handleSimulateUpload} className="bg-primary hover:bg-primary/90">
+              <Button type="button" className="bg-primary hover:bg-primary/90 pointer-events-none">
                 Procurar Arquivo
               </Button>
             </div>
@@ -88,22 +137,24 @@ export default function AdminImport() {
         <CardHeader>
           <CardTitle className="text-lg">Instruções de Mapeamento</CardTitle>
           <CardDescription>
-            O arquivo deve conter obrigatoriamente as seguintes colunas:
+            A primeira linha do arquivo deve ser o cabeçalho. As colunas essenciais são
+            identificadas por partes do nome:
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ul className="grid grid-cols-2 gap-4 text-sm">
+          <ul className="grid grid-cols-2 gap-4 text-sm text-slate-700">
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> ID do Pedido
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> "pedido" ou "id" (Obrigatório)
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> E-mail do Comprador
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> "email" (Obrigatório)
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Tipo de Ingresso
+              <CheckCircle2 className="w-4 h-4 text-slate-300" /> "nome" (Opcional)
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Status do Pagamento
+              <CheckCircle2 className="w-4 h-4 text-slate-300" /> "tipo" (Opcional, Padrão:
+              Standard)
             </li>
           </ul>
         </CardContent>

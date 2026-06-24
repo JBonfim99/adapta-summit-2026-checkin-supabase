@@ -1,11 +1,12 @@
-export type TicketStatus = 'pending' | 'filled'
+export type TicketStatus = 'pendente' | 'preenchido' | 'enviado' | 'erro_webhook'
 export type TicketType = 'VIP' | 'Standard'
 
 export interface Ticket {
   id: string
+  pedido_id?: string
   type: TicketType
   status: TicketStatus
-  buyerEmail: string
+  buyerEmail?: string
   participantName?: string
 }
 
@@ -29,9 +30,4 @@ export interface WebhookLog {
   status: number
   method: string
   response: string
-}
-
-export interface User {
-  email: string
-  role: 'buyer' | 'admin'
 }

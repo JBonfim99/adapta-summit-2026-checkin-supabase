@@ -1,28 +1,41 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useApp } from '@/contexts/app-context'
+import pb from '@/lib/pocketbase/client'
+import { useToast } from '@/hooks/use-toast'
 
 export default function MagicLink() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { login } = useApp()
+  const { setBuyer } = useApp()
+  const { toast } = useToast()
+  const hasRun = useRef(false)
 
   useEffect(() => {
-    const email = searchParams.get('email')
-    if (email) {
-      setTimeout(() => {
-        login(email)
-        if (email.includes('admin')) {
-          navigate('/admin')
-        } else {
-          navigate('/meus-ingressos')
-        }
-      }, 1500)
+    if (hasRun.current) return
+    hasRun.current = true
+
+    const token = searchParams.get('token')
+    if (token) {
+      pb.send('/backend/v1/auth/magic-link/consume', {
+        method: 'POST',
+        body: JSON.stringify({ token }),
+      })
+        .then((data) => {
+          if (data.token) {
+            setBuyer({ ...data.comprador, token: data.token })
+            navigate('/meus-ingressos', { replace: true })
+          }
+        })
+        .catch(() => {
+          toast({ title: 'Token inválido ou expirado', variant: 'destructive' })
+          navigate('/', { replace: true })
+        })
     } else {
-      navigate('/')
+      navigate('/', { replace: true })
     }
-  }, [searchParams, login, navigate])
+  }, [searchParams, navigate, setBuyer, toast])
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4 animate-fade-in">

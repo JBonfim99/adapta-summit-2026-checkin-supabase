@@ -1,27 +1,36 @@
-import { useApp } from '@/contexts/app-context'
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Users, Ticket as TicketIcon, Percent, Activity } from 'lucide-react'
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts'
 import { ChartContainer, ChartTooltipContent } from '@/components/ui/chart'
+import pb from '@/lib/pocketbase/client'
 
 export default function AdminDashboard() {
-  const { tickets, participants } = useApp()
+  const [stats, setStats] = useState<any>(null)
 
-  const totalTickets = tickets.length
-  const filledTickets = tickets.filter((t) => t.status === 'filled').length
-  const pendingTickets = totalTickets - filledTickets
-  const fillRate = totalTickets ? Math.round((filledTickets / totalTickets) * 100) : 0
+  useEffect(() => {
+    pb.send('/backend/v1/admin/stats', { method: 'GET' }).then(setStats)
+  }, [])
+
+  if (!stats)
+    return (
+      <div className="p-8 text-center text-muted-foreground animate-pulse">
+        Carregando métricas...
+      </div>
+    )
+
+  const fillRate = stats.total ? Math.round((stats.preenchidos / stats.total) * 100) : 0
 
   const chartData = [
     {
       name: 'VIP',
-      preenchidos: tickets.filter((t) => t.type === 'VIP' && t.status === 'filled').length,
-      pendentes: tickets.filter((t) => t.type === 'VIP' && t.status === 'pending').length,
+      preenchidos: stats.vip.preenchidos,
+      pendentes: stats.vip.pendentes,
     },
     {
       name: 'Standard',
-      preenchidos: tickets.filter((t) => t.type === 'Standard' && t.status === 'filled').length,
-      pendentes: tickets.filter((t) => t.type === 'Standard' && t.status === 'pending').length,
+      preenchidos: stats.standard.preenchidos,
+      pendentes: stats.standard.pendentes,
     },
   ]
 
@@ -31,7 +40,7 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 animate-fade-in-up">
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Dashboard Administrativo</h2>
         <p className="text-muted-foreground">Visão geral do progresso de credenciamento.</p>
@@ -44,7 +53,7 @@ export default function AdminDashboard() {
             <TicketIcon className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalTickets}</div>
+            <div className="text-2xl font-bold">{stats.total}</div>
           </CardContent>
         </Card>
         <Card className="shadow-sm">
@@ -53,7 +62,7 @@ export default function AdminDashboard() {
             <Users className="h-4 w-4 text-emerald-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-emerald-600">{filledTickets}</div>
+            <div className="text-2xl font-bold text-emerald-600">{stats.preenchidos}</div>
           </CardContent>
         </Card>
         <Card className="shadow-sm">
@@ -62,7 +71,7 @@ export default function AdminDashboard() {
             <Activity className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-amber-500">{pendingTickets}</div>
+            <div className="text-2xl font-bold text-amber-500">{stats.pendentes}</div>
           </CardContent>
         </Card>
         <Card className="shadow-sm">
@@ -118,20 +127,17 @@ export default function AdminDashboard() {
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {participants
-                .slice(-5)
-                .reverse()
-                .map((p) => (
-                  <div key={p.id} className="flex items-center">
-                    <div className="ml-4 space-y-1">
-                      <p className="text-sm font-medium leading-none">{p.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        Preencheu o ingresso {p.ticketId}
-                      </p>
-                    </div>
+              {stats.activity.map((p: any) => (
+                <div key={p.id} className="flex items-center">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium leading-none">{p.nome}</p>
+                    <p className="text-xs text-muted-foreground mt-1 font-mono">
+                      Preencheu o ingresso {p.ingresso_id}
+                    </p>
                   </div>
-                ))}
-              {participants.length === 0 && (
+                </div>
+              ))}
+              {stats.activity.length === 0 && (
                 <p className="text-sm text-muted-foreground text-center py-8">
                   Nenhuma atividade recente.
                 </p>
