@@ -1,16 +1,14 @@
-import { useState } from 'react'
 import { Outlet, Link, useNavigate } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { useApp } from '@/contexts/app-context'
 import { Button } from '@/components/ui/button'
 
 export default function Layout() {
-  const { user, buyer, logout } = useApp()
+  const { buyer, logoutBuyer } = useApp()
   const navigate = useNavigate()
-  const [imgError, setImgError] = useState(false)
 
   const handleLogout = () => {
-    logout()
+    logoutBuyer()
     navigate('/')
   }
 
@@ -22,38 +20,21 @@ export default function Layout() {
             to={buyer ? '/meus-ingressos' : '/'}
             className="flex items-center gap-2 transition-transform hover:scale-105 shrink-0"
           >
-            {!imgError ? (
-              <img
-                src="https://img.usecurling.com/i?q=mountain&color=black&shape=fill"
-                alt="Adapta Summit 2026"
-                width="120"
-                height="32"
-                className="h-8 w-auto min-w-[100px] object-contain object-left"
-                onError={() => setImgError(true)}
-              />
-            ) : (
-              <span className="text-xl font-bold tracking-tight">Adapta Summit</span>
-            )}
+            <span className="text-xl font-bold tracking-tight text-primary">
+              Adapta Summit 2026
+            </span>
           </Link>
 
-          {user && (
+          {buyer && (
             <div className="flex items-center gap-4">
-              <div className="text-sm text-muted-foreground hidden md:block">{user.email}</div>
-              {user.role === 'admin' && (
-                <Link to="/admin" className="text-sm font-medium hover:text-accent">
-                  Admin
-                </Link>
-              )}
-              {user.role === 'buyer' && (
-                <Link to="/meus-ingressos" className="text-sm font-medium hover:text-accent">
-                  Ingressos
-                </Link>
-              )}
+              <div className="text-sm text-muted-foreground hidden md:block font-medium">
+                {buyer.email}
+              </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={handleLogout}
-                className="text-muted-foreground hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted font-sans font-medium transition-colors"
               >
                 <LogOut className="h-4 w-4 mr-2" />
                 Sair
