@@ -9,7 +9,6 @@ export default function MagicLink() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { setBuyer } = useApp()
-  const { toast } = useToast()
   const hasRun = useRef(false)
 
   useEffect(() => {
@@ -29,13 +28,15 @@ export default function MagicLink() {
           }
         })
         .catch(() => {
-          toast({ title: 'Token inválido ou expirado', variant: 'destructive' })
-          navigate('/', { replace: true })
+          navigate('/', {
+            replace: true,
+            state: { error: 'Este link é inválido ou expirou. Por favor, solicite um novo.' },
+          })
         })
     } else {
       navigate('/', { replace: true })
     }
-  }, [searchParams, navigate, setBuyer, toast])
+  }, [searchParams, navigate, setBuyer])
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4 animate-fade-in">

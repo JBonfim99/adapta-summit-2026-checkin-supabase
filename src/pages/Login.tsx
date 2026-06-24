@@ -1,18 +1,38 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Mail, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
+import { useApp } from '@/contexts/app-context'
 
 export default function Login() {
   const [email, setEmail] = useState('')
+  const { buyer } = useApp()
+  const location = useLocation()
   const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const { toast } = useToast()
+
+  useEffect(() => {
+    if (buyer) {
+      navigate('/meus-ingressos', { replace: true })
+    }
+  }, [buyer, navigate])
+
+  useEffect(() => {
+    if (location.state?.error) {
+      toast({
+        title: 'Erro de Acesso',
+        description: location.state.error,
+        variant: 'destructive',
+      })
+      window.history.replaceState({}, document.title)
+    }
+  }, [location, toast])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
