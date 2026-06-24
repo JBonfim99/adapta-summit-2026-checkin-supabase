@@ -45,7 +45,7 @@ export function TicketCard({ ticket, onInvite, onFill }: TicketCardProps) {
                 {!ticket.participantName && !ticket.participantEmail && !ticket.participantCpf ? (
                   <div className="flex flex-col items-center justify-center py-4 text-muted-foreground">
                     <User className="w-8 h-8 mb-2 opacity-20" />
-                    <p className="text-sm font-medium">Dados não encontrados</p>
+                    <p className="text-sm font-medium">Aguardando atualização dos dados...</p>
                   </div>
                 ) : (
                   <>
@@ -54,7 +54,7 @@ export function TicketCard({ ticket, onInvite, onFill }: TicketCardProps) {
                         <User className="w-4 h-4" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-xs text-muted-foreground">Nome</p>
+                        <p className="text-xs text-muted-foreground">Nome Completo</p>
                         <p className="font-semibold text-sm text-foreground truncate">
                           {ticket.participantName || 'Preenchido'}
                         </p>
@@ -66,7 +66,7 @@ export function TicketCard({ ticket, onInvite, onFill }: TicketCardProps) {
                           <Mail className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-xs text-muted-foreground">E-mail</p>
+                          <p className="text-xs text-muted-foreground">Email</p>
                           <p className="font-medium text-sm text-foreground truncate">
                             {ticket.participantEmail}
                           </p>

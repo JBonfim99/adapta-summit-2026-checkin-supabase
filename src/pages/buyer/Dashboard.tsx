@@ -23,6 +23,7 @@ export default function BuyerDashboard() {
   const { toast } = useToast()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [inviteTicket, setInviteTicket] = useState<{ t: Ticket; link: string } | null>(null)
+  const [imgError, setImgError] = useState(false)
 
   const loadTickets = useCallback(() => {
     if (!buyer) return
@@ -112,13 +113,18 @@ export default function BuyerDashboard() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4 border-b pb-6">
         <div>
           <div className="mb-6">
-            <img
-              src="https://img.usecurling.com/i?q=mountain&color=black&shape=fill"
-              alt="Adapta Summit 2026"
-              width="200"
-              height="48"
-              className="h-10 md:h-12 w-auto min-w-[150px] object-contain object-left"
-            />
+            {!imgError ? (
+              <img
+                src="https://img.usecurling.com/i?q=mountain&color=black&shape=fill"
+                alt="Adapta Summit 2026"
+                width="200"
+                height="48"
+                className="h-10 md:h-12 w-auto min-w-[150px] object-contain object-left"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <h2 className="text-2xl font-bold tracking-tight">Adapta Summit</h2>
+            )}
           </div>
           <div className="flex items-center gap-3 mb-2">
             <h1 className="text-3xl font-bold tracking-tight">Meus Ingressos</h1>

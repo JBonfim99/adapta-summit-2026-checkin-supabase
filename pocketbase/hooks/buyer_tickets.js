@@ -1,149 +1,104 @@
 routerAdd('GET', '/backend/v1/buyer/tickets', (e) => {
   const authHeader = e.request.header.get('Authorization') || ''
   const token = authHeader.replace('Bearer ', '').trim()
-  if (!token) return e.unauthorizedError('Token missing')
+  if (!token) return e.unauthorizedError('Missing token')
 
-  let tokenRecord
+  let link
   try {
-    tokenRecord = $app.findFirstRecordByData('tokens_acesso', 'token', token)
-  } catch (_) {
+    link = $app.findFirstRecordByFilter('tokens_acesso', 'token = {:t} && expira_em > {:now}', {
+      t: token,
+      now: new Date().toISOString(),
+    })
+  } catch (err) {
     return e.unauthorizedError('Invalid token')
   }
 
-  if (new Date(tokenRecord.getString('expira_em')) < new Date()) {
-    return e.unauthorizedError('Token expired')
-  }
-
-  const compradorId = tokenRecord.getString('comprador_id')
-
-  const records = $app.findRecordsByFilter(
+  const tickets = $app.findRecordsByFilter(
     'ingressos',
-    `comprador_id = '${compradorId}'`,
+    'comprador_id = {:c}',
     '-created',
-    100,
+    1000,
     0,
+    { c: link.getString('comprador_id') },
   )
 
-  $apis.enrichRecords(e, records, 'participante_id')
+  const items = []
+  for (const t of tickets) {
+    const exported = JSON.parse(JSON.stringify(t.publicExport()))
 
-  const activeLinks = $app.findRecordsByFilter(
-    'links_participante',
-    `ingresso_id.comprador_id = '${compradorId}' && usado = false && expira_em > @now`,
-    '-created',
-    100,
-    0,
-  )
-
-  const activeLinksMap = {}
-  for (const link of activeLinks) {
-    if (!activeLinksMap[link.getString('ingresso_id')]) {
-      activeLinksMap[link.getString('ingresso_id')] = link.getString('token')
+    if (t.getString('status') === 'pendente') {
+      try {
+        const pl = $app.findFirstRecordByFilter(
+          'links_participante',
+          'ingresso_id = {:id} && expira_em > {:now}',
+          { id: t.id, now: new Date().toISOString() },
+        )
+        exported.pending_link = pl.getString('token')
+      } catch (err) {}
     }
-  }
 
-  const items = records.map((r) => {
-    const json = JSON.parse(JSON.stringify(r))
-    json.pending_link = activeLinksMap[r.id] || null
-    return json
-  })
+    const pId = t.getString('participante_id')
+    if (pId) {
+      try {
+        const p = $app.findRecordById('participantes', pId)
+        if (!exported.expand) exported.expand = {}
+        exported.expand.participante_id = JSON.parse(JSON.stringify(p.publicExport()))
+      } catch (err) {}
+    }
+
+    items.push(exported)
+  }
 
   return e.json(200, { items })
 })
 
-routerAdd('POST', '/backend/v1/buyer/tickets/{ticketId}/invite', (e) => {
+routerAdd('POST', '/backend/v1/buyer/tickets/{id}/invite', (e) => {
   const authHeader = e.request.header.get('Authorization') || ''
-  const authToken = authHeader.replace('Bearer ', '').trim()
-  if (!authToken) return e.unauthorizedError('Token missing')
+  const token = authHeader.replace('Bearer ', '').trim()
+  if (!token) return e.unauthorizedError('Missing token')
 
-  let tokenRecord
+  let link
   try {
-    tokenRecord = $app.findFirstRecordByData('tokens_acesso', 'token', authToken)
-  } catch (_) {
+    link = $app.findFirstRecordByFilter('tokens_acesso', 'token = {:t} && expira_em > {:now}', {
+      t: token,
+      now: new Date().toISOString(),
+    })
+  } catch (err) {
     return e.unauthorizedError('Invalid token')
   }
 
-  const compradorId = tokenRecord.getString('comprador_id')
-  const ticketId = e.request.pathValue('ticketId')
-
+  const ticketId = e.request.pathValue('id')
   let ticket
   try {
     ticket = $app.findRecordById('ingressos', ticketId)
-  } catch (_) {
+  } catch (err) {
     return e.notFoundError('Ticket not found')
   }
 
-  if (ticket.getString('comprador_id') !== compradorId) {
-    return e.forbiddenError('Not your ticket')
-  }
-  if (ticket.getString('status') !== 'pendente') {
-    return e.badRequestError('Ticket already filled')
-  }
-
-  const oldLinks = $app.findRecordsByFilter(
-    'links_participante',
-    `ingresso_id = '${ticketId}' && usado = false`,
-    '',
-    100,
-    0,
-  )
-  for (const old of oldLinks) {
-    old.set('usado', true)
-    $app.save(old)
-  }
-
-  const linkCol = $app.findCollectionByNameOrId('links_participante')
-  const linkRecord = new Record(linkCol)
-  const newToken = $security.randomString(32)
-  linkRecord.set('ingresso_id', ticketId)
-  linkRecord.set('token', newToken)
-  linkRecord.set('usado', false)
-
-  const expire = new Date()
-  expire.setDate(expire.getDate() + 7)
-  linkRecord.set('expira_em', expire.toISOString().replace('T', ' ').substring(0, 19) + 'Z')
-
-  $app.save(linkRecord)
-
-  return e.json(200, { token: newToken })
-})
-
-routerAdd('POST', '/backend/v1/buyer/tickets/{ticketId}/revoke', (e) => {
-  const authHeader = e.request.header.get('Authorization') || ''
-  const authToken = authHeader.replace('Bearer ', '').trim()
-  if (!authToken) return e.unauthorizedError('Token missing')
-
-  let tokenRecord
-  try {
-    tokenRecord = $app.findFirstRecordByData('tokens_acesso', 'token', authToken)
-  } catch (_) {
-    return e.unauthorizedError('Invalid token')
-  }
-
-  const compradorId = tokenRecord.getString('comprador_id')
-  const ticketId = e.request.pathValue('ticketId')
-
-  let ticket
-  try {
-    ticket = $app.findRecordById('ingressos', ticketId)
-  } catch (_) {
-    return e.notFoundError('Ticket not found')
-  }
-
-  if (ticket.getString('comprador_id') !== compradorId) {
+  if (ticket.getString('comprador_id') !== link.getString('comprador_id')) {
     return e.forbiddenError('Not your ticket')
   }
 
-  const oldLinks = $app.findRecordsByFilter(
-    'links_participante',
-    `ingresso_id = '${ticketId}' && usado = false`,
-    '',
-    100,
-    0,
-  )
-  for (const old of oldLinks) {
-    old.set('usado', true)
-    $app.save(old)
+  let inviteToken
+  try {
+    const pl = $app.findFirstRecordByFilter(
+      'links_participante',
+      'ingresso_id = {:id} && expira_em > {:now}',
+      { id: ticketId, now: new Date().toISOString() },
+    )
+    inviteToken = pl.getString('token')
+  } catch (err) {
+    const linksCollection = $app.findCollectionByNameOrId('links_participante')
+    const newLink = new Record(linksCollection)
+    newLink.set('ingresso_id', ticketId)
+    newLink.set('token', $security.randomString(32))
+    const exp = new Date()
+    exp.setDate(exp.getDate() + 30)
+    newLink.set('expira_em', exp.toISOString())
+    newLink.set('usado', false)
+    $app.save(newLink)
+    inviteToken = newLink.getString('token')
   }
 
-  return e.json(200, { success: true })
+  return e.json(200, { token: inviteToken })
 })

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Outlet, Link, useNavigate } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { useApp } from '@/contexts/app-context'
@@ -6,6 +7,7 @@ import { Button } from '@/components/ui/button'
 export default function Layout() {
   const { user, buyer, logout } = useApp()
   const navigate = useNavigate()
+  const [imgError, setImgError] = useState(false)
 
   const handleLogout = () => {
     logout()
@@ -20,13 +22,18 @@ export default function Layout() {
             to={buyer ? '/meus-ingressos' : '/'}
             className="flex items-center gap-2 transition-transform hover:scale-105 shrink-0"
           >
-            <img
-              src="https://img.usecurling.com/i?q=mountain&color=black&shape=fill"
-              alt="Adapta Summit 2026"
-              width="120"
-              height="32"
-              className="h-8 w-auto min-w-[100px] object-contain object-left"
-            />
+            {!imgError ? (
+              <img
+                src="https://img.usecurling.com/i?q=mountain&color=black&shape=fill"
+                alt="Adapta Summit 2026"
+                width="120"
+                height="32"
+                className="h-8 w-auto min-w-[100px] object-contain object-left"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <span className="text-xl font-bold tracking-tight">Adapta Summit</span>
+            )}
           </Link>
 
           {user && (
