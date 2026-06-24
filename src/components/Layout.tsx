@@ -1,10 +1,10 @@
 import { Outlet, Link, useNavigate } from 'react-router-dom'
-import { MountainSnow, LogOut } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import { useApp } from '@/contexts/app-context'
 import { Button } from '@/components/ui/button'
 
 export default function Layout() {
-  const { user, logout } = useApp()
+  const { user, buyer, logout } = useApp()
   const navigate = useNavigate()
 
   const handleLogout = () => {
@@ -16,13 +16,15 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-50 w-full border-b bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between max-w-7xl">
-          <Link to="/" className="flex items-center gap-2 transition-transform hover:scale-105">
-            <div className="bg-primary text-primary-foreground p-1.5 rounded-md">
-              <MountainSnow className="h-5 w-5" />
-            </div>
-            <span className="font-bold text-xl tracking-tight hidden sm:inline-block">
-              Adapta Summit 2026
-            </span>
+          <Link
+            to={buyer ? '/meus-ingressos' : '/'}
+            className="flex items-center gap-2 transition-transform hover:scale-105"
+          >
+            <img
+              src="https://drive.google.com/uc?export=view&id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs"
+              alt="Adapta Summit 2026"
+              className="h-8 w-auto object-contain"
+            />
           </Link>
 
           {user && (

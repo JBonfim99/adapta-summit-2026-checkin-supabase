@@ -162,7 +162,12 @@ export default function ParticipantForm() {
 
   return (
     <div className="max-w-2xl mx-auto py-8 px-4 animate-fade-in">
-      <div className="mb-8 text-center space-y-2">
+      <div className="mb-8 text-center space-y-2 flex flex-col items-center">
+        <img
+          src="https://drive.google.com/uc?export=view&id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs"
+          alt="Adapta Summit 2026"
+          className="h-12 md:h-16 w-auto object-contain mb-4"
+        />
         <h1 className="text-3xl font-bold">Pré-Credenciamento</h1>
         <p className="text-muted-foreground">
           Ingresso:{' '}
