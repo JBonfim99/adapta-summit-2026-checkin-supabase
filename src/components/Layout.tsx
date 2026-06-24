@@ -21,7 +21,7 @@ export default function Layout() {
             className="flex items-center gap-2 transition-transform hover:scale-105 shrink-0"
           >
             <img
-              src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
+              src="https://img.usecurling.com/i?q=mountain&color=black&shape=fill"
               alt="Adapta Summit 2026"
               width="120"
               height="32"

@@ -42,42 +42,51 @@ export function TicketCard({ ticket, onInvite, onFill }: TicketCardProps) {
           {isFilled ? (
             <div className="space-y-4">
               <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 space-y-3">
-                <div className="flex items-center gap-3">
-                  <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
-                    <User className="w-4 h-4" />
+                {!ticket.participantName && !ticket.participantEmail && !ticket.participantCpf ? (
+                  <div className="flex flex-col items-center justify-center py-4 text-muted-foreground">
+                    <User className="w-8 h-8 mb-2 opacity-20" />
+                    <p className="text-sm font-medium">Dados não encontrados</p>
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">Nome Completo</p>
-                    <p className="font-semibold text-sm text-foreground truncate">
-                      {ticket.participantName || 'Preenchido'}
-                    </p>
-                  </div>
-                </div>
-                {ticket.participantEmail && (
-                  <div className="flex items-center gap-3">
-                    <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
-                      <Mail className="w-4 h-4" />
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
+                        <User className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">Nome</p>
+                        <p className="font-semibold text-sm text-foreground truncate">
+                          {ticket.participantName || 'Preenchido'}
+                        </p>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground">E-mail</p>
-                      <p className="font-medium text-sm text-foreground truncate">
-                        {ticket.participantEmail}
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {ticket.participantCpf && (
-                  <div className="flex items-center gap-3">
-                    <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
-                      <IdCard className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground">CPF</p>
-                      <p className="font-medium text-sm text-foreground truncate">
-                        {formatCpf(ticket.participantCpf)}
-                      </p>
-                    </div>
-                  </div>
+                    {ticket.participantEmail && (
+                      <div className="flex items-center gap-3">
+                        <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
+                          <Mail className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs text-muted-foreground">E-mail</p>
+                          <p className="font-medium text-sm text-foreground truncate">
+                            {ticket.participantEmail}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {ticket.participantCpf && (
+                      <div className="flex items-center gap-3">
+                        <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
+                          <IdCard className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs text-muted-foreground">CPF</p>
+                          <p className="font-medium text-sm text-foreground truncate">
+                            {formatCpf(ticket.participantCpf)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
               <Button variant="outline" className="w-full text-muted-foreground" disabled>

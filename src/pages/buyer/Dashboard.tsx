@@ -26,7 +26,7 @@ export default function BuyerDashboard() {
 
   const loadTickets = useCallback(() => {
     if (!buyer) return
-    pb.send('/backend/v1/buyer/tickets', {
+    pb.send('/backend/v1/buyer/tickets?expand=participante_id', {
       headers: { Authorization: `Bearer ${buyer.token}` },
     })
       .then((data) => {
@@ -113,7 +113,7 @@ export default function BuyerDashboard() {
         <div>
           <div className="mb-6">
             <img
-              src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
+              src="https://img.usecurling.com/i?q=mountain&color=black&shape=fill"
               alt="Adapta Summit 2026"
               width="200"
               height="48"
