@@ -70,14 +70,6 @@ export default function Layout() {
       <footer className="border-t bg-white py-6 mt-auto">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground max-w-7xl">
           <p>© 2026 Adapta Summit. Todos os direitos reservados.</p>
-          <div className="mt-2 space-x-4">
-            <a href="#" className="hover:text-primary transition-colors">
-              Suporte
-            </a>
-            <a href="#" className="hover:text-primary transition-colors">
-              Termos
-            </a>
-          </div>
         </div>
       </footer>
     </div>
