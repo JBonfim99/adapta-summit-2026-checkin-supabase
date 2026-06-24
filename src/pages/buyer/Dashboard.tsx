@@ -24,6 +24,7 @@ export default function BuyerDashboard() {
   const { toast } = useToast()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [inviteTicket, setInviteTicket] = useState<{ t: Ticket; link: string } | null>(null)
+  const [loadingTicketId, setLoadingTicketId] = useState<string | null>(null)
 
   const loadTickets = useCallback(() => {
     if (!buyer) return
@@ -63,8 +64,6 @@ export default function BuyerDashboard() {
 
   const filledCount = tickets.filter((t) => t.status !== 'pendente').length
   const totalCount = tickets.length
-
-  const [loadingTicketId, setLoadingTicketId] = useState<string | null>(null)
 
   const getInviteToken = async (ticketId: string, force: boolean = false) => {
     const data = await pb.send(
