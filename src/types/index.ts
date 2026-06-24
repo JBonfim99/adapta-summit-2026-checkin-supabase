@@ -8,6 +8,8 @@ export interface Ticket {
   status: TicketStatus
   buyerEmail?: string
   participantName?: string
+  participantEmail?: string
+  participantCpf?: string
   pendingLink?: string | null
 }
 

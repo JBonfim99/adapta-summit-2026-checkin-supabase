@@ -36,6 +36,8 @@ export default function BuyerDashboard() {
           type: t.tipo_ingresso,
           status: t.status,
           participantName: t.expand?.participante_id?.nome_completo,
+          participantEmail: t.expand?.participante_id?.email,
+          participantCpf: t.expand?.participante_id?.cpf,
           pendingLink: t.pending_link || null,
         }))
         setTickets(formatted)
@@ -90,19 +92,6 @@ export default function BuyerDashboard() {
     }
   }
 
-  const handleRevoke = async (ticket: Ticket) => {
-    try {
-      await pb.send(`/backend/v1/buyer/tickets/${ticket.id}/revoke`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${buyer.token}` },
-      })
-      toast({ title: 'Convite revogado', description: 'O link anterior não é mais válido.' })
-      loadTickets()
-    } catch (e: any) {
-      toast({ title: 'Erro', description: e.message, variant: 'destructive' })
-    }
-  }
-
   const copyLink = () => {
     if (!inviteTicket) return
     navigator.clipboard.writeText(inviteTicket.link)
@@ -110,6 +99,12 @@ export default function BuyerDashboard() {
       title: 'Link copiado!',
       description: 'Envie este link para o participante preencher os dados.',
     })
+  }
+
+  const shareWhatsApp = () => {
+    if (!inviteTicket) return
+    const message = `Olá! Aqui está o seu ingresso para o Adapta Summit 2026. Por favor, preencha seus dados para confirmar sua presença através deste link: ${inviteTicket.link}`
+    window.open(`https://wa.me/send?text=${encodeURIComponent(message)}`, '_blank')
   }
 
   return (
@@ -141,13 +136,7 @@ export default function BuyerDashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {tickets.map((ticket) => (
-          <TicketCard
-            key={ticket.id}
-            ticket={ticket}
-            onFill={handleFill}
-            onInvite={handleInvite}
-            onRevoke={handleRevoke}
-          />
+          <TicketCard key={ticket.id} ticket={ticket} onFill={handleFill} onInvite={handleInvite} />
         ))}
       </div>
 
@@ -176,7 +165,7 @@ export default function BuyerDashboard() {
             <Button
               variant="outline"
               className="w-full gap-2 border-green-500 text-green-600 hover:bg-green-50"
-              onClick={copyLink}
+              onClick={shareWhatsApp}
             >
               <Share2 className="w-4 h-4" />
               Compartilhar no WhatsApp

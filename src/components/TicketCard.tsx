@@ -2,7 +2,7 @@ import { Ticket } from '@/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { StatusBadge } from './StatusBadge'
 import { Button } from '@/components/ui/button'
-import { User, Copy, Edit, QrCode, AlertCircle } from 'lucide-react'
+import { User, Copy, Edit, QrCode, Mail, IdCard } from 'lucide-react'
 
 interface TicketCardProps {
   ticket: Ticket
@@ -10,12 +10,14 @@ interface TicketCardProps {
   onFill: (ticket: Ticket) => void
 }
 
-export function TicketCard({
-  ticket,
-  onInvite,
-  onFill,
-  onRevoke,
-}: TicketCardProps & { onRevoke?: (ticket: Ticket) => void }) {
+const formatCpf = (cpf?: string) => {
+  if (!cpf) return ''
+  const digits = cpf.replace(/\D/g, '')
+  if (digits.length !== 11) return cpf
+  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4')
+}
+
+export function TicketCard({ ticket, onInvite, onFill }: TicketCardProps) {
   const isFilled = ticket.status !== 'pendente'
 
   return (
@@ -39,16 +41,44 @@ export function TicketCard({
         <div className="mt-auto">
           {isFilled ? (
             <div className="space-y-4">
-              <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-lg border border-slate-100">
-                <div className="bg-primary/10 p-2 rounded-full text-primary">
-                  <User className="w-5 h-5" />
+              <div className="bg-slate-50 p-4 rounded-lg border border-slate-100 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
+                    <User className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Nome Completo</p>
+                    <p className="font-semibold text-sm text-foreground truncate">
+                      {ticket.participantName || 'Preenchido'}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Participante</p>
-                  <p className="font-semibold text-foreground truncate max-w-[150px]">
-                    {ticket.participantName || 'Preenchido'}
-                  </p>
-                </div>
+                {ticket.participantEmail && (
+                  <div className="flex items-center gap-3">
+                    <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
+                      <Mail className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">E-mail</p>
+                      <p className="font-medium text-sm text-foreground truncate">
+                        {ticket.participantEmail}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {ticket.participantCpf && (
+                  <div className="flex items-center gap-3">
+                    <div className="bg-primary/10 p-2 rounded-full text-primary flex-shrink-0">
+                      <IdCard className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">CPF</p>
+                      <p className="font-medium text-sm text-foreground truncate">
+                        {formatCpf(ticket.participantCpf)}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
               <Button variant="outline" className="w-full text-muted-foreground" disabled>
                 <QrCode className="w-4 h-4 mr-2" />
@@ -72,31 +102,6 @@ export function TicketCard({
                 <Copy className="w-4 h-4 mr-2" />
                 Convidar
               </Button>
-            </div>
-          )}
-          {!isFilled && ticket.pendingLink && onRevoke && (
-            <div className="mt-4 pt-4 border-t border-slate-100">
-              <p className="text-xs text-amber-600 mb-2 font-medium flex items-center">
-                <AlertCircle className="w-3 h-3 mr-1" /> Convite pendente
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 text-xs"
-                  onClick={() => onInvite(ticket)}
-                >
-                  Ver Link
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="flex-1 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
-                  onClick={() => onRevoke(ticket)}
-                >
-                  Revogar
-                </Button>
-              </div>
             </div>
           )}
         </div>
