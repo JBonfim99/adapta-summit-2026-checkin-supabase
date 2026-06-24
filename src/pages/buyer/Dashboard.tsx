@@ -115,7 +115,9 @@ export default function BuyerDashboard() {
             <img
               src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
               alt="Adapta Summit 2026"
-              className="h-10 md:h-12 w-auto object-contain"
+              width="200"
+              height="48"
+              className="h-10 md:h-12 w-auto min-w-[150px] object-contain object-left"
             />
           </div>
           <div className="flex items-center gap-3 mb-2">

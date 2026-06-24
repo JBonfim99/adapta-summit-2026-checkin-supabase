@@ -18,12 +18,14 @@ export default function Layout() {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between max-w-7xl">
           <Link
             to={buyer ? '/meus-ingressos' : '/'}
-            className="flex items-center gap-2 transition-transform hover:scale-105"
+            className="flex items-center gap-2 transition-transform hover:scale-105 shrink-0"
           >
             <img
-              src="https://drive.google.com/uc?export=view&id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs"
+              src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
               alt="Adapta Summit 2026"
-              className="h-8 w-auto object-contain"
+              width="120"
+              height="32"
+              className="h-8 w-auto min-w-[100px] object-contain object-left"
             />
           </Link>
 

@@ -83,7 +83,9 @@ export default function Login() {
         <img
           src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
           alt="Adapta Summit 2026"
-          className="h-16 md:h-20 w-auto object-contain mb-2"
+          width="300"
+          height="80"
+          className="h-16 md:h-20 w-auto min-w-[200px] object-contain mb-2"
         />
         <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-primary">
           Acesse seus Ingressos

@@ -166,7 +166,9 @@ export default function ParticipantForm() {
         <img
           src="https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7vRCxs&sz=w1000"
           alt="Adapta Summit 2026"
-          className="h-12 md:h-16 w-auto object-contain mb-4"
+          width="250"
+          height="64"
+          className="h-12 md:h-16 w-auto min-w-[180px] object-contain mb-4"
         />
         <h1 className="text-3xl font-bold">Pré-Credenciamento</h1>
         <p className="text-muted-foreground">
