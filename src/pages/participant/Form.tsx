@@ -15,39 +15,86 @@ import pb from '@/lib/pocketbase/client'
 const formSchema = z.object({
   nome_completo: z.string().min(3, 'Nome é obrigatório'),
   email: z.string().email('E-mail inválido'),
-  cpf: z.string().min(11, 'CPF inválido'),
-  telefone: z.string().min(10, 'Telefone inválido'),
+  cpf: z.string().min(14, 'CPF inválido'),
+  telefone: z.string().min(14, 'Telefone inválido'),
   nome_empresa: z.string().min(2, 'Empresa é obrigatória'),
   cargo: z.string().min(1, 'Selecione um cargo'),
   nicho: z.string().min(1, 'Selecione um nicho'),
   num_funcionarios: z.string().min(1, 'Selecione o tamanho'),
   faturamento_anual: z.string().min(1, 'Selecione o faturamento'),
-  areas_ajuda: z.array(z.string()).min(1).max(2, 'Selecione até 2 áreas'),
-  expectativa_aprendizado: z.string().optional(),
-  expectativa_experiencia: z.string().optional(),
+  areas_ajuda: z
+    .array(z.string())
+    .min(1, 'Selecione pelo menos uma área')
+    .max(2, 'Selecione até 2 áreas'),
+  expectativa_aprendizado: z.string().min(3, 'Preenchimento obrigatório'),
+  expectativa_experiencia: z.string().min(3, 'Preenchimento obrigatório'),
 })
 
 type FormValues = z.infer<typeof formSchema>
 
-const ROLES = ['Empreendedor/Sócio/CEO', 'C-level/Diretor/Head', 'Gerente/Coordenador', 'Analista']
+const ROLES = [
+  'Empreendedor, sócio ou CEO',
+  'C-level, Diretor ou Head',
+  'Gerente ou Coordenador',
+  'Analista',
+]
+
 const NICHES = [
   'Agronegócio',
   'Construção',
-  'Consultoria',
-  'Tecnologia',
-  'Varejo',
-  'Saúde',
+  'Consultoria / Projetos',
+  'Contábil',
   'Educação',
-]
-const EMPLOYEES = ['1-5', '6-10', '11-50', '51-200', '201+']
-const REVENUE = ['Até R$500k', 'R$500k-R$4M', 'R$4M-R$10M', 'R$10M-R$50M', 'Mais de R$50M']
-const HELP_AREAS = [
-  'Vendas',
-  'Marketing',
-  'Gestão de Pessoas',
+  'Energia',
   'Finanças',
-  'Operações',
+  'Hospitalidade e Turismo',
+  'Imobiliário',
+  'Indústria',
+  'Mídia e Entretenimento',
+  'Saúde',
+  'Jurídico',
+  'Setor público',
   'Tecnologia',
+  'Transporte e logística',
+  'Varejo',
+  'Fitness',
+  'Telecom',
+  'Marketing',
+  'Serviço',
+  'Outro',
+]
+
+const EMPLOYEES = [
+  '1 a 5',
+  '6 a 10',
+  '11 a 20',
+  '21 a 50',
+  '51 a 100',
+  '101 a 300',
+  '301 a 500',
+  '501 a 1.000',
+  'Mais de 1.000',
+]
+
+const REVENUE = [
+  'Até R$500.000 por ano',
+  'De R$500.000 até R$4 milhões por ano',
+  'De R$4 milhões até R$10 milhões por ano',
+  'De R$10 milhões até R$20 milhões por ano',
+  'Mais de R$20 milhões por ano',
+]
+
+const HELP_AREAS = [
+  'Gestão de Indicadores',
+  'Criação de Sistemas e Processos',
+  'Marketing',
+  'Edição de Vídeo e Geração de Criativos',
+  'Vendas',
+  'Automação e Integração de Sistemas',
+  'Atendimento ao Cliente / Suporte',
+  'Tecnologia',
+  'Administrativo / Financeiro',
+  'Gestão de Pessoas',
 ]
 
 export default function ParticipantForm() {
@@ -79,6 +126,7 @@ export default function ParticipantForm() {
   const methods = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: { areas_ajuda: [] },
+    mode: 'onTouched',
   })
 
   const onSubmit = async (data: FormValues) => {
@@ -161,13 +209,18 @@ export default function ParticipantForm() {
                   />
                   <FormInput
                     name="email"
-                    label="E-mail"
+                    label="E-mail de registro no evento"
                     type="email"
                     placeholder="joao@exemplo.com"
                   />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormInput name="cpf" label="CPF" placeholder="000.000.000-00" />
-                    <FormInput name="telefone" label="WhatsApp" placeholder="(00) 90000-0000" />
+                    <FormInput name="cpf" label="CPF" placeholder="000.000.000-00" mask="cpf" />
+                    <FormInput
+                      name="telefone"
+                      label="Telefone"
+                      placeholder="(00) 90000-0000"
+                      mask="phone"
+                    />
                   </div>
                 </div>
               </div>
@@ -196,14 +249,14 @@ export default function ParticipantForm() {
                     />
                     <FormInput
                       name="num_funcionarios"
-                      label="Funcionários"
+                      label="Número de funcionários"
                       type="select"
                       options={EMPLOYEES}
                       placeholder="Selecione..."
                     />
                     <FormInput
                       name="faturamento_anual"
-                      label="Faturamento"
+                      label="Faixa de faturamento"
                       type="select"
                       options={REVENUE}
                       placeholder="Selecione..."
@@ -226,25 +279,35 @@ export default function ParticipantForm() {
                               key={item}
                               control={methods.control}
                               name="areas_ajuda"
-                              render={({ field }) => (
-                                <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3 shadow-sm hover:bg-slate-50 transition-colors">
-                                  <FormControl>
-                                    <Checkbox
-                                      checked={field.value?.includes(item)}
-                                      onCheckedChange={(checked) => {
-                                        return checked
-                                          ? field.onChange([...field.value, item])
-                                          : field.onChange(
-                                              field.value?.filter((value) => value !== item),
-                                            )
-                                      }}
-                                    />
-                                  </FormControl>
-                                  <FormLabel className="font-normal cursor-pointer w-full">
-                                    {item}
-                                  </FormLabel>
-                                </FormItem>
-                              )}
+                              render={({ field }) => {
+                                const isChecked = field.value?.includes(item)
+                                const isAtLimit = field.value?.length >= 2 && !isChecked
+
+                                return (
+                                  <FormItem
+                                    className={`flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3 shadow-sm transition-colors ${isAtLimit ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'}`}
+                                  >
+                                    <FormControl>
+                                      <Checkbox
+                                        checked={isChecked}
+                                        disabled={isAtLimit}
+                                        onCheckedChange={(checked) => {
+                                          return checked
+                                            ? field.onChange([...field.value, item])
+                                            : field.onChange(
+                                                field.value?.filter((value) => value !== item),
+                                              )
+                                        }}
+                                      />
+                                    </FormControl>
+                                    <FormLabel
+                                      className={`font-normal w-full ${isAtLimit ? 'cursor-not-allowed' : 'cursor-pointer'}`}
+                                    >
+                                      {item}
+                                    </FormLabel>
+                                  </FormItem>
+                                )
+                              }}
                             />
                           ))}
                         </div>
@@ -255,8 +318,14 @@ export default function ParticipantForm() {
                   <FormInput
                     name="expectativa_aprendizado"
                     type="textarea"
-                    label="Expectativa de Aprendizado (Opcional)"
-                    placeholder="O que você espera levar do evento?"
+                    label="O que espera aprender no evento?"
+                    placeholder="Sua expectativa..."
+                  />
+                  <FormInput
+                    name="expectativa_experiencia"
+                    type="textarea"
+                    label="Que tipo de experiência espera participar no evento?"
+                    placeholder="Sua expectativa..."
                   />
                 </div>
               </div>

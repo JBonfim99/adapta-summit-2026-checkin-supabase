@@ -16,9 +16,17 @@ interface FormInputProps {
   placeholder?: string
   type?: 'text' | 'email' | 'textarea' | 'select'
   options?: string[]
+  mask?: 'cpf' | 'phone'
 }
 
-export function FormInput({ name, label, placeholder, type = 'text', options }: FormInputProps) {
+export function FormInput({
+  name,
+  label,
+  placeholder,
+  type = 'text',
+  options,
+  mask,
+}: FormInputProps) {
   const { control } = useFormContext()
 
   return (
@@ -47,7 +55,36 @@ export function FormInput({ name, label, placeholder, type = 'text', options }: 
                 </SelectContent>
               </Select>
             ) : (
-              <Input type={type} placeholder={placeholder} className="bg-white" {...field} />
+              <Input
+                type={type}
+                placeholder={placeholder}
+                className="bg-white"
+                {...field}
+                onChange={(e) => {
+                  let val = e.target.value
+                  if (mask === 'cpf') {
+                    val = val
+                      .replace(/\D/g, '')
+                      .replace(/(\d{3})(\d)/, '$1.$2')
+                      .replace(/(\d{3})(\d)/, '$1.$2')
+                      .replace(/(\d{3})(\d{1,2})/, '$1-$2')
+                      .replace(/(-\d{2})\d+?$/, '$1')
+                  } else if (mask === 'phone') {
+                    val = val.replace(/\D/g, '')
+                    if (val.length <= 10) {
+                      val = val
+                        .replace(/^(\d{2})(\d)/g, '($1) $2')
+                        .replace(/(\d{4})(\d{1,4})$/, '$1-$2')
+                    } else {
+                      val = val
+                        .replace(/^(\d{2})(\d)/g, '($1) $2')
+                        .replace(/(\d{5})(\d{1,4})$/, '$1-$2')
+                    }
+                    val = val.substring(0, 15)
+                  }
+                  field.onChange(val)
+                }}
+              />
             )}
           </FormControl>
           <FormMessage />
