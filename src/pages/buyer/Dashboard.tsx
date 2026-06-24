@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, Navigate } from 'react-router-dom'
 import { useApp } from '@/contexts/app-context'
 import { TicketCard } from '@/components/TicketCard'
+import { useRealtime } from '@/hooks/use-realtime'
 import {
   Dialog,
   DialogContent,
@@ -23,7 +24,7 @@ export default function BuyerDashboard() {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [inviteTicket, setInviteTicket] = useState<{ t: Ticket; link: string } | null>(null)
 
-  useEffect(() => {
+  const loadTickets = useCallback(() => {
     if (!buyer) return
     pb.send('/backend/v1/buyer/tickets', {
       headers: { Authorization: `Bearer ${buyer.token}` },
@@ -35,6 +36,7 @@ export default function BuyerDashboard() {
           type: t.tipo_ingresso,
           status: t.status,
           participantName: t.expand?.participante_id?.nome_completo,
+          pendingLink: t.pending_link || null,
         }))
         setTickets(formatted)
       })
@@ -42,6 +44,17 @@ export default function BuyerDashboard() {
         logoutBuyer()
       })
   }, [buyer, logoutBuyer])
+
+  useEffect(() => {
+    loadTickets()
+  }, [loadTickets])
+
+  useRealtime('ingressos', () => {
+    loadTickets()
+  })
+  useRealtime('participantes', () => {
+    loadTickets()
+  })
 
   if (!buyer) return <Navigate to="/" replace />
 
@@ -58,8 +71,10 @@ export default function BuyerDashboard() {
 
   const handleFill = async (ticket: Ticket) => {
     try {
-      const token = await getInviteToken(ticket.id)
-      navigate(`/participante?token=${token}`)
+      const token = ticket.pendingLink || (await getInviteToken(ticket.id))
+      navigate(
+        `/participante?token=${token}&nome=${encodeURIComponent(buyer.nome)}&email=${encodeURIComponent(buyer.email)}`,
+      )
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message, variant: 'destructive' })
     }
@@ -67,8 +82,22 @@ export default function BuyerDashboard() {
 
   const handleInvite = async (ticket: Ticket) => {
     try {
-      const token = await getInviteToken(ticket.id)
+      const token = ticket.pendingLink || (await getInviteToken(ticket.id))
       setInviteTicket({ t: ticket, link: `${window.location.origin}/participante?token=${token}` })
+      if (!ticket.pendingLink) loadTickets()
+    } catch (e: any) {
+      toast({ title: 'Erro', description: e.message, variant: 'destructive' })
+    }
+  }
+
+  const handleRevoke = async (ticket: Ticket) => {
+    try {
+      await pb.send(`/backend/v1/buyer/tickets/${ticket.id}/revoke`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${buyer.token}` },
+      })
+      toast({ title: 'Convite revogado', description: 'O link anterior não é mais válido.' })
+      loadTickets()
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message, variant: 'destructive' })
     }
@@ -112,7 +141,13 @@ export default function BuyerDashboard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {tickets.map((ticket) => (
-          <TicketCard key={ticket.id} ticket={ticket} onFill={handleFill} onInvite={handleInvite} />
+          <TicketCard
+            key={ticket.id}
+            ticket={ticket}
+            onFill={handleFill}
+            onInvite={handleInvite}
+            onRevoke={handleRevoke}
+          />
         ))}
       </div>
 

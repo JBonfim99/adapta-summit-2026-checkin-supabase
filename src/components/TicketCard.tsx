@@ -2,7 +2,7 @@ import { Ticket } from '@/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { StatusBadge } from './StatusBadge'
 import { Button } from '@/components/ui/button'
-import { User, Copy, Edit, QrCode } from 'lucide-react'
+import { User, Copy, Edit, QrCode, AlertCircle } from 'lucide-react'
 
 interface TicketCardProps {
   ticket: Ticket
@@ -10,14 +10,19 @@ interface TicketCardProps {
   onFill: (ticket: Ticket) => void
 }
 
-export function TicketCard({ ticket, onInvite, onFill }: TicketCardProps) {
+export function TicketCard({
+  ticket,
+  onInvite,
+  onFill,
+  onRevoke,
+}: TicketCardProps & { onRevoke?: (ticket: Ticket) => void }) {
   const isFilled = ticket.status !== 'pendente'
 
   return (
     <Card className="group hover:shadow-elevation transition-all duration-300 border-slate-200 overflow-hidden flex flex-col">
       <div className="h-2 w-full bg-slate-100 flex-shrink-0">
         <div
-          className={`h-full w-full ${ticket.type === 'VIP' ? 'bg-amber-500' : 'bg-slate-300'}`}
+          className={`h-full w-full ${ticket.type === 'GOLD' ? 'bg-yellow-500' : ticket.type === 'PLATINUM' ? 'bg-slate-800' : 'bg-slate-300'}`}
         />
       </div>
       <CardContent className="p-6 flex-1 flex flex-col">
@@ -67,6 +72,31 @@ export function TicketCard({ ticket, onInvite, onFill }: TicketCardProps) {
                 <Copy className="w-4 h-4 mr-2" />
                 Convidar
               </Button>
+            </div>
+          )}
+          {!isFilled && ticket.pendingLink && onRevoke && (
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              <p className="text-xs text-amber-600 mb-2 font-medium flex items-center">
+                <AlertCircle className="w-3 h-3 mr-1" /> Convite pendente
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 text-xs"
+                  onClick={() => onInvite(ticket)}
+                >
+                  Ver Link
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex-1 text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                  onClick={() => onRevoke(ticket)}
+                >
+                  Revogar
+                </Button>
+              </div>
             </div>
           )}
         </div>

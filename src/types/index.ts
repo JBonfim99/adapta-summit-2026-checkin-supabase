@@ -1,5 +1,5 @@
 export type TicketStatus = 'pendente' | 'preenchido' | 'enviado' | 'erro_webhook'
-export type TicketType = 'VIP' | 'Standard'
+export type TicketType = 'GOLD' | 'PLATINUM'
 
 export interface Ticket {
   id: string
@@ -8,6 +8,7 @@ export interface Ticket {
   status: TicketStatus
   buyerEmail?: string
   participantName?: string
+  pendingLink?: string | null
 }
 
 export interface Participant {
