@@ -302,16 +302,31 @@ export default function AdminParticipants() {
                           className="text-indigo-600"
                           onClick={async () => {
                             try {
-                              const link = await pb
-                                .collection('links_participante')
-                                .getFirstListItem(`ingresso_id = "${row.id}"`)
-                              const url = `https://adapta-summit-2026-d2d58.goskip.app/pre-credenciamento/${link.token}`
+                              let link
+                              try {
+                                link = await pb
+                                  .collection('links_participante')
+                                  .getFirstListItem(`ingresso_id = "${row.id}" && usado = false`)
+                              } catch (err) {
+                                const expiraEm = new Date()
+                                expiraEm.setDate(expiraEm.getDate() + 30)
+                                link = await pb.collection('links_participante').create({
+                                  ingresso_id: row.id,
+                                  token:
+                                    Math.random().toString(36).substring(2, 15) +
+                                    Math.random().toString(36).substring(2, 15),
+                                  usado: false,
+                                  expira_em: expiraEm.toISOString(),
+                                })
+                              }
+                              const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${link.token}`
                               await navigator.clipboard.writeText(url)
-                              toast({ title: 'Link copiado com sucesso!' })
+                              toast({ title: 'Link de pré-credenciamento copiado com sucesso!' })
                             } catch (e) {
                               toast({
                                 title: 'Erro',
-                                description: 'Link de pré-credenciamento não encontrado.',
+                                description:
+                                  'Erro ao gerar link: tente novamente ou verifique se o ingresso é válido.',
                                 variant: 'destructive',
                               })
                             }
