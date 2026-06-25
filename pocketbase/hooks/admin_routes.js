@@ -50,6 +50,141 @@ routerAdd(
   $apis.requireAuth(),
 )
 
+// Cria um ingresso avulso para um comprador. pedido_id é numérico de até 6
+// dígitos: se informado, valida formato + unicidade; se omitido, gera único.
+routerAdd(
+  'POST',
+  '/backend/v1/admin/tickets',
+  (e) => {
+    try {
+      const body = e.requestInfo().body || {}
+      const compradorId = body.comprador_id
+      const tipo = body.tipo_ingresso
+      let pedidoId = (body.pedido_id || '').toString().trim()
+
+      if (!compradorId) return e.badRequestError('comprador_id é obrigatório')
+      if (tipo !== 'GOLD' && tipo !== 'PLATINUM') {
+        return e.badRequestError('tipo_ingresso deve ser GOLD ou PLATINUM')
+      }
+
+      let comprador
+      try {
+        comprador = $app.findRecordById('compradores', compradorId)
+      } catch (err) {
+        return e.notFoundError('Comprador não encontrado')
+      }
+
+      if (pedidoId) {
+        if (!/^[0-9]{1,6}$/.test(pedidoId)) {
+          return e.badRequestError('ID do pedido deve ter no máximo 6 dígitos numéricos')
+        }
+        let taken = false
+        try {
+          $app.findFirstRecordByData('ingressos', 'pedido_id', pedidoId)
+          taken = true
+        } catch (_) {}
+        if (taken) return e.badRequestError('Já existe um ingresso com esse ID de pedido')
+      } else {
+        let candidate = ''
+        for (let attempt = 0; attempt < 50; attempt++) {
+          const c = String(Math.floor(100000 + Math.random() * 900000))
+          let exists = false
+          try {
+            $app.findFirstRecordByData('ingressos', 'pedido_id', c)
+            exists = true
+          } catch (_) {}
+          if (!exists) {
+            candidate = c
+            break
+          }
+        }
+        if (!candidate) return e.badRequestError('Falha ao gerar ID de pedido único')
+        pedidoId = candidate
+      }
+
+      let createdId = ''
+      $app.runInTransaction((txApp) => {
+        const ingColl = txApp.findCollectionByNameOrId('ingressos')
+        const ingresso = new Record(ingColl)
+        ingresso.set('comprador_id', comprador.id)
+        ingresso.set('pedido_id', pedidoId)
+        ingresso.set('tipo_ingresso', tipo)
+        ingresso.set('status', 'Pendente')
+        ingresso.set('status_webhook', 'pendente')
+        txApp.save(ingresso)
+        createdId = ingresso.id
+
+        const linksColl = txApp.findCollectionByNameOrId('links_participante')
+        const link = new Record(linksColl)
+        link.set('ingresso_id', ingresso.id)
+        link.set('token', $security.randomString(32))
+        link.set('usado', false)
+        const exp = new Date()
+        exp.setFullYear(exp.getFullYear() + 1)
+        link.set('expira_em', exp.toISOString())
+        txApp.save(link)
+      })
+
+      return e.json(200, { success: true, id: createdId, pedido_id: pedidoId })
+    } catch (err) {
+      return e.badRequestError(err.message)
+    }
+  },
+  $apis.requireAuth(),
+)
+
+// Pré-credenciamento manual pelo admin: cria o participante e atrela a um
+// ingresso PENDENTE. A criação do participante dispara o hook de webhook+log
+// (ver webhook_inac.js), e o ingresso passa a Pré-Credenciado.
+routerAdd(
+  'POST',
+  '/backend/v1/admin/participant/create',
+  (e) => {
+    const body = e.requestInfo().body || {}
+    const ingressoId = body.ingresso_id
+    if (!ingressoId) return e.badRequestError('ingresso_id é obrigatório')
+
+    try {
+      $app.runInTransaction((txApp) => {
+        const ingresso = txApp.findRecordById('ingressos', ingressoId)
+        if (ingresso.getString('status') !== 'Pendente') {
+          throw new Error('Este ingresso não está com status Pendente')
+        }
+        if (ingresso.getString('participante_id')) {
+          throw new Error('Este ingresso já possui um participante')
+        }
+
+        const partColl = txApp.findCollectionByNameOrId('participantes')
+        const part = new Record(partColl)
+        part.set('ingresso_id', ingresso.id)
+        part.set('nome_completo', body.nome_completo)
+        part.set('email', body.email)
+        part.set('cpf', body.cpf)
+        part.set('telefone', body.telefone)
+        part.set('nome_empresa', body.nome_empresa)
+        part.set('cargo', body.cargo)
+        part.set('nicho', body.nicho)
+        part.set('num_funcionarios', body.num_funcionarios)
+        part.set('faturamento_anual', body.faturamento_anual)
+        part.set('areas_ajuda', body.areas_ajuda || [])
+        part.set('expectativa_aprendizado', body.expectativa_aprendizado || '')
+        part.set('expectativa_experiencia', body.expectativa_experiencia || '')
+        txApp.save(part)
+
+        ingresso.set('participante_id', part.id)
+        ingresso.set('status', 'Pré-Credenciado')
+        ingresso.set('preenchido_em', new Date().toISOString())
+        txApp.save(ingresso)
+      })
+
+      return e.json(200, { success: true })
+    } catch (err) {
+      return e.badRequestError(err.message)
+    }
+  },
+  $apis.requireAuth(),
+)
+
 routerAdd(
   'GET',
   '/backend/v1/admin/stats',

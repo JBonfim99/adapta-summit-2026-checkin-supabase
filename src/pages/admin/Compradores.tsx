@@ -531,7 +531,15 @@ export default function AdminCompradores() {
                   <FormItem>
                     <FormLabel>Documento</FormLabel>
                     <FormControl>
-                      <Input placeholder="CPF/CNPJ" {...field} />
+                      <Input
+                        placeholder="CPF/CNPJ (apenas números)"
+                        {...field}
+                        inputMode="numeric"
+                        maxLength={14}
+                        onChange={(e) =>
+                          field.onChange(e.target.value.replace(/\D/g, '').slice(0, 14))
+                        }
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -544,7 +552,15 @@ export default function AdminCompradores() {
                   <FormItem>
                     <FormLabel>Telefone</FormLabel>
                     <FormControl>
-                      <Input placeholder="(11) 99999-9999" {...field} />
+                      <Input
+                        placeholder="Apenas números"
+                        {...field}
+                        inputMode="numeric"
+                        maxLength={14}
+                        onChange={(e) =>
+                          field.onChange(e.target.value.replace(/\D/g, '').slice(0, 14))
+                        }
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

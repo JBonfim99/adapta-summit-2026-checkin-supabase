@@ -17,8 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { Plus } from 'lucide-react'
+import { Plus, UserPlus } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -30,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { AddParticipantDialog } from '@/components/admin/AddParticipantDialog'
 
 export function BuyerTicketsSheet({
   buyer,
@@ -44,6 +44,8 @@ export function BuyerTicketsSheet({
   const [loading, setLoading] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [newTicket, setNewTicket] = useState({ tipo_ingresso: '', pedido_id: '' })
+  const [saving, setSaving] = useState(false)
+  const [participantTicket, setParticipantTicket] = useState<any | null>(null)
   const { toast } = useToast()
 
   const loadTickets = async () => {
@@ -78,18 +80,24 @@ export function BuyerTicketsSheet({
     if (!newTicket.tipo_ingresso) {
       return toast({ title: 'Informe o tipo do ingresso', variant: 'destructive' })
     }
+    setSaving(true)
     try {
-      await pb.collection('ingressos').create({
-        comprador_id: buyer.id,
-        tipo_ingresso: newTicket.tipo_ingresso,
-        pedido_id: newTicket.pedido_id || `MANUAL-${Math.floor(Math.random() * 10000)}`,
-        status: 'pendente',
+      await pb.send('/backend/v1/admin/tickets', {
+        method: 'POST',
+        body: JSON.stringify({
+          comprador_id: buyer.id,
+          tipo_ingresso: newTicket.tipo_ingresso,
+          pedido_id: newTicket.pedido_id || undefined,
+        }),
       })
       toast({ title: 'Ingresso adicionado com sucesso!' })
       setNewTicket({ tipo_ingresso: '', pedido_id: '' })
       setShowAdd(false)
+      loadTickets()
     } catch (err: any) {
       toast({ title: 'Erro ao adicionar', description: err.message, variant: 'destructive' })
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -118,10 +126,15 @@ export function BuyerTicketsSheet({
                     <Label>ID do Pedido (Opcional)</Label>
                     <Input
                       value={newTicket.pedido_id}
+                      inputMode="numeric"
+                      maxLength={6}
                       onChange={(e) =>
-                        setNewTicket((prev) => ({ ...prev, pedido_id: e.target.value }))
+                        setNewTicket((prev) => ({
+                          ...prev,
+                          pedido_id: e.target.value.replace(/\D/g, '').slice(0, 6),
+                        }))
                       }
-                      placeholder="Ex: PED-123"
+                      placeholder="Ex: 482193"
                     />
                   </div>
                   <div className="space-y-1">
@@ -143,11 +156,16 @@ export function BuyerTicketsSheet({
                   </div>
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setShowAdd(false)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowAdd(false)}
+                    disabled={saving}
+                  >
                     Cancelar
                   </Button>
-                  <Button size="sm" onClick={handleAdd}>
-                    Salvar
+                  <Button size="sm" onClick={handleAdd} disabled={saving}>
+                    {saving ? 'Salvando...' : 'Salvar'}
                   </Button>
                 </div>
               </div>
@@ -161,19 +179,20 @@ export function BuyerTicketsSheet({
                     <TableHead>Tipo</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Participante</TableHead>
+                    <TableHead className="text-right">Ação</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading && (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                         Carregando ingressos...
                       </TableCell>
                     </TableRow>
                   )}
                   {!loading && tickets.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                         Nenhum ingresso encontrado.
                       </TableCell>
                     </TableRow>
@@ -203,6 +222,18 @@ export function BuyerTicketsSheet({
                             </span>
                           )}
                         </TableCell>
+                        <TableCell className="text-right">
+                          {t.status === 'Pendente' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1"
+                              onClick={() => setParticipantTicket(t)}
+                            >
+                              <UserPlus className="w-3.5 h-3.5" /> Adicionar Participante
+                            </Button>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                 </TableBody>
@@ -211,6 +242,13 @@ export function BuyerTicketsSheet({
           </div>
         </SheetContent>
       </Sheet>
+
+      <AddParticipantDialog
+        ticket={participantTicket}
+        open={!!participantTicket}
+        onOpenChange={(val: boolean) => !val && setParticipantTicket(null)}
+        onSuccess={loadTickets}
+      />
     </>
   )
 }
