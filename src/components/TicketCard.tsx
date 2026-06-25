@@ -13,7 +13,7 @@ interface TicketCardProps {
 }
 
 export function TicketCard({ ticket, onFill, onInvite, isLoadingFill }: TicketCardProps) {
-  const isPendente = ticket.status === 'pendente'
+  const isPendente = ticket.status === 'Pendente'
   const isEnviado = ticket.status === 'enviado'
 
   return (
@@ -83,7 +83,7 @@ export function TicketCard({ ticket, onFill, onInvite, isLoadingFill }: TicketCa
         )}
         {!isPendente && (
           <Button variant="ghost" className="w-full opacity-50 cursor-not-allowed">
-            Dados preenchidos
+            {ticket.status === 'Pré-Credenciado' ? 'Dados preenchidos' : ticket.status}
           </Button>
         )}
       </CardFooter>

@@ -323,7 +323,7 @@ export default function AdminParticipants() {
                               }
                               const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${link.token}`
                               await navigator.clipboard.writeText(url)
-                              toast({ title: 'Link copiado com sucesso!' })
+                              toast({ title: 'Link de pré-credenciamento copiado!' })
                             } catch (e: any) {
                               if (e?.status === 401) {
                                 toast({
@@ -337,7 +337,7 @@ export default function AdminParticipants() {
                                 toast({
                                   title: 'Erro',
                                   description:
-                                    'Erro ao gerar link: tente novamente ou verifique se o ingresso é válido.',
+                                    'Erro ao gerar link: verifique se o ingresso é válido.',
                                   variant: 'destructive',
                                 })
                               }

@@ -62,7 +62,7 @@ export default function BuyerDashboard() {
 
   if (!buyer) return <Navigate to="/" replace />
 
-  const filledCount = tickets.filter((t) => t.status !== 'pendente').length
+  const filledCount = tickets.filter((t) => t.status === 'Pré-Credenciado').length
   const totalCount = tickets.length
 
   const getInviteToken = async (ticketId: string, force: boolean = false) => {
