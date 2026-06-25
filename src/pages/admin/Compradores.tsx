@@ -9,7 +9,8 @@ import {
 } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Plus, Pencil, Trash2, Ticket as TicketIcon, Download } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, Ticket as TicketIcon, Download, Loader2 } from 'lucide-react'
+import { Skeleton } from '@/components/ui/skeleton'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
 import { BuyerTicketsSheet } from '@/components/admin/BuyerTicketsSheet'
@@ -84,6 +85,7 @@ export default function AdminCompradores() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   const [ingressosCount, setIngressosCount] = useState<Record<string, number>>({})
   const [selectedBuyer, setSelectedBuyer] = useState<any | null>(null)
@@ -256,6 +258,7 @@ export default function AdminCompradores() {
   }
 
   const handleExportCSV = async () => {
+    setExporting(true)
     try {
       const s = search.replace(/"/g, '')
       const filterStr = s ? `nome ~ "${s}" || email ~ "${s}"` : ''
@@ -317,8 +320,11 @@ export default function AdminCompradores() {
       link.href = URL.createObjectURL(blob)
       link.download = 'compradores.csv'
       link.click()
+      toast({ title: 'Exportação concluída', description: 'O download foi iniciado.' })
     } catch (e: any) {
       toast({ title: 'Erro ao exportar', description: e.message, variant: 'destructive' })
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -332,8 +338,18 @@ export default function AdminCompradores() {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" onClick={handleExportCSV}>
-            <Download className="w-4 h-4" /> Exportar CSV
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={handleExportCSV}
+            disabled={exporting}
+          >
+            {exporting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            {exporting ? 'Exportando...' : 'Exportar CSV'}
           </Button>
           <Button className="bg-primary gap-2" onClick={handleOpenCreate}>
             <Plus className="w-4 h-4" /> Novo Comprador
@@ -386,11 +402,25 @@ export default function AdminCompradores() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                    Carregando...
-                  </TableCell>
-                </TableRow>
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Skeleton className="h-4 w-32" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-48" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-24" />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Skeleton className="h-4 w-8 mx-auto" />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Skeleton className="h-8 w-24 ml-auto" />
+                    </TableCell>
+                  </TableRow>
+                ))
               ) : data.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">

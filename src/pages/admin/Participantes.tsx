@@ -9,8 +9,9 @@ import {
 } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Download, RefreshCcw } from 'lucide-react'
-import { StatusBadge } from '@/components/StatusBadge'
+import { Search, Download, RefreshCcw, Loader2 } from 'lucide-react'
+import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
+import { Skeleton } from '@/components/ui/skeleton'
 import pb from '@/lib/pocketbase/client'
 import {
   Pagination,
@@ -35,6 +36,7 @@ export default function AdminParticipants() {
   const [totalPages, setTotalPages] = useState(1)
   const limit = 10
 
+  const [exporting, setExporting] = useState(false)
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
 
   const loadData = () => {
@@ -73,6 +75,7 @@ export default function AdminParticipants() {
   }, [page, search, statusFilter, typeFilter])
 
   const handleExportCSV = async () => {
+    setExporting(true)
     try {
       let filterStr = ''
       if (search) {
@@ -142,8 +145,11 @@ export default function AdminParticipants() {
       link.href = URL.createObjectURL(blob)
       link.download = 'participantes.csv'
       link.click()
+      toast({ title: 'Exportação concluída', description: 'O download foi iniciado.' })
     } catch (e: any) {
       toast({ title: 'Erro ao exportar', description: e.message, variant: 'destructive' })
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -158,8 +164,13 @@ export default function AdminParticipants() {
           <Button variant="outline" className="gap-2" onClick={loadData}>
             <RefreshCcw className="w-4 h-4" /> Atualizar
           </Button>
-          <Button className="bg-primary gap-2" onClick={handleExportCSV}>
-            <Download className="w-4 h-4" /> Exportar CSV
+          <Button className="bg-primary gap-2" onClick={handleExportCSV} disabled={exporting}>
+            {exporting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Download className="w-4 h-4" />
+            )}
+            {exporting ? 'Exportando...' : 'Exportar CSV'}
           </Button>
         </div>
       </div>
@@ -218,11 +229,28 @@ export default function AdminParticipants() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                    Carregando...
-                  </TableCell>
-                </TableRow>
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell>
+                      <Skeleton className="h-10 w-24" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-4 w-32" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-8 w-32" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-8 w-32" />
+                    </TableCell>
+                    <TableCell>
+                      <Skeleton className="h-6 w-24" />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Skeleton className="h-8 w-24 ml-auto" />
+                    </TableCell>
+                  </TableRow>
+                ))
               ) : data.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
@@ -233,8 +261,8 @@ export default function AdminParticipants() {
                 data.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-medium">
-                      <div className="font-mono text-sm">{row.pedido_id}</div>
-                      <div className="text-xs text-muted-foreground">{row.tipo_ingresso}</div>
+                      <div className="font-mono text-sm mb-1">{row.pedido_id}</div>
+                      <TypeBadge type={row.tipo_ingresso} />
                     </TableCell>
                     <TableCell className="text-sm">{row.expand?.comprador_id?.email}</TableCell>
                     <TableCell>

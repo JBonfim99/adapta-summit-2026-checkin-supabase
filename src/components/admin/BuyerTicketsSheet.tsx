@@ -22,6 +22,7 @@ import { Plus } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
+import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
 import {
   Select,
   SelectContent,
@@ -89,37 +90,6 @@ export function BuyerTicketsSheet({
       setShowAdd(false)
     } catch (err: any) {
       toast({ title: 'Erro ao adicionar', description: err.message, variant: 'destructive' })
-    }
-  }
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'pendente':
-        return (
-          <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
-            Pendente
-          </Badge>
-        )
-      case 'preenchido':
-        return (
-          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-            Preenchido
-          </Badge>
-        )
-      case 'enviado':
-        return (
-          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-            Enviado
-          </Badge>
-        )
-      case 'erro_webhook':
-        return (
-          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-            Erro
-          </Badge>
-        )
-      default:
-        return <Badge variant="outline">{status}</Badge>
     }
   }
 
@@ -217,8 +187,12 @@ export function BuyerTicketsSheet({
                         >
                           {t.pedido_id}
                         </TableCell>
-                        <TableCell>{t.tipo_ingresso}</TableCell>
-                        <TableCell>{getStatusBadge(t.status)}</TableCell>
+                        <TableCell>
+                          <TypeBadge type={t.tipo_ingresso} />
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={t.status} />
+                        </TableCell>
                         <TableCell
                           className="max-w-[150px] truncate"
                           title={t.expand?.participante_id?.nome_completo}

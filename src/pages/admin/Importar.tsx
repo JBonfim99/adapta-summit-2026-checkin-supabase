@@ -96,7 +96,7 @@ export default function AdminImport() {
         setProgress(0)
         toast({
           title: 'Importação concluída',
-          description: `${res.imported} novos ingressos importados com sucesso.`,
+          description: `Sucesso! ${res.imported || res.buyers || 0} compradores importados e ingressos gerados.`,
         })
       }, 500)
     } catch (err: any) {
