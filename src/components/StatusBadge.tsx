@@ -6,7 +6,7 @@ export function StatusBadge({ status }: { status: string }) {
       return (
         <Badge
           variant="secondary"
-          className="bg-slate-100 text-slate-700 hover:bg-slate-100 border-slate-200"
+          className="whitespace-nowrap bg-slate-100 text-slate-700 hover:bg-slate-100 border-slate-200"
         >
           Pendente
         </Badge>
@@ -17,7 +17,7 @@ export function StatusBadge({ status }: { status: string }) {
       return (
         <Badge
           variant="secondary"
-          className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border-emerald-200"
+          className="whitespace-nowrap bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border-emerald-200"
         >
           Pré-Credenciado
         </Badge>
@@ -26,15 +26,23 @@ export function StatusBadge({ status }: { status: string }) {
       return (
         <Badge
           variant="secondary"
-          className="bg-blue-100 text-blue-800 hover:bg-blue-100 border-blue-200"
+          className="whitespace-nowrap bg-blue-100 text-blue-800 hover:bg-blue-100 border-blue-200"
         >
           Enviado (INAC)
         </Badge>
       )
     case 'erro_webhook':
-      return <Badge variant="destructive">Erro Sync</Badge>
+      return (
+        <Badge variant="destructive" className="whitespace-nowrap">
+          Erro Sync
+        </Badge>
+      )
     default:
-      return <Badge variant="outline">{status || 'Desconhecido'}</Badge>
+      return (
+        <Badge variant="outline" className="whitespace-nowrap">
+          {status || 'Desconhecido'}
+        </Badge>
+      )
   }
 }
 
