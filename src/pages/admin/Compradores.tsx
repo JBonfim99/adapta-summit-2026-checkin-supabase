@@ -49,6 +49,13 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -62,6 +69,7 @@ const formSchema = z.object({
 export default function AdminCompradores() {
   const [data, setData] = useState<any[]>([])
   const [search, setSearch] = useState('')
+  const [filterStatus, setFilterStatus] = useState<string>('all')
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
@@ -94,31 +102,86 @@ export default function AdminCompradores() {
       .catch(() => {})
   }
 
-  const loadData = () => {
+  const loadData = async () => {
     setLoading(true)
-    const filterStr = search
-      ? `nome ~ "${search.replace(/"/g, '')}" || email ~ "${search.replace(/"/g, '')}"`
-      : ''
-    pb.collection('compradores')
-      .getList(page, limit, { sort: '-created', filter: filterStr })
-      .then((res) => {
+    try {
+      const s = search.replace(/"/g, '')
+      const filterStr = s ? `nome ~ "${s}" || email ~ "${s}"` : ''
+
+      if (filterStatus !== 'all') {
+        const allTickets = await pb
+          .collection('ingressos')
+          .getFullList({ fields: 'comprador_id,status' })
+        const buyerStats: Record<string, { total: number; pendente: number; pre: number }> = {}
+        allTickets.forEach((t) => {
+          if (!buyerStats[t.comprador_id])
+            buyerStats[t.comprador_id] = { total: 0, pendente: 0, pre: 0 }
+          buyerStats[t.comprador_id].total += 1
+          if (t.status === 'Pendente') buyerStats[t.comprador_id].pendente += 1
+          if (t.status === 'Pré-Credenciado') buyerStats[t.comprador_id].pre += 1
+        })
+
+        const matchingIds = new Set<string>()
+        for (const [buyerId, stats] of Object.entries(buyerStats)) {
+          if (filterStatus === 'all_pre_credenciados') {
+            if (stats.total > 0 && stats.pre === stats.total) {
+              matchingIds.add(buyerId)
+            }
+          } else if (filterStatus === 'pending') {
+            if (stats.pendente > 0) {
+              matchingIds.add(buyerId)
+            }
+          }
+        }
+
+        const allBuyers = await pb
+          .collection('compradores')
+          .getFullList({ sort: '-created', filter: filterStr })
+        const filteredBuyers = allBuyers.filter((b) => matchingIds.has(b.id))
+
+        const totalItems = filteredBuyers.length
+        const totalPagesCalc = Math.ceil(totalItems / limit) || 1
+
+        let currentPage = page
+        if (currentPage > totalPagesCalc && totalPagesCalc > 0) {
+          setPage(totalPagesCalc)
+          return
+        }
+        if (totalPagesCalc === 0 && currentPage !== 1) {
+          setPage(1)
+          return
+        }
+
+        const items = filteredBuyers.slice((currentPage - 1) * limit, currentPage * limit)
+        setData(items)
+        setTotalPages(totalPagesCalc)
+      } else {
+        const res = await pb
+          .collection('compradores')
+          .getList(page, limit, { sort: '-created', filter: filterStr })
         setData(res.items)
         setTotalPages(res.totalPages || 1)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
+      }
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     loadData()
-  }, [page, search])
+  }, [page, search, filterStatus])
 
   useEffect(() => {
     loadCounts()
   }, [])
 
   useRealtime('compradores', () => loadData())
-  useRealtime('ingressos', () => loadCounts())
+  useRealtime('ingressos', () => {
+    loadData()
+    loadCounts()
+  })
 
   const handleOpenCreate = () => {
     setEditingId(null)
@@ -183,21 +246,74 @@ export default function AdminCompradores() {
 
   const handleExportCSV = async () => {
     try {
-      const filterStr = search
-        ? `nome ~ "${search.replace(/"/g, '')}" || email ~ "${search.replace(/"/g, '')}"`
-        : ''
+      const s = search.replace(/"/g, '')
+      const filterStr = s ? `nome ~ "${s}" || email ~ "${s}"` : ''
+
       const allBuyers = await pb
         .collection('compradores')
         .getFullList({ filter: filterStr, sort: '-created' })
 
+      const allTickets = await pb.collection('ingressos').getFullList({ expand: 'participante_id' })
+
+      const ticketsByBuyer: Record<string, any[]> = {}
+      allTickets.forEach((t) => {
+        if (!ticketsByBuyer[t.comprador_id]) ticketsByBuyer[t.comprador_id] = []
+        ticketsByBuyer[t.comprador_id].push(t)
+      })
+
+      let finalBuyers = allBuyers
+      if (filterStatus !== 'all') {
+        finalBuyers = allBuyers.filter((b) => {
+          const tickets = ticketsByBuyer[b.id] || []
+          const total = tickets.length
+          const pendente = tickets.filter((t) => t.status === 'Pendente').length
+          const pre = tickets.filter((t) => t.status === 'Pré-Credenciado').length
+          if (filterStatus === 'all_pre_credenciados') return total > 0 && pre === total
+          if (filterStatus === 'pending') return pendente > 0
+          return true
+        })
+      }
+
+      const escapeCSV = (str: any) => {
+        if (!str) return '""'
+        return `"${String(str).replace(/"/g, '""')}"`
+      }
+
       const csvContent = [
-        ['Nome', 'Email', 'Data de Criação', 'Qtd. Ingressos'],
-        ...allBuyers.map((b) => [
-          `"${b.nome}"`,
-          `"${b.email}"`,
-          `"${format(new Date(b.created), 'dd/MM/yyyy HH:mm')}"`,
-          ingressosCount[b.id] || 0,
-        ]),
+        [
+          'Nome',
+          'Email',
+          'Documento',
+          'Telefone',
+          'Quantidade de Ingressos',
+          'Categorias de Ingressos',
+        ],
+        ...finalBuyers.map((b) => {
+          const tickets = ticketsByBuyer[b.id] || []
+          const qtd = tickets.length
+          const categories = Array.from(
+            new Set(tickets.map((t) => t.tipo_ingresso).filter(Boolean)),
+          ).join(', ')
+
+          let doc = ''
+          let phone = ''
+          for (const t of tickets) {
+            const p = t.expand?.participante_id
+            if (p) {
+              if (!doc && p.cpf) doc = p.cpf
+              if (!phone && p.telefone) phone = p.telefone
+            }
+          }
+
+          return [
+            escapeCSV(b.nome),
+            escapeCSV(b.email),
+            escapeCSV(doc),
+            escapeCSV(phone),
+            qtd,
+            escapeCSV(categories),
+          ]
+        }),
       ]
         .map((e) => e.join(','))
         .join('\n')
@@ -231,8 +347,8 @@ export default function AdminCompradores() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 max-w-sm">
-        <div className="relative w-full">
+      <div className="flex items-center gap-4 flex-wrap max-w-2xl">
+        <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar por nome ou email..."
@@ -244,6 +360,22 @@ export default function AdminCompradores() {
             }}
           />
         </div>
+        <Select
+          value={filterStatus}
+          onValueChange={(val) => {
+            setFilterStatus(val)
+            setPage(1)
+          }}
+        >
+          <SelectTrigger className="w-[280px] bg-white">
+            <SelectValue placeholder="Filtrar por status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos os Compradores</SelectItem>
+            <SelectItem value="all_pre_credenciados">Todos Pré-Credenciados</SelectItem>
+            <SelectItem value="pending">Com Ingressos Pendentes</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="border rounded-xl bg-white overflow-hidden shadow-sm flex flex-col">

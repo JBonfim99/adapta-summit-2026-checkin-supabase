@@ -69,13 +69,16 @@ export default function AdminParticipants() {
         filterStr = `comprador_id.email ~ "${s}" || pedido_id ~ "${s}" || participante_id.nome_completo ~ "${s}" || participante_id.email ~ "${s}"`
       }
 
-      const allTickets = await pb
-        .collection('ingressos')
-        .getFullList({
-          expand: 'comprador_id,participante_id',
-          sort: '-created',
-          filter: filterStr,
-        })
+      const allTickets = await pb.collection('ingressos').getFullList({
+        expand: 'comprador_id,participante_id',
+        sort: '-created',
+        filter: filterStr,
+      })
+
+      const escapeCSV = (str: any) => {
+        if (!str) return '""'
+        return `"${String(str).replace(/"/g, '""')}"`
+      }
 
       const csvContent = [
         [
@@ -92,24 +95,31 @@ export default function AdminParticipants() {
           'Funcionários',
           'Faturamento',
           'Status',
+          'Áreas de Ajuda',
+          'Expectativa de Aprendizado',
+          'Expectativa da Experiência',
         ],
         ...allTickets.map((row) => {
           const p = row.expand?.participante_id || {}
           const c = row.expand?.comprador_id || {}
+          const areas = Array.isArray(p.areas_ajuda) ? p.areas_ajuda.join('; ') : ''
           return [
-            `"${row.pedido_id}"`,
-            `"${row.tipo_ingresso}"`,
-            `"${c.email || ''}"`,
-            `"${p.nome_completo || ''}"`,
-            `"${p.email || ''}"`,
-            `"${p.cpf || ''}"`,
-            `"${p.telefone || ''}"`,
-            `"${p.nome_empresa || ''}"`,
-            `"${p.cargo || ''}"`,
-            `"${p.nicho || ''}"`,
-            `"${p.num_funcionarios || ''}"`,
-            `"${p.faturamento_anual || ''}"`,
-            `"${row.status}"`,
+            escapeCSV(row.pedido_id),
+            escapeCSV(row.tipo_ingresso),
+            escapeCSV(c.email),
+            escapeCSV(p.nome_completo),
+            escapeCSV(p.email),
+            escapeCSV(p.cpf),
+            escapeCSV(p.telefone),
+            escapeCSV(p.nome_empresa),
+            escapeCSV(p.cargo),
+            escapeCSV(p.nicho),
+            escapeCSV(p.num_funcionarios),
+            escapeCSV(p.faturamento_anual),
+            escapeCSV(row.status),
+            escapeCSV(areas),
+            escapeCSV(p.expectativa_aprendizado),
+            escapeCSV(p.expectativa_experiencia),
           ]
         }),
       ]
