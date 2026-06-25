@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectTrigger,
@@ -16,26 +18,31 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Mail, Send, Loader2, RotateCw, AlertTriangle } from 'lucide-react'
+import { Mail, Send, Loader2, RotateCw, AlertTriangle, Inbox } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
+import { useRealtime } from '@/hooks/use-realtime'
 
 interface Template {
   id: string
   name: string
 }
 
-interface Stats {
+interface Disparo {
+  id: string
+  template_id: string
+  template_nome: string
+  cluster: string
   total: number
-  na_fila: number
-  enviando: number
-  enviado: number
-  erro: number
+  enviados: number
+  erros: number
+  status: string
+  created: string
 }
 
 const CLUSTERS: Record<string, string> = {
   todos: 'Todos os compradores',
-  pendentes: 'Apenas compradores com ingresso pendente',
+  pendentes: 'Apenas com ingresso pendente',
 }
 
 export default function AdminDispatch() {
@@ -47,15 +54,13 @@ export default function AdminDispatch() {
   const [templateId, setTemplateId] = useState('')
   const [cluster, setCluster] = useState('todos')
 
-  const [stats, setStats] = useState<Stats | null>(null)
+  const [disparos, setDisparos] = useState<Disparo[]>([])
 
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [previewCount, setPreviewCount] = useState(0)
   const [previewing, setPreviewing] = useState(false)
   const [enqueuing, setEnqueuing] = useState(false)
-  const [retrying, setRetrying] = useState(false)
-
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [retryingId, setRetryingId] = useState<string | null>(null)
 
   const loadTemplates = useCallback(() => {
     setLoadingTemplates(true)
@@ -69,20 +74,20 @@ export default function AdminDispatch() {
       .finally(() => setLoadingTemplates(false))
   }, [])
 
-  const loadStats = useCallback(() => {
-    pb.send('/backend/v1/admin/dispatch/stats', {})
-      .then((res) => setStats(res))
+  const loadDisparos = useCallback(() => {
+    pb.collection('disparos')
+      .getFullList({ sort: '-created' })
+      .then((res) => setDisparos(res as unknown as Disparo[]))
       .catch(() => {})
   }, [])
 
   useEffect(() => {
     loadTemplates()
-    loadStats()
-    pollRef.current = setInterval(loadStats, 4000)
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
-    }
-  }, [loadTemplates, loadStats])
+    loadDisparos()
+  }, [loadTemplates, loadDisparos])
+
+  // Acompanhamento ao vivo: o cron atualiza o registro do disparo a cada lote.
+  useRealtime('disparos', () => loadDisparos())
 
   const templateName = templates.find((t) => t.id === templateId)?.name || templateId
 
@@ -111,14 +116,14 @@ export default function AdminDispatch() {
     try {
       const res = await pb.send('/backend/v1/admin/dispatch/enqueue', {
         method: 'POST',
-        body: JSON.stringify({ cluster, template_id: templateId }),
+        body: JSON.stringify({ cluster, template_id: templateId, template_nome: templateName }),
       })
       setConfirmOpen(false)
       toast({
-        title: 'Disparo enfileirado!',
-        description: `${res.enqueued} comprador(es) na fila. O envio começa em até 1 minuto.`,
+        title: 'Disparo iniciado!',
+        description: `${res.enqueued} comprador(es) na fila. Acompanhe no histórico abaixo.`,
       })
-      loadStats()
+      loadDisparos()
     } catch (e: any) {
       toast({ title: 'Erro ao enfileirar', description: e.message, variant: 'destructive' })
     } finally {
@@ -126,31 +131,21 @@ export default function AdminDispatch() {
     }
   }
 
-  const handleRetryErrors = async () => {
-    setRetrying(true)
+  const handleRetry = async (id: string) => {
+    setRetryingId(id)
     try {
-      const res = await pb.send('/backend/v1/admin/dispatch/retry-errors', { method: 'POST' })
+      const res = await pb.send(`/backend/v1/admin/dispatch/${id}/retry`, { method: 'POST' })
       toast({
         title: 'Reenfileirado',
         description: `${res.requeued} comprador(es) voltaram para a fila.`,
       })
-      loadStats()
+      loadDisparos()
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message, variant: 'destructive' })
     } finally {
-      setRetrying(false)
+      setRetryingId(null)
     }
   }
-
-  const statCards = [
-    { label: 'Total', value: stats?.total ?? 0, cls: 'text-slate-900' },
-    { label: 'Na fila', value: stats?.na_fila ?? 0, cls: 'text-amber-600' },
-    { label: 'Enviando', value: stats?.enviando ?? 0, cls: 'text-blue-600' },
-    { label: 'Enviado', value: stats?.enviado ?? 0, cls: 'text-emerald-600' },
-    { label: 'Erro', value: stats?.erro ?? 0, cls: 'text-rose-600' },
-  ]
-
-  const inFlight = (stats?.na_fila ?? 0) + (stats?.enviando ?? 0)
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -234,47 +229,83 @@ export default function AdminDispatch() {
         </CardContent>
       </Card>
 
-      {/* Painel de status ao vivo */}
-      <Card className="border-none shadow-sm">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-lg">Status do envio</CardTitle>
-            <CardDescription>
-              {inFlight > 0
-                ? `${inFlight} na fila/enviando — atualiza sozinho a cada 4s.`
-                : 'Fila vazia.'}
-            </CardDescription>
+      {/* Histórico de disparos (ao vivo via realtime) */}
+      <div>
+        <h3 className="text-lg font-semibold mb-3">Histórico de disparos</h3>
+        {disparos.length === 0 ? (
+          <div className="text-center py-12 bg-muted/30 rounded-xl border border-dashed text-muted-foreground">
+            <Inbox className="w-8 h-8 mx-auto mb-2 opacity-50" />
+            Nenhum disparo ainda. Os disparos aparecem aqui e atualizam sozinhos.
           </div>
-          {(stats?.erro ?? 0) > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={handleRetryErrors}
-              disabled={retrying}
-            >
-              {retrying ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <RotateCw className="w-4 h-4" />
-              )}
-              Reenfileirar erros
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            {statCards.map((s) => (
-              <div key={s.label} className="rounded-xl border bg-white p-4 text-center">
-                <div className={`text-3xl font-bold ${s.cls}`}>{s.value}</div>
-                <div className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">
-                  {s.label}
-                </div>
-              </div>
-            ))}
+        ) : (
+          <div className="space-y-3">
+            {disparos.map((d) => {
+              const total = d.total || 0
+              const enviados = d.enviados || 0
+              const erros = d.erros || 0
+              const restantes = Math.max(0, total - enviados - erros)
+              const pct = total > 0 ? Math.round(((enviados + erros) / total) * 100) : 0
+              const emAndamento = d.status === 'em_andamento'
+
+              return (
+                <Card key={d.id} className="border shadow-sm">
+                  <CardContent className="p-5 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-semibold truncate">{d.template_nome}</span>
+                          {emAndamento ? (
+                            <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1">
+                              <Loader2 className="w-3 h-3 animate-spin" /> Em andamento
+                            </Badge>
+                          ) : (
+                            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
+                              Concluído
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {CLUSTERS[d.cluster] || d.cluster} ·{' '}
+                          {new Date(d.created).toLocaleString('pt-BR')}
+                        </p>
+                      </div>
+                      {erros > 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1 shrink-0"
+                          onClick={() => handleRetry(d.id)}
+                          disabled={retryingId === d.id}
+                        >
+                          {retryingId === d.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <RotateCw className="w-3 h-3" />
+                          )}
+                          Retentar erros ({erros})
+                        </Button>
+                      )}
+                    </div>
+
+                    <Progress value={pct} className="h-2" />
+
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className="text-emerald-700 font-medium">
+                        {enviados}{' '}
+                        <span className="text-muted-foreground font-normal">
+                          de {total} enviados
+                        </span>
+                      </span>
+                      {restantes > 0 && <span className="text-amber-600">{restantes} na fila</span>}
+                      {erros > 0 && <span className="text-rose-600">{erros} com erro</span>}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
-        </CardContent>
-      </Card>
+        )}
+      </div>
 
       {/* Confirmação */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
@@ -303,7 +334,7 @@ export default function AdminDispatch() {
                 </div>
                 <p className="text-muted-foreground">
                   Cada comprador recebe um link de acesso válido por 60 dias. O envio acontece em
-                  segundo plano (~1000/min).
+                  segundo plano (~1000/min) e você acompanha no histórico.
                 </p>
               </div>
             </DialogDescription>

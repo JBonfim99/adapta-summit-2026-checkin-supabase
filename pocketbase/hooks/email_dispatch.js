@@ -1,13 +1,16 @@
 // ============================================================================
 // DISPARO DE ACESSO (magic link) AOS COMPRADORES VIA SENDGRID
 // ----------------------------------------------------------------------------
-// Arquitetura: o clique do admin apenas ENFILEIRA (UPDATE em massa, instantâneo).
-// Um cron drena a fila em lotes de até 1000 (limite de personalizations do
-// SendGrid), gera 1 token de acesso por comprador (validade 60 dias) e faz UMA
-// chamada ao /v3/mail/send por lote. Carga ~1 chamada/min, sem cascata.
+// Fluxo: o clique do admin cria uma CAMPANHA (registro em `disparos`) e
+// ENFILEIRA os compradores-alvo (UPDATE em massa, instantâneo), marcando cada
+// um com o acesso_disparo_id da campanha. Um cron drena a fila em lotes de até
+// 1000 (limite de personalizations do SendGrid), gera 1 token (60 dias) por
+// comprador e faz UMA chamada ao /v3/mail/send por lote. Ao fim de cada lote,
+// recalcula os contadores da campanha e grava no registro `disparos` — o painel
+// acompanha por realtime, sem polling.
 //
-// REGRA JSVM: cada callback roda em VM isolada — nada de helper no topo. Todo
-// helper (decodeBody, etc.) é declarado DENTRO do callback.
+// REGRA JSVM: cada callback roda em VM isolada — todo helper é declarado DENTRO
+// do callback (nada no topo do arquivo).
 // ============================================================================
 
 // --- Lista os dynamic templates do SendGrid (para o dropdown) ---------------
@@ -88,21 +91,36 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- Enqueue: marca o cluster como na_fila com o template escolhido ----------
+// --- Enqueue: cria a campanha e enfileira o cluster -------------------------
 routerAdd(
   'POST',
   '/backend/v1/admin/dispatch/enqueue',
   (e) => {
     try {
       const body = e.requestInfo().body || {}
-      const cluster = body.cluster
+      const cluster = body.cluster === 'pendentes' ? 'pendentes' : 'todos'
       const templateId = (body.template_id || '').toString().trim()
+      const templateNome = (body.template_nome || '').toString().trim()
 
       if (!templateId) return e.badRequestError('Selecione um template')
       if (templateId.indexOf('d-') !== 0) {
         return e.badRequestError('template_id inválido (deve começar com d-)')
       }
 
+      // 1. Cria o registro da campanha.
+      const disparosColl = $app.findCollectionByNameOrId('disparos')
+      const disparo = new Record(disparosColl)
+      disparo.set('template_id', templateId)
+      disparo.set('template_nome', templateNome || templateId)
+      disparo.set('cluster', cluster)
+      disparo.set('total', 0)
+      disparo.set('enviados', 0)
+      disparo.set('erros', 0)
+      disparo.set('status', 'em_andamento')
+      $app.save(disparo)
+      const disparoId = disparo.id
+
+      // 2. Enfileira o cluster, marcando o acesso_disparo_id da campanha.
       let where
       if (cluster === 'pendentes') {
         where =
@@ -114,22 +132,26 @@ routerAdd(
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'na_fila', acesso_template_id = {:tid}, acesso_tentativas = 0, acesso_erro = '' WHERE " +
+          "UPDATE compradores SET acesso_status = 'na_fila', acesso_template_id = {:tid}, " +
+            "acesso_disparo_id = {:did}, acesso_tentativas = 0, acesso_erro = '' WHERE " +
             where,
         )
-        .bind({ tid: templateId })
+        .bind({ tid: templateId, did: disparoId })
         .execute()
 
+      // 3. Conta quantos entraram e grava o total na campanha.
       const row = new DynamicModel({ c: 0 })
       $app
         .db()
-        .newQuery(
-          "SELECT COUNT(*) as c FROM compradores WHERE acesso_status = 'na_fila' AND acesso_template_id = {:tid}",
-        )
-        .bind({ tid: templateId })
+        .newQuery('SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did}')
+        .bind({ did: disparoId })
         .one(row)
 
-      return e.json(200, { enqueued: row.c })
+      disparo.set('total', row.c)
+      if (row.c === 0) disparo.set('status', 'concluido')
+      $app.save(disparo)
+
+      return e.json(200, { enqueued: row.c, disparo_id: disparoId })
     } catch (err) {
       return e.badRequestError(err.message)
     }
@@ -137,51 +159,40 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- Stats: contadores por status (para o painel ao vivo) -------------------
-routerAdd(
-  'GET',
-  '/backend/v1/admin/dispatch/stats',
-  (e) => {
-    try {
-      const count = (sql) => {
-        const row = new DynamicModel({ c: 0 })
-        $app.db().newQuery(sql).one(row)
-        return row.c
-      }
-      const total = count("SELECT COUNT(*) as c FROM compradores WHERE email != ''")
-      const na_fila = count("SELECT COUNT(*) as c FROM compradores WHERE acesso_status = 'na_fila'")
-      const enviando = count(
-        "SELECT COUNT(*) as c FROM compradores WHERE acesso_status = 'enviando'",
-      )
-      const enviado = count("SELECT COUNT(*) as c FROM compradores WHERE acesso_status = 'enviado'")
-      const erro = count("SELECT COUNT(*) as c FROM compradores WHERE acesso_status = 'erro'")
-
-      return e.json(200, { total, na_fila, enviando, enviado, erro })
-    } catch (err) {
-      return e.badRequestError(err.message)
-    }
-  },
-  $apis.requireAuth(),
-)
-
-// --- Reenfileira os que ficaram em 'erro' -----------------------------------
+// --- Retry por campanha: reenfileira os 'erro' de um disparo -----------------
 routerAdd(
   'POST',
-  '/backend/v1/admin/dispatch/retry-errors',
+  '/backend/v1/admin/dispatch/{disparoId}/retry',
   (e) => {
     try {
+      const disparoId = e.request.pathValue('disparoId')
+      if (!disparoId) return e.badRequestError('disparoId é obrigatório')
+
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'na_fila', acesso_tentativas = 0, acesso_erro = '' WHERE acesso_status = 'erro'",
+          "UPDATE compradores SET acesso_status = 'na_fila', acesso_tentativas = 0, acesso_erro = '' " +
+            "WHERE acesso_disparo_id = {:did} AND acesso_status = 'erro'",
         )
+        .bind({ did: disparoId })
         .execute()
 
       const row = new DynamicModel({ c: 0 })
       $app
         .db()
-        .newQuery("SELECT COUNT(*) as c FROM compradores WHERE acesso_status = 'na_fila'")
+        .newQuery(
+          "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'na_fila'",
+        )
+        .bind({ did: disparoId })
         .one(row)
+
+      try {
+        const disparo = $app.findRecordById('disparos', disparoId)
+        if (row.c > 0) {
+          disparo.set('status', 'em_andamento')
+          $app.save(disparo)
+        }
+      } catch (_) {}
 
       return e.json(200, { requeued: row.c })
     } catch (err) {
@@ -191,7 +202,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- CRON: drena a fila, 1 lote de até 1000 por minuto ----------------------
+// --- CRON: drena a fila, 1 lote (1 campanha) de até 1000 por minuto ---------
 cronAdd('email_dispatch', '* * * * *', () => {
   const apiKey = $os.getenv('SENDGRID_API_KEY')
   if (!apiKey) return
@@ -210,8 +221,46 @@ cronAdd('email_dispatch', '* * * * *', () => {
     return ''
   }
 
+  // Recalcula os contadores de uma campanha e grava no registro `disparos`.
+  const atualizaDisparo = (did) => {
+    if (!did) return
+    try {
+      const cEnv = new DynamicModel({ c: 0 })
+      $app
+        .db()
+        .newQuery(
+          "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'enviado'",
+        )
+        .bind({ did: did })
+        .one(cEnv)
+
+      const cErr = new DynamicModel({ c: 0 })
+      $app
+        .db()
+        .newQuery(
+          "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'erro'",
+        )
+        .bind({ did: did })
+        .one(cErr)
+
+      const cRest = new DynamicModel({ c: 0 })
+      $app
+        .db()
+        .newQuery(
+          "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND (acesso_status = 'na_fila' OR acesso_status = 'enviando')",
+        )
+        .bind({ did: did })
+        .one(cRest)
+
+      const disparo = $app.findRecordById('disparos', did)
+      disparo.set('enviados', cEnv.c)
+      disparo.set('erros', cErr.c)
+      disparo.set('status', cRest.c > 0 ? 'em_andamento' : 'concluido')
+      $app.save(disparo)
+    } catch (_) {}
+  }
+
   // 1. Recupera lotes presos em 'enviando' há mais de 10min (crash/deploy).
-  //    Não toca em lotes ativos (updated recente), então é seguro contra overlap.
   try {
     const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
     $app
@@ -223,7 +272,7 @@ cronAdd('email_dispatch', '* * * * *', () => {
       .execute()
   } catch (_) {}
 
-  // 2. Descobre o template do topo da fila.
+  // 2. Descobre a campanha do topo da fila.
   let first
   try {
     first = $app.findFirstRecordByFilter('compradores', 'acesso_status = {:s}', { s: 'na_fila' })
@@ -231,26 +280,40 @@ cronAdd('email_dispatch', '* * * * *', () => {
     return // fila vazia
   }
   const templateId = first.getString('acesso_template_id')
+  const disparoId = first.getString('acesso_disparo_id')
   if (!templateId) {
     first.set('acesso_status', 'erro')
     first.set('acesso_erro', 'Sem template definido')
     try {
       $app.save(first)
     } catch (_) {}
+    atualizaDisparo(disparoId)
     return
   }
 
-  // 3. Pega até 1000 da fila com esse template.
+  // 3. Pega até 1000 da fila DESSA campanha (homogêneo: mesmo template).
   let batch
   try {
-    batch = $app.findRecordsByFilter(
-      'compradores',
-      'acesso_status = {:s} && acesso_template_id = {:tid}',
-      'created',
-      1000,
-      0,
-      { s: 'na_fila', tid: templateId },
-    )
+    if (disparoId) {
+      batch = $app.findRecordsByFilter(
+        'compradores',
+        'acesso_status = {:s} && acesso_disparo_id = {:did}',
+        'created',
+        1000,
+        0,
+        { s: 'na_fila', did: disparoId },
+      )
+    } else {
+      // Legado (enfileirado antes do histórico): agrupa por template.
+      batch = $app.findRecordsByFilter(
+        'compradores',
+        'acesso_status = {:s} && acesso_template_id = {:tid}',
+        'created',
+        1000,
+        0,
+        { s: 'na_fila', tid: templateId },
+      )
+    }
   } catch (_) {
     return
   }
@@ -296,7 +359,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
       }
     })
   } catch (err) {
-    // Falha ao gerar tokens: devolve o lote pra fila e sai.
     try {
       $app
         .db()
@@ -317,6 +379,7 @@ cronAdd('email_dispatch', '* * * * *', () => {
         )
         .execute()
     } catch (_) {}
+    atualizaDisparo(disparoId)
     return
   }
 
@@ -374,4 +437,7 @@ cronAdd('email_dispatch', '* * * * *', () => {
         .execute()
     } catch (_) {}
   }
+
+  // 8. Recalcula e grava os contadores da campanha (acompanhamento ao vivo).
+  atualizaDisparo(disparoId)
 })

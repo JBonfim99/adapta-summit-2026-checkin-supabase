@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-25T22:29:22.556Z",
+  "generatedAt": "2026-06-25T23:36:35.277Z",
   "collections": [
     {
       "name": "users",
@@ -147,6 +147,12 @@
         },
         {
           "name": "acesso_erro",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "acesso_disparo_id",
           "type": "text",
           "required": false,
           "system": false
@@ -553,6 +559,85 @@
           "type": "text",
           "required": false,
           "system": false
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "disparos",
+      "type": "base",
+      "apiRules": {
+        "list": "@request.auth.id != ''",
+        "view": "@request.auth.id != ''",
+        "create": null,
+        "update": null,
+        "delete": null
+      },
+      "fields": [
+        {
+          "name": "template_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "template_nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "cluster",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "total",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "enviados",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "erros",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "status",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": [
+            "em_andamento",
+            "concluido"
+          ]
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate"
+          ]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         }
       ],
       "indexes": []
