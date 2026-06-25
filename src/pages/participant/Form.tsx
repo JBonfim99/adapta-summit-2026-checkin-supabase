@@ -11,6 +11,7 @@ import { FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/comp
 import { ArrowRight, ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
+import { getErrorMessage } from '@/lib/pocketbase/errors'
 
 const formSchema = z.object({
   nome_completo: z.string().min(3, 'Nome é obrigatório'),
@@ -139,7 +140,7 @@ export default function ParticipantForm() {
       toast({ title: 'Dados salvos com sucesso!' })
       navigate('/participante/obrigado')
     } catch (e: any) {
-      toast({ title: 'Erro', description: e.message, variant: 'destructive' })
+      toast({ title: 'Erro', description: getErrorMessage(e), variant: 'destructive' })
     } finally {
       setSubmitting(false)
     }
