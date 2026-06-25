@@ -18,20 +18,17 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 export function BuyerTicketsSheet({
   buyer,
@@ -46,7 +43,6 @@ export function BuyerTicketsSheet({
   const [loading, setLoading] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [newTicket, setNewTicket] = useState({ tipo_ingresso: '', pedido_id: '' })
-  const [deleteId, setDeleteId] = useState<string | null>(null)
   const { toast } = useToast()
 
   const loadTickets = async () => {
@@ -93,18 +89,6 @@ export function BuyerTicketsSheet({
       setShowAdd(false)
     } catch (err: any) {
       toast({ title: 'Erro ao adicionar', description: err.message, variant: 'destructive' })
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!deleteId) return
-    try {
-      await pb.collection('ingressos').delete(deleteId)
-      toast({ title: 'Ingresso removido com sucesso!' })
-    } catch (err: any) {
-      toast({ title: 'Erro ao remover', description: err.message, variant: 'destructive' })
-    } finally {
-      setDeleteId(null)
     }
   }
 
@@ -172,13 +156,20 @@ export function BuyerTicketsSheet({
                   </div>
                   <div className="space-y-1">
                     <Label>Tipo de Ingresso</Label>
-                    <Input
+                    <Select
                       value={newTicket.tipo_ingresso}
-                      onChange={(e) =>
-                        setNewTicket((prev) => ({ ...prev, tipo_ingresso: e.target.value }))
+                      onValueChange={(value) =>
+                        setNewTicket((prev) => ({ ...prev, tipo_ingresso: value }))
                       }
-                      placeholder="Ex: VIP"
-                    />
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione o tipo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="GOLD">GOLD</SelectItem>
+                        <SelectItem value="PLATINUM">PLATINUM</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div className="flex justify-end gap-2">
@@ -200,20 +191,19 @@ export function BuyerTicketsSheet({
                     <TableHead>Tipo</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Participante</TableHead>
-                    <TableHead className="w-12"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {loading && (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
                         Carregando ingressos...
                       </TableCell>
                     </TableRow>
                   )}
                   {!loading && tickets.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
                         Nenhum ingresso encontrado.
                       </TableCell>
                     </TableRow>
@@ -239,16 +229,6 @@ export function BuyerTicketsSheet({
                             </span>
                           )}
                         </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setDeleteId(t.id)}
-                            title="Remover ingresso"
-                          >
-                            <Trash2 className="w-4 h-4 text-rose-500" />
-                          </Button>
-                        </TableCell>
                       </TableRow>
                     ))}
                 </TableBody>
@@ -257,27 +237,6 @@ export function BuyerTicketsSheet({
           </div>
         </SheetContent>
       </Sheet>
-
-      <AlertDialog open={!!deleteId} onOpenChange={(val) => !val && setDeleteId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remover ingresso?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Tem certeza que deseja remover este ingresso? O comprador não será excluído, apenas
-              este registro de ingresso.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              className="bg-rose-500 hover:bg-rose-600 text-white"
-            >
-              Remover
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   )
 }
