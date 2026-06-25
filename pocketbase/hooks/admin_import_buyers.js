@@ -74,6 +74,7 @@ routerAdd(
           ingresso.set('pedido_id', `${doc}-${seqStr}`)
           ingresso.set('tipo_ingresso', 'GOLD')
           ingresso.set('status', 'Pendente')
+          ingresso.set('status_webhook', 'pendente')
           txApp.save(ingresso)
           imported++
 
@@ -95,6 +96,7 @@ routerAdd(
           ingresso.set('pedido_id', `${doc}-${seqStr}`)
           ingresso.set('tipo_ingresso', 'PLATINUM')
           ingresso.set('status', 'Pendente')
+          ingresso.set('status_webhook', 'pendente')
           txApp.save(ingresso)
           imported++
 

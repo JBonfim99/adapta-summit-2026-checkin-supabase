@@ -1,52 +1,82 @@
-onRecordAfterCreateSuccess((e) => {
-  const part = e.record
-  const ingressoId = part.getString('ingresso_id')
-  const ingresso = $app.findRecordById('ingressos', ingressoId)
+// ---------------------------------------------------------------------------
+// Integração com o INAC (entrega de pré-credenciamento p/ geração de QR Code).
+//
+// A URL de disparo será fornecida depois. Enquanto INAC_WEBHOOK_URL estiver
+// vazia, nada é enviado e o ingresso fica com status_webhook = 'pendente'
+// (dá pra reenviar depois pela tela de Envios).
+// ---------------------------------------------------------------------------
 
-  const payload = {
+const INAC_WEBHOOK_URL = '' // TODO: preencher com a URL do INAC
+
+function buildInacPayload(part, ingresso) {
+  return {
+    event: 'adapta-summit-2026',
+    participant_id: part.id,
+    ticket_id: ingresso.id,
+    order_id: ingresso.getString('pedido_id'),
+    ticket_type: ingresso.getString('tipo_ingresso'),
     name: part.getString('nome_completo'),
     email: part.getString('email'),
     cpf: part.getString('cpf'),
     phone: part.getString('telefone'),
-    ticket_type: ingresso.getString('tipo_ingresso'),
-    order_id: ingresso.getString('pedido_id'),
+    company: part.getString('nome_empresa'),
+    role: part.getString('cargo'),
   }
+}
 
-  let status = 500
-  let respBody = ''
+function deliverToInac(ingresso, part) {
+  if (!INAC_WEBHOOK_URL) {
+    return { status: 0, body: 'INAC_WEBHOOK_URL não configurada — envio ignorado' }
+  }
 
   try {
     const res = $http.send({
-      url: 'https://httpbin.org/post',
+      url: INAC_WEBHOOK_URL,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(buildInacPayload(part, ingresso)),
       timeout: 10,
     })
-    status = res.statusCode
-    respBody = res.body ? new TextDecoder().decode(res.body) : ''
+    return {
+      status: res.statusCode,
+      body: res.body ? new TextDecoder().decode(res.body) : '',
+    }
   } catch (err) {
-    respBody = err.message
+    return { status: 0, body: err.message }
   }
+}
 
+function logWebhook(ingressoId, status, body) {
   const logColl = $app.findCollectionByNameOrId('webhooks_log')
   const log = new Record(logColl)
-  log.set('ingresso_id', ingresso.id)
+  log.set('ingresso_id', ingressoId)
   log.set('status', status)
   log.set('method', 'POST')
-  log.set('response', respBody.substring(0, 500))
+  log.set('response', (body || '').substring(0, 500))
   $app.save(log)
+}
 
-  if (status >= 200 && status < 300) {
-    ingresso.set('status', 'enviado')
-  } else {
-    ingresso.set('status', 'erro_webhook')
-  }
+function webhookStatusFor(httpStatus) {
+  if (httpStatus >= 200 && httpStatus < 300) return 'enviado'
+  if (httpStatus === 0) return 'pendente' // não enviado (URL ausente ou falha de rede)
+  return 'erro'
+}
+
+// Dispara automaticamente quando um participante é criado (após o submit).
+onRecordAfterCreateSuccess((e) => {
+  const part = e.record
+  const ingresso = $app.findRecordById('ingressos', part.getString('ingresso_id'))
+
+  const { status, body } = deliverToInac(ingresso, part)
+  logWebhook(ingresso.id, status, body)
+
+  ingresso.set('status_webhook', webhookStatusFor(status))
   $app.save(ingresso)
 
   e.next()
 }, 'participantes')
 
+// Reenvio manual a partir da tela de Envios.
 routerAdd(
   'POST',
   '/backend/v1/admin/retry-webhook/{ingressoId}',
@@ -59,47 +89,16 @@ routerAdd(
 
       const part = $app.findRecordById('participantes', partId)
 
-      const payload = {
-        name: part.getString('nome_completo'),
-        email: part.getString('email'),
-        cpf: part.getString('cpf'),
-        phone: part.getString('telefone'),
-        ticket_type: ingresso.getString('tipo_ingresso'),
-        order_id: ingresso.getString('pedido_id'),
-      }
+      const { status, body } = deliverToInac(ingresso, part)
+      logWebhook(ingresso.id, status, body)
 
-      let status = 500
-      let respBody = ''
-      try {
-        const res = $http.send({
-          url: 'https://httpbin.org/post',
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        status = res.statusCode
-        respBody = res.body ? new TextDecoder().decode(res.body) : ''
-      } catch (err) {
-        respBody = err.message
-      }
-
-      const logColl = $app.findCollectionByNameOrId('webhooks_log')
-      const log = new Record(logColl)
-      log.set('ingresso_id', ingresso.id)
-      log.set('status', status)
-      log.set('method', 'POST')
-      log.set('response', respBody.substring(0, 500))
-      $app.save(log)
+      ingresso.set('status_webhook', webhookStatusFor(status))
+      $app.save(ingresso)
 
       if (status >= 200 && status < 300) {
-        ingresso.set('status', 'enviado')
-        $app.save(ingresso)
         return e.json(200, { success: true })
-      } else {
-        ingresso.set('status', 'erro_webhook')
-        $app.save(ingresso)
-        return e.json(500, { success: false, error: respBody })
       }
+      return e.json(502, { success: false, status: status, error: body })
     } catch (err) {
       return e.badRequestError(err.message)
     }

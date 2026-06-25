@@ -95,7 +95,7 @@ export default function AdminWebhooks() {
                   </div>
                 </TableCell>
                 <TableCell className="text-right">
-                  {log.expand?.ingresso_id?.status === 'erro_webhook' && (
+                  {log.expand?.ingresso_id?.status_webhook === 'erro' && (
                     <Button
                       variant="outline"
                       size="sm"

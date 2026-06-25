@@ -38,18 +38,14 @@ routerAdd('POST', '/backend/v1/auth/magic-link/consume', (e) => {
     return e.badRequestError('Token inválido')
   }
 
-  if (tokenRecord.getBool('usado')) {
-    return e.badRequestError('Token já utilizado')
-  }
-
   const expiraEm = new Date(tokenRecord.getString('expira_em'))
   if (expiraEm < new Date()) {
     return e.badRequestError('Token expirado')
   }
 
-  tokenRecord.set('usado', true)
-  $app.save(tokenRecord)
-
+  // OBS: o token NÃO é marcado como `usado` aqui de propósito. Ele é reutilizado
+  // como bearer de sessão por /buyer/tickets e /invite (que validam só token +
+  // expira_em). A validade efetiva é a expiração de 24h.
   const comprador = $app.findRecordById('compradores', tokenRecord.getString('comprador_id'))
 
   return e.json(200, {

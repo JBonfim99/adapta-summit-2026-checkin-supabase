@@ -26,7 +26,7 @@ routerAdd('GET', '/backend/v1/buyer/tickets', (e) => {
   for (const t of tickets) {
     const exported = JSON.parse(JSON.stringify(t.publicExport()))
 
-    if (t.getString('status') === 'pendente') {
+    if (t.getString('status') === 'Pendente') {
       try {
         const pl = $app.findFirstRecordByFilter(
           'links_participante',

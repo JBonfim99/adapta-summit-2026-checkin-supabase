@@ -1,10 +1,8 @@
+// NEUTRALIZADA INTENCIONALMENTE.
+// O reset de dados já foi feito manualmente — esta migration foi esvaziada
+// para NÃO reexecutar os DELETEs ao aplicar as correções. Mantida como no-op
+// apenas para preservar a sequência de numeração das migrations.
 migrate(
-  (app) => {
-    app.db().newQuery('DELETE FROM links_participante').execute()
-    app.db().newQuery('DELETE FROM tokens_acesso').execute()
-    app.db().newQuery('DELETE FROM ingressos').execute()
-    app.db().newQuery('DELETE FROM participantes').execute()
-    app.db().newQuery('DELETE FROM compradores').execute()
-  },
+  (app) => {},
   (app) => {},
 )
