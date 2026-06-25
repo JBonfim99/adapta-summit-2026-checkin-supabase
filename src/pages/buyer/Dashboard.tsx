@@ -26,27 +26,31 @@ export default function BuyerDashboard() {
   const [inviteTicket, setInviteTicket] = useState<{ t: Ticket; link: string } | null>(null)
   const [loadingTicketId, setLoadingTicketId] = useState<string | null>(null)
 
-  const loadTickets = useCallback(() => {
+  const loadTickets = useCallback(async () => {
     if (!buyer) return
-    pb.send('/backend/v1/buyer/tickets?expand=participante_id', {
-      headers: { Authorization: `Bearer ${buyer.token}` },
-    })
-      .then((data) => {
-        const formatted = (data.items || []).map((t: any) => ({
+    try {
+      const data = await pb.send('/backend/v1/buyer/tickets?expand=participante_id,comprador_id', {
+        headers: { Authorization: `Bearer ${buyer.token}` },
+      })
+
+      const formatted = (data.items || []).map((t: any, index: number) => {
+        const doc = t.expand?.comprador_id?.documento || buyer.documento || '00000000000'
+        return {
           id: t.id,
           pedido_id: t.pedido_id,
+          displayId: `${doc}-${(index + 1).toString().padStart(2, '0')}`,
           type: t.tipo_ingresso,
           status: t.status,
           participantName: t.expand?.participante_id?.nome_completo,
           participantEmail: t.expand?.participante_id?.email,
           participantCpf: t.expand?.participante_id?.cpf,
           pendingLink: t.pending_link || null,
-        }))
-        setTickets(formatted)
+        }
       })
-      .catch(() => {
-        logoutBuyer()
-      })
+      setTickets(formatted)
+    } catch (err) {
+      logoutBuyer()
+    }
   }, [buyer, logoutBuyer])
 
   useEffect(() => {
@@ -81,7 +85,7 @@ export default function BuyerDashboard() {
       setLoadingTicketId(ticket.id)
       const token = await getInviteToken(ticket.id, true)
       navigate(
-        `/participante?token=${token}&nome=${encodeURIComponent(buyer.nome)}&email=${encodeURIComponent(buyer.email)}`,
+        `/credenciamento?token=${token}&nome=${encodeURIComponent(buyer.nome)}&email=${encodeURIComponent(buyer.email)}`,
       )
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message, variant: 'destructive' })
@@ -93,7 +97,10 @@ export default function BuyerDashboard() {
   const handleInvite = async (ticket: Ticket) => {
     try {
       const token = ticket.pendingLink || (await getInviteToken(ticket.id))
-      setInviteTicket({ t: ticket, link: `${window.location.origin}/participante?token=${token}` })
+      setInviteTicket({
+        t: ticket,
+        link: `${window.location.origin}/credenciamento?token=${token}`,
+      })
       if (!ticket.pendingLink) loadTickets()
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message, variant: 'destructive' })

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Mail, PenSquare, CheckCircle2, UserPlus, Loader2 } from 'lucide-react'
 import { StatusBadge } from '@/components/StatusBadge'
+import { cn } from '@/lib/utils'
 
 interface TicketCardProps {
   ticket: Ticket
@@ -18,10 +19,12 @@ export function TicketCard({ ticket, onFill, onInvite, isLoadingFill }: TicketCa
 
   return (
     <Card className="flex flex-col h-full overflow-hidden transition-all duration-300 hover:shadow-lg hover:border-primary/20 group">
-      <CardHeader className="bg-muted/30 pb-4 border-b">
+      <CardHeader
+        className={cn('pb-4 border-b', ticket.type === 'GOLD' ? 'bg-yellow-100/50' : 'bg-muted/30')}
+      >
         <div className="flex justify-between items-start mb-2">
           <Badge variant="outline" className="bg-background">
-            Pedido #{ticket.pedido_id?.slice(-6) || 'N/A'}
+            Ingresso #{ticket.displayId || ticket.pedido_id?.slice(-6) || 'N/A'}
           </Badge>
           <StatusBadge status={ticket.status} />
         </div>
