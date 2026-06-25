@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Download, RefreshCcw, Loader2, Link as LinkIcon } from 'lucide-react'
+import { Search, Download, RefreshCcw, Loader2, Link as LinkIcon, UserPlus } from 'lucide-react'
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import pb from '@/lib/pocketbase/client'
@@ -23,6 +23,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { AddParticipantDialog } from '@/components/admin/AddParticipantDialog'
 
 export default function AdminParticipants() {
   const [data, setData] = useState<any[]>([])
@@ -38,6 +39,7 @@ export default function AdminParticipants() {
 
   const [exporting, setExporting] = useState(false)
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
+  const [participantTicket, setParticipantTicket] = useState<any | null>(null)
 
   const loadData = () => {
     setLoading(true)
@@ -294,55 +296,67 @@ export default function AdminParticipants() {
                     <TableCell>
                       <StatusBadge status={row.status} />
                     </TableCell>
-                    <TableCell className="text-right flex items-center justify-end gap-2">
-                      {row.status === 'Pendente' && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-indigo-600"
-                          onClick={async () => {
-                            try {
-                              if (!row.id) throw new Error('Missing ingresso_id')
-                              const res = await pb.send(
-                                `/backend/v1/admin/ticket/${row.id}/invite-link`,
-                                { method: 'POST' },
-                              )
-                              const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${res.token}`
-                              await navigator.clipboard.writeText(url)
-                              toast({ title: 'Link de pré-credenciamento copiado!' })
-                            } catch (e: any) {
-                              if (e?.status === 401) {
-                                toast({
-                                  title: 'Sessão expirada',
-                                  description:
-                                    'Sua sessão expirou. Por favor, faça login novamente.',
-                                  variant: 'destructive',
-                                })
-                                window.location.href = '/admin/login'
-                              } else {
-                                toast({
-                                  title: 'Erro',
-                                  description:
-                                    'Erro ao gerar link: verifique se o ingresso é válido.',
-                                  variant: 'destructive',
-                                })
-                              }
-                            }
-                          }}
-                        >
-                          <LinkIcon className="w-4 h-4 mr-1" />
-                          Copiar Link
-                        </Button>
-                      )}
-                      {row.expand?.participante_id && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedParticipant(row.expand.participante_id)}
-                        >
-                          Ver Detalhes
-                        </Button>
-                      )}
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {row.status === 'Pendente' && (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 gap-1"
+                              onClick={() => setParticipantTicket(row)}
+                            >
+                              <UserPlus className="w-3.5 h-3.5" /> Adicionar Participante
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-indigo-600"
+                              onClick={async () => {
+                                try {
+                                  if (!row.id) throw new Error('Missing ingresso_id')
+                                  const res = await pb.send(
+                                    `/backend/v1/admin/ticket/${row.id}/invite-link`,
+                                    { method: 'POST' },
+                                  )
+                                  const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${res.token}`
+                                  await navigator.clipboard.writeText(url)
+                                  toast({ title: 'Link de pré-credenciamento copiado!' })
+                                } catch (e: any) {
+                                  if (e?.status === 401) {
+                                    toast({
+                                      title: 'Sessão expirada',
+                                      description:
+                                        'Sua sessão expirou. Por favor, faça login novamente.',
+                                      variant: 'destructive',
+                                    })
+                                    window.location.href = '/admin/login'
+                                  } else {
+                                    toast({
+                                      title: 'Erro',
+                                      description:
+                                        'Erro ao gerar link: verifique se o ingresso é válido.',
+                                      variant: 'destructive',
+                                    })
+                                  }
+                                }
+                              }}
+                            >
+                              <LinkIcon className="w-4 h-4 mr-1" />
+                              Copiar Link
+                            </Button>
+                          </>
+                        )}
+                        {row.expand?.participante_id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedParticipant(row.expand.participante_id)}
+                          >
+                            Ver Detalhes
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))
@@ -482,6 +496,13 @@ export default function AdminParticipants() {
           </ScrollArea>
         </DialogContent>
       </Dialog>
+
+      <AddParticipantDialog
+        ticket={participantTicket}
+        open={!!participantTicket}
+        onOpenChange={(val: boolean) => !val && setParticipantTicket(null)}
+        onSuccess={loadData}
+      />
     </div>
   )
 }

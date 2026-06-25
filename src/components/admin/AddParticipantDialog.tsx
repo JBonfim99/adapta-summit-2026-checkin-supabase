@@ -13,7 +13,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { FormInput } from '@/components/FormInput'
 import { CheckCircle2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
@@ -162,8 +161,8 @@ export function AddParticipantDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[88vh] p-0 overflow-hidden flex flex-col">
-        <DialogHeader className="p-6 border-b pb-4 bg-slate-50/50">
+      <DialogContent className="max-w-2xl p-0 overflow-hidden gap-0">
+        <DialogHeader className="p-6 border-b pb-4 bg-slate-50/50 space-y-1">
           <DialogTitle>Adicionar Participante</DialogTitle>
           <DialogDescription>
             Pré-credenciamento manual do ingresso{' '}
@@ -173,8 +172,8 @@ export function AddParticipantDialog({
         </DialogHeader>
 
         <FormProvider {...methods}>
-          <form onSubmit={methods.handleSubmit(onSubmit)} className="flex flex-col flex-1 min-h-0">
-            <ScrollArea className="flex-1 px-6 py-4">
+          <form onSubmit={methods.handleSubmit(onSubmit)}>
+            <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
               <div className="space-y-5">
                 <FormInput name="nome_completo" label="Nome Completo" placeholder="João da Silva" />
                 <FormInput
@@ -301,7 +300,7 @@ export function AddParticipantDialog({
                   placeholder="Sua expectativa..."
                 />
               </div>
-            </ScrollArea>
+            </div>
 
             <DialogFooter className="p-4 border-t bg-slate-50/50">
               <Button
