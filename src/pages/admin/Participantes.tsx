@@ -302,12 +302,14 @@ export default function AdminParticipants() {
                           className="text-indigo-600"
                           onClick={async () => {
                             try {
+                              if (!row.id) throw new Error('Missing ingresso_id')
                               let link
                               try {
                                 link = await pb
                                   .collection('links_participante')
                                   .getFirstListItem(`ingresso_id = "${row.id}" && usado = false`)
-                              } catch (err) {
+                              } catch (err: any) {
+                                if (err?.status === 401) throw err
                                 const expiraEm = new Date()
                                 expiraEm.setDate(expiraEm.getDate() + 30)
                                 link = await pb.collection('links_participante').create({
@@ -321,14 +323,24 @@ export default function AdminParticipants() {
                               }
                               const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${link.token}`
                               await navigator.clipboard.writeText(url)
-                              toast({ title: 'Link de pré-credenciamento copiado com sucesso!' })
-                            } catch (e) {
-                              toast({
-                                title: 'Erro',
-                                description:
-                                  'Erro ao gerar link: tente novamente ou verifique se o ingresso é válido.',
-                                variant: 'destructive',
-                              })
+                              toast({ title: 'Link copiado com sucesso!' })
+                            } catch (e: any) {
+                              if (e?.status === 401) {
+                                toast({
+                                  title: 'Sessão expirada',
+                                  description:
+                                    'Sua sessão expirou. Por favor, faça login novamente.',
+                                  variant: 'destructive',
+                                })
+                                window.location.href = '/admin/login'
+                              } else {
+                                toast({
+                                  title: 'Erro',
+                                  description:
+                                    'Erro ao gerar link: tente novamente ou verifique se o ingresso é válido.',
+                                  variant: 'destructive',
+                                })
+                              }
                             }
                           }}
                         >

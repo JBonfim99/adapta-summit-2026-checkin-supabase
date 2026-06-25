@@ -29,6 +29,11 @@ function PreCredenciamentoRedirect() {
   return <Navigate to={`/participante?token=${token}`} replace />
 }
 
+function CredenciamentoRedirect() {
+  const location = useLocation()
+  return <Navigate to={`/participante${location.search}`} replace />
+}
+
 function PrefillHack() {
   const location = useLocation()
   useEffect(() => {
@@ -91,6 +96,7 @@ const App = () => (
               <Route path="/participante/expirado" element={<ParticipantExpired />} />
               <Route path="/participante" element={<ParticipantForm />} />
               <Route path="/pre-credenciamento/:token" element={<PreCredenciamentoRedirect />} />
+              <Route path="/credenciamento" element={<CredenciamentoRedirect />} />
             </Route>
 
             <Route path="/admin/login" element={<AdminLogin />} />
