@@ -202,6 +202,246 @@ routerAdd(
   $apis.requireAuth(),
 )
 
+// --- TICK manual: processa UM lote sob demanda e devolve diagnóstico --------
+// Usado pela tela (que chama enquanto há campanha em andamento) e serve de
+// fallback caso o cron não rode no ambiente. Espelha a lógica do cron.
+routerAdd(
+  'POST',
+  '/backend/v1/admin/dispatch/tick',
+  (e) => {
+    const apiKey = $os.getenv('SENDGRID_API_KEY')
+    if (!apiKey) return e.json(200, { ran: false, reason: 'no_api_key' })
+
+    const decodeBody = (body) => {
+      if (body == null) return ''
+      if (typeof body === 'string') return body
+      try {
+        return new TextDecoder().decode(body)
+      } catch (_) {}
+      try {
+        let s = ''
+        for (let i = 0; i < body.length; i++) s += String.fromCharCode(body[i])
+        return s
+      } catch (_) {}
+      return ''
+    }
+
+    const atualizaDisparo = (did) => {
+      if (!did) return
+      try {
+        const cEnv = new DynamicModel({ c: 0 })
+        $app
+          .db()
+          .newQuery(
+            "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'enviado'",
+          )
+          .bind({ did: did })
+          .one(cEnv)
+        const cErr = new DynamicModel({ c: 0 })
+        $app
+          .db()
+          .newQuery(
+            "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'erro'",
+          )
+          .bind({ did: did })
+          .one(cErr)
+        const cRest = new DynamicModel({ c: 0 })
+        $app
+          .db()
+          .newQuery(
+            "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND (acesso_status = 'na_fila' OR acesso_status = 'enviando')",
+          )
+          .bind({ did: did })
+          .one(cRest)
+        const disparo = $app.findRecordById('disparos', did)
+        disparo.set('enviados', cEnv.c)
+        disparo.set('erros', cErr.c)
+        disparo.set('status', cRest.c > 0 ? 'em_andamento' : 'concluido')
+        $app.save(disparo)
+      } catch (_) {}
+    }
+
+    // Recupera presos em 'enviando' há mais de 10min.
+    try {
+      const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
+      $app
+        .db()
+        .newQuery(
+          "UPDATE compradores SET acesso_status = 'na_fila' WHERE acesso_status = 'enviando' AND updated < {:cut}",
+        )
+        .bind({ cut: cut })
+        .execute()
+    } catch (_) {}
+
+    let first
+    try {
+      first = $app.findFirstRecordByFilter('compradores', 'acesso_status = {:s}', { s: 'na_fila' })
+    } catch (_) {
+      return e.json(200, { ran: false, reason: 'fila_vazia' })
+    }
+    const templateId = first.getString('acesso_template_id')
+    const disparoId = first.getString('acesso_disparo_id')
+    if (!templateId) {
+      first.set('acesso_status', 'erro')
+      first.set('acesso_erro', 'Sem template definido')
+      try {
+        $app.save(first)
+      } catch (_) {}
+      atualizaDisparo(disparoId)
+      return e.json(200, { ran: false, reason: 'sem_template' })
+    }
+
+    let batch
+    try {
+      if (disparoId) {
+        batch = $app.findRecordsByFilter(
+          'compradores',
+          'acesso_status = {:s} && acesso_disparo_id = {:did}',
+          'created',
+          1000,
+          0,
+          { s: 'na_fila', did: disparoId },
+        )
+      } else {
+        batch = $app.findRecordsByFilter(
+          'compradores',
+          'acesso_status = {:s} && acesso_template_id = {:tid}',
+          'created',
+          1000,
+          0,
+          { s: 'na_fila', tid: templateId },
+        )
+      }
+    } catch (err) {
+      return e.json(200, { ran: false, reason: 'erro_busca', error: err.message })
+    }
+    if (!batch || batch.length === 0) return e.json(200, { ran: false, reason: 'fila_vazia' })
+
+    const idList = batch.map((c) => "'" + c.id + "'").join(',')
+
+    try {
+      $app
+        .db()
+        .newQuery("UPDATE compradores SET acesso_status = 'enviando' WHERE id IN (" + idList + ')')
+        .execute()
+    } catch (_) {}
+
+    const personalizations = []
+    const exp = new Date()
+    exp.setDate(exp.getDate() + 60)
+    const expIso = exp.toISOString()
+    try {
+      $app.runInTransaction((txApp) => {
+        const tokenColl = txApp.findCollectionByNameOrId('tokens_acesso')
+        for (const c of batch) {
+          const email = c.getString('email')
+          if (!email) continue
+          const token = $security.randomString(40)
+          const tr = new Record(tokenColl)
+          tr.set('comprador_id', c.id)
+          tr.set('token', token)
+          tr.set('usado', false)
+          tr.set('expira_em', expIso)
+          txApp.save(tr)
+          const nome = c.getString('nome') || ''
+          const firstname = (nome.split(' ')[0] || nome || '').trim()
+          personalizations.push({
+            to: [{ email: email, name: nome }],
+            dynamic_template_data: { firstname: firstname, token: token },
+          })
+        }
+      })
+    } catch (err) {
+      try {
+        $app
+          .db()
+          .newQuery("UPDATE compradores SET acesso_status = 'na_fila' WHERE id IN (" + idList + ')')
+          .execute()
+      } catch (_) {}
+      return e.json(200, { ran: false, reason: 'erro_token', error: err.message })
+    }
+
+    if (personalizations.length === 0) {
+      try {
+        $app
+          .db()
+          .newQuery(
+            "UPDATE compradores SET acesso_status = 'erro', acesso_erro = 'Sem email' WHERE id IN (" +
+              idList +
+              ')',
+          )
+          .execute()
+      } catch (_) {}
+      atualizaDisparo(disparoId)
+      return e.json(200, { ran: false, reason: 'sem_email' })
+    }
+
+    let status = 0
+    let respBody = ''
+    let erroMsg = ''
+    try {
+      const res = $http.send({
+        url: 'https://api.sendgrid.com/v3/mail/send',
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: { email: 'duvidas@adapta.org', name: 'Adapta Summit 2026' },
+          template_id: templateId,
+          personalizations: personalizations,
+        }),
+        timeout: 30,
+      })
+      status = res.statusCode
+      respBody = decodeBody(res.body)
+    } catch (err) {
+      erroMsg = err.message
+    }
+
+    const ok = status >= 200 && status < 300
+    if (ok) {
+      const now = new Date().toISOString()
+      try {
+        $app
+          .db()
+          .newQuery(
+            "UPDATE compradores SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '' WHERE id IN (" +
+              idList +
+              ')',
+          )
+          .bind({ now: now })
+          .execute()
+      } catch (_) {}
+    } else {
+      const errTxt = ('HTTP ' + status + ' ' + (respBody || erroMsg || '')).substring(0, 300)
+      try {
+        $app
+          .db()
+          .newQuery(
+            'UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, ' +
+              "acesso_status = CASE WHEN acesso_tentativas + 1 >= 3 THEN 'erro' ELSE 'na_fila' END " +
+              'WHERE id IN (' +
+              idList +
+              ')',
+          )
+          .bind({ err: errTxt })
+          .execute()
+      } catch (_) {}
+    }
+
+    atualizaDisparo(disparoId)
+
+    return e.json(200, {
+      ran: true,
+      reason: ok ? 'ok' : 'sendgrid_falhou',
+      batch: batch.length,
+      sg_status: status,
+      sg_ok: ok,
+      sg_error: ok ? '' : (respBody || erroMsg || '').substring(0, 300),
+    })
+  },
+  $apis.requireAuth(),
+)
+
 // --- CRON: drena a fila, 1 lote (1 campanha) de até 1000 por minuto ---------
 cronAdd('email_dispatch', '* * * * *', () => {
   const apiKey = $os.getenv('SENDGRID_API_KEY')

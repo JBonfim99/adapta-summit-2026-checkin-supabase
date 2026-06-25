@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -18,7 +18,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Mail, Send, Loader2, RotateCw, AlertTriangle, Inbox } from 'lucide-react'
+import { Mail, Send, Loader2, RotateCw, AlertTriangle, Inbox, PlayCircle } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -61,6 +61,7 @@ export default function AdminDispatch() {
   const [previewing, setPreviewing] = useState(false)
   const [enqueuing, setEnqueuing] = useState(false)
   const [retryingId, setRetryingId] = useState<string | null>(null)
+  const tickingRef = useRef(false)
 
   const loadTemplates = useCallback(() => {
     setLoadingTemplates(true)
@@ -88,6 +89,54 @@ export default function AdminDispatch() {
 
   // Acompanhamento ao vivo: o cron atualiza o registro do disparo a cada lote.
   useRealtime('disparos', () => loadDisparos())
+
+  // Processa um lote sob demanda. A tela chama isso enquanto houver campanha em
+  // andamento (fallback caso o cron não rode no ambiente).
+  const runTick = useCallback(
+    async (manual: boolean) => {
+      if (tickingRef.current) return
+      tickingRef.current = true
+      try {
+        const res = await pb.send('/backend/v1/admin/dispatch/tick', { method: 'POST' })
+        if (manual) {
+          if (res.ran && res.sg_ok) {
+            toast({
+              title: 'Lote enviado',
+              description: `${res.batch} e-mail(s) aceitos pelo SendGrid.`,
+            })
+          } else if (res.reason === 'fila_vazia') {
+            toast({ title: 'Fila vazia', description: 'Nada para processar agora.' })
+          } else if (res.reason === 'sendgrid_falhou') {
+            toast({
+              title: 'SendGrid recusou o envio',
+              description: `HTTP ${res.sg_status}: ${res.sg_error || 'sem detalhe'}`,
+              variant: 'destructive',
+            })
+          } else {
+            toast({
+              title: 'Não processou',
+              description: res.reason + (res.error ? ': ' + res.error : ''),
+              variant: 'destructive',
+            })
+          }
+        }
+        loadDisparos()
+      } catch (e: any) {
+        if (manual) toast({ title: 'Erro', description: e.message, variant: 'destructive' })
+      } finally {
+        tickingRef.current = false
+      }
+    },
+    [toast, loadDisparos],
+  )
+
+  const hasActive = disparos.some((d) => d.status === 'em_andamento')
+  useEffect(() => {
+    if (!hasActive) return
+    runTick(false)
+    const iv = setInterval(() => runTick(false), 4000)
+    return () => clearInterval(iv)
+  }, [hasActive, runTick])
 
   const templateName = templates.find((t) => t.id === templateId)?.name || templateId
 
@@ -231,7 +280,12 @@ export default function AdminDispatch() {
 
       {/* Histórico de disparos (ao vivo via realtime) */}
       <div>
-        <h3 className="text-lg font-semibold mb-3">Histórico de disparos</h3>
+        <div className="flex items-center justify-between mb-3 gap-3">
+          <h3 className="text-lg font-semibold">Histórico de disparos</h3>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => runTick(true)}>
+            <PlayCircle className="w-4 h-4" /> Processar fila agora
+          </Button>
+        </div>
         {disparos.length === 0 ? (
           <div className="text-center py-12 bg-muted/30 rounded-xl border border-dashed text-muted-foreground">
             <Inbox className="w-8 h-8 mx-auto mb-2 opacity-50" />
