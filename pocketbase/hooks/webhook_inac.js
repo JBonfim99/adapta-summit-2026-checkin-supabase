@@ -10,8 +10,7 @@
 //   - timeout de 10s por tentativa
 //   - espera de 2s entre as tentativas
 //   - cada tentativa é gravada em Logs
-//   - o erro NUNCA é exibido ao usuário: o disparo roda após o commit, então a
-//     resposta de sucesso já foi enviada. Só fica registrado nos logs.
+//   - o erro NUNCA é exibido ao usuário (o disparo roda após o commit).
 //
 // OBS: no JSVM do PocketBase os callbacks rodam em VMs separadas, então toda a
 // lógica está inline em cada callback.
@@ -30,6 +29,22 @@ onRecordAfterCreateSuccess((e) => {
     $app.save(ingresso)
     e.next()
     return
+  }
+
+  // Lê o corpo da resposta de forma defensiva (pode vir como string, bytes,
+  // TypedArray ou array de bytes dependendo do runtime).
+  const decodeBody = (body) => {
+    if (body == null) return ''
+    if (typeof body === 'string') return body
+    try {
+      return new TextDecoder().decode(body)
+    } catch (_) {}
+    try {
+      let s = ''
+      for (let i = 0; i < body.length; i++) s += String.fromCharCode(body[i])
+      return s
+    } catch (_) {}
+    return ''
   }
 
   const payload = {
@@ -59,7 +74,7 @@ onRecordAfterCreateSuccess((e) => {
         timeout: 10,
       })
       status = res.statusCode
-      respBody = res.body ? new TextDecoder().decode(res.body) : ''
+      respBody = decodeBody(res.body)
     } catch (err) {
       erroMsg = err.message
     }
@@ -112,6 +127,20 @@ routerAdd(
   (e) => {
     const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL')
 
+    const decodeBody = (body) => {
+      if (body == null) return ''
+      if (typeof body === 'string') return body
+      try {
+        return new TextDecoder().decode(body)
+      } catch (_) {}
+      try {
+        let s = ''
+        for (let i = 0; i < body.length; i++) s += String.fromCharCode(body[i])
+        return s
+      } catch (_) {}
+      return ''
+    }
+
     try {
       const id = e.request.pathValue('ingressoId')
       const ingresso = $app.findRecordById('ingressos', id)
@@ -146,7 +175,7 @@ routerAdd(
           timeout: 10,
         })
         status = res.statusCode
-        respBody = res.body ? new TextDecoder().decode(res.body) : ''
+        respBody = decodeBody(res.body)
       } catch (err) {
         erroMsg = err.message
       }

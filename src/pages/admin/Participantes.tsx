@@ -98,7 +98,7 @@ export default function AdminParticipants() {
 
       const csvContent = [
         [
-          'Pedido',
+          'ID do Ingresso',
           'Tipo',
           'Comprador Email',
           'Participante Nome',
@@ -224,7 +224,6 @@ export default function AdminParticipants() {
                 <TableHead>Ingresso / Pedido</TableHead>
                 <TableHead>Comprador</TableHead>
                 <TableHead>Participante</TableHead>
-                <TableHead>Empresa / Cargo</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
@@ -243,9 +242,6 @@ export default function AdminParticipants() {
                       <Skeleton className="h-8 w-32" />
                     </TableCell>
                     <TableCell>
-                      <Skeleton className="h-8 w-32" />
-                    </TableCell>
-                    <TableCell>
                       <Skeleton className="h-6 w-24" />
                     </TableCell>
                     <TableCell className="text-right">
@@ -255,7 +251,7 @@ export default function AdminParticipants() {
                 ))
               ) : data.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                     Nenhum registro encontrado.
                   </TableCell>
                 </TableRow>
@@ -279,18 +275,6 @@ export default function AdminParticipants() {
                         </div>
                       ) : (
                         <span className="text-muted-foreground text-sm italic">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {row.expand?.participante_id ? (
-                        <div>
-                          <div className="text-sm">{row.expand.participante_id.nome_empresa}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {row.expand.participante_id.cargo}
-                          </div>
-                        </div>
-                      ) : (
-                        '-'
                       )}
                     </TableCell>
                     <TableCell>
