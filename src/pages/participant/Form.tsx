@@ -146,9 +146,24 @@ export default function ParticipantForm() {
   const onSubmit = async (data: FormValues) => {
     setSubmitting(true)
     try {
+      const payload = {
+        token,
+        nome_completo: data.nome_completo || '',
+        email: data.email || '',
+        cpf: data.cpf || '',
+        telefone: data.telefone || '',
+        nome_empresa: data.nome_empresa || '',
+        cargo: data.cargo || '',
+        nicho: data.nicho || '',
+        num_funcionarios: data.num_funcionarios || '',
+        faturamento_anual: data.faturamento_anual || '',
+        areas_ajuda: data.areas_ajuda || [],
+        expectativa_aprendizado: data.expectativa_aprendizado || '',
+        expectativa_experiencia: data.expectativa_experiencia || '',
+      }
       await pb.send('/backend/v1/participant/submit', {
         method: 'POST',
-        body: JSON.stringify({ token, ...data }),
+        body: JSON.stringify(payload),
       })
       toast({ title: 'Dados salvos com sucesso!' })
       navigate('/participante/obrigado')
@@ -303,8 +318,9 @@ export default function ParticipantForm() {
                               control={methods.control}
                               name="areas_ajuda"
                               render={({ field }) => {
-                                const isChecked = field.value?.includes(item)
-                                const isAtLimit = field.value?.length >= 2 && !isChecked
+                                const currentValues = field.value || []
+                                const isChecked = currentValues.includes(item)
+                                const isAtLimit = currentValues.length >= 2 && !isChecked
 
                                 return (
                                   <FormItem
@@ -316,9 +332,11 @@ export default function ParticipantForm() {
                                         disabled={isAtLimit}
                                         onCheckedChange={(checked) => {
                                           return checked
-                                            ? field.onChange([...field.value, item])
+                                            ? field.onChange([...currentValues, item])
                                             : field.onChange(
-                                                field.value?.filter((value) => value !== item),
+                                                currentValues.filter(
+                                                  (value: string) => value !== item,
+                                                ),
                                               )
                                         }}
                                       />
