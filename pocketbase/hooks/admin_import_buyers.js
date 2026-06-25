@@ -11,6 +11,28 @@ routerAdd(
       const ingressosCollection = txApp.findCollectionByNameOrId('ingressos')
       const linksCollection = txApp.findCollectionByNameOrId('links_participante')
 
+      // Gera um pedido_id numérico de 6 dígitos, único (checa o banco + os já
+      // gerados nesta importação, e regenera em caso de colisão).
+      const usedPedidoIds = {}
+      const genPedidoId = () => {
+        for (let attempt = 0; attempt < 50; attempt++) {
+          const candidate = String(Math.floor(100000 + Math.random() * 900000))
+          if (usedPedidoIds[candidate]) continue
+          let exists = false
+          try {
+            txApp.findFirstRecordByData('ingressos', 'pedido_id', candidate)
+            exists = true
+          } catch (_) {
+            exists = false
+          }
+          if (!exists) {
+            usedPedidoIds[candidate] = true
+            return candidate
+          }
+        }
+        throw new Error('Falha ao gerar pedido_id único após várias tentativas')
+      }
+
       // Dedup do comprador por EMAIL (índice único em compradores.email).
       const groups = {}
       for (const row of rows) {
@@ -29,7 +51,6 @@ routerAdd(
             qtd_platinum: 0,
           }
         }
-        // Mantém o primeiro documento não-vazio visto para este email.
         if (!groups[email].documento && doc) groups[email].documento = doc
         groups[email].qtd_gold += parseInt(row.qtd_gold || '0', 10) || 0
         groups[email].qtd_platinum += parseInt(row.qtd_platinum || '0', 10) || 0
@@ -57,27 +78,10 @@ routerAdd(
           txApp.save(comprador)
         }
 
-        // Prefixo do pedido: documento quando houver, senão o próprio email.
-        const prefix = data.documento || email
-
-        let currentSeq = 0
-        try {
-          const existing = txApp.findRecordsByFilter(
-            'ingressos',
-            `comprador_id = '${comprador.id}'`,
-            '',
-            1000,
-            0,
-          )
-          currentSeq = existing.length
-        } catch (_) {}
-
         for (let i = 0; i < data.qtd_gold; i++) {
-          currentSeq++
-          const seqStr = String(currentSeq).padStart(2, '0')
           const ingresso = new Record(ingressosCollection)
           ingresso.set('comprador_id', comprador.id)
-          ingresso.set('pedido_id', `${prefix}-${seqStr}`)
+          ingresso.set('pedido_id', genPedidoId())
           ingresso.set('tipo_ingresso', 'GOLD')
           ingresso.set('status', 'Pendente')
           ingresso.set('status_webhook', 'pendente')
@@ -95,11 +99,9 @@ routerAdd(
         }
 
         for (let i = 0; i < data.qtd_platinum; i++) {
-          currentSeq++
-          const seqStr = String(currentSeq).padStart(2, '0')
           const ingresso = new Record(ingressosCollection)
           ingresso.set('comprador_id', comprador.id)
-          ingresso.set('pedido_id', `${prefix}-${seqStr}`)
+          ingresso.set('pedido_id', genPedidoId())
           ingresso.set('tipo_ingresso', 'PLATINUM')
           ingresso.set('status', 'Pendente')
           ingresso.set('status_webhook', 'pendente')
