@@ -1,92 +1,60 @@
+routerAdd('GET', '/backend/v1/participant/link/{token}', (e) => {
+  const token = e.request.pathValue('token')
+  try {
+    const link = $app.findFirstRecordByData('links_participante', 'token', token)
+    if (link.getBool('usado') || new Date(link.getString('expira_em')) < new Date()) {
+      return e.badRequestError('Link inválido ou expirado')
+    }
+    const ingresso = $app.findRecordById('ingressos', link.getString('ingresso_id'))
+    return e.json(200, {
+      ingresso_id: ingresso.id,
+      tipo_ingresso: ingresso.getString('tipo_ingresso'),
+    })
+  } catch (err) {
+    return e.badRequestError('Link não encontrado')
+  }
+})
+
 routerAdd('POST', '/backend/v1/participant/submit', (e) => {
   const body = e.requestInfo().body
   const token = body.token
 
-  if (!token) return e.badRequestError('Missing token')
-
-  let link
   try {
-    link = $app.findFirstRecordByFilter('links_participante', 'token = {:t} && usado = false', {
-      t: token,
-    })
-  } catch (err) {
-    return e.badRequestError('Token inválido ou já usado')
-  }
-
-  const ticketId = link.getString('ingresso_id')
-  let ticket
-  try {
-    ticket = $app.findRecordById('ingressos', ticketId)
-  } catch (err) {
-    return e.badRequestError('Ingresso não encontrado')
-  }
-
-  $app.runInTransaction((txApp) => {
-    let p
-    const pId = ticket.getString('participante_id')
-    if (pId) {
-      try {
-        p = txApp.findRecordById('participantes', pId)
-      } catch (err) {}
+    const link = $app.findFirstRecordByData('links_participante', 'token', token)
+    if (link.getBool('usado') || new Date(link.getString('expira_em')) < new Date()) {
+      return e.badRequestError('Link inválido ou expirado')
     }
 
-    if (!p) {
-      const participantes = txApp.findCollectionByNameOrId('participantes')
-      p = new Record(participantes)
-    }
+    const ingresso = $app.findRecordById('ingressos', link.getString('ingresso_id'))
 
-    p.set('nome_completo', body.nome_completo || '')
-    p.set('email', body.email || '')
-    p.set('cpf', body.cpf || '')
-    p.set('telefone', body.telefone || '')
-    p.set('nome_empresa', body.nome_empresa || '')
-    p.set('cargo', body.cargo || '')
-    p.set('nicho', body.nicho || '')
-    p.set('num_funcionarios', body.num_funcionarios || '')
-    p.set('faturamento_anual', body.faturamento_anual || '')
-    p.set('areas_ajuda', body.areas_ajuda || [])
-    p.set('expectativa_aprendizado', body.expectativa_aprendizado || '')
-    p.set('expectativa_experiencia', body.expectativa_experiencia || '')
-    p.set('ingresso_id', ticketId)
+    const partColl = $app.findCollectionByNameOrId('participantes')
+    const part = new Record(partColl)
+    part.set('ingresso_id', ingresso.id)
+    part.set('nome_completo', body.nome_completo)
+    part.set('email', body.email)
+    part.set('cpf', body.cpf)
+    part.set('telefone', body.telefone)
+    part.set('nome_empresa', body.nome_empresa)
+    part.set('cargo', body.cargo)
+    part.set('nicho', body.nicho)
+    part.set('num_funcionarios', body.num_funcionarios)
+    part.set('faturamento_anual', body.faturamento_anual)
+    part.set('areas_ajuda', body.areas_ajuda || [])
+    part.set('expectativa_aprendizado', body.expectativa_aprendizado)
+    part.set('expectativa_experiencia', body.expectativa_experiencia)
 
-    txApp.save(p)
+    $app.save(part)
 
-    ticket.set('participante_id', p.id)
-    if (ticket.getString('status') === 'pendente') {
-      ticket.set('status', 'preenchido')
-      ticket.set('preenchido_em', new Date().toISOString())
-    }
-    txApp.save(ticket)
+    ingresso.set('participante_id', part.id)
+    ingresso.set('status', 'Pré-Credenciado')
+    ingresso.set('preenchido_em', new Date().toISOString())
+    $app.save(ingresso)
 
     link.set('usado', true)
-    txApp.save(link)
-  })
+    $app.save(link)
 
-  return e.json(200, { success: true })
-})
-
-routerAdd('GET', '/backend/v1/participant/link/{token}', (e) => {
-  const token = e.request.pathValue('token')
-  let link
-  try {
-    link = $app.findFirstRecordByFilter(
-      'links_participante',
-      'token = {:t} && usado = false && expira_em > {:now}',
-      { t: token, now: new Date().toISOString() },
-    )
+    return e.json(200, { success: true })
   } catch (err) {
-    return e.badRequestError('Token inválido ou expirado')
+    return e.badRequestError(err.message)
   }
-
-  let ticket
-  try {
-    ticket = $app.findRecordById('ingressos', link.getString('ingresso_id'))
-  } catch (err) {
-    return e.badRequestError('Ingresso não encontrado')
-  }
-
-  return e.json(200, {
-    tipo_ingresso: ticket.getString('tipo_ingresso'),
-    pedido_id: ticket.getString('pedido_id'),
-  })
 })

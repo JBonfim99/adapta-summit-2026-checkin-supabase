@@ -41,7 +41,7 @@ export default function AdminWebhooks() {
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
-        <h2 className="text-2xl font-bold">Logs de Sincronização (INAC)</h2>
+        <h2 className="text-2xl font-bold">Logs</h2>
         <p className="text-muted-foreground">
           Monitore o envio de dados para a API externa de credenciais.
         </p>

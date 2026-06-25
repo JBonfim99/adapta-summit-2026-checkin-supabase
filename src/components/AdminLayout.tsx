@@ -15,7 +15,7 @@ export function AdminLayout() {
     { name: 'Importar', path: '/admin/importar', icon: Upload },
     { name: 'Compradores', path: '/admin/compradores', icon: ShoppingBag },
     { name: 'Participantes', path: '/admin/participantes', icon: Users },
-    { name: 'Envios (INAC)', path: '/admin/envios', icon: Send },
+    { name: 'Logs', path: '/admin/envios', icon: Send },
   ]
 
   return (

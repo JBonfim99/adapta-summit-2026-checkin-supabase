@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Plus, Pencil, Trash2, Ticket as TicketIcon } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, Ticket as TicketIcon, Download } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
 import { BuyerTicketsSheet } from '@/components/admin/BuyerTicketsSheet'
@@ -42,6 +42,13 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -58,6 +65,10 @@ export default function AdminCompradores() {
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const limit = 10
+
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
@@ -67,10 +78,7 @@ export default function AdminCompradores() {
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
-    defaultValues: {
-      nome: '',
-      email: '',
-    },
+    defaultValues: { nome: '', email: '' },
   })
 
   const loadCounts = () => {
@@ -88,10 +96,14 @@ export default function AdminCompradores() {
 
   const loadData = () => {
     setLoading(true)
+    const filterStr = search
+      ? `nome ~ "${search.replace(/"/g, '')}" || email ~ "${search.replace(/"/g, '')}"`
+      : ''
     pb.collection('compradores')
-      .getFullList({ sort: '-created' })
+      .getList(page, limit, { sort: '-created', filter: filterStr })
       .then((res) => {
-        setData(res)
+        setData(res.items)
+        setTotalPages(res.totalPages || 1)
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -99,21 +111,14 @@ export default function AdminCompradores() {
 
   useEffect(() => {
     loadData()
+  }, [page, search])
+
+  useEffect(() => {
     loadCounts()
   }, [])
 
-  useRealtime('compradores', () => {
-    loadData()
-  })
-
-  useRealtime('ingressos', () => {
-    loadCounts()
-  })
-
-  const filteredData = data.filter((item) => {
-    const term = search.toLowerCase()
-    return item.nome.toLowerCase().includes(term) || item.email.toLowerCase().includes(term)
-  })
+  useRealtime('compradores', () => loadData())
+  useRealtime('ingressos', () => loadCounts())
 
   const handleOpenCreate = () => {
     setEditingId(null)
@@ -137,6 +142,7 @@ export default function AdminCompradores() {
         toast({ title: 'Comprador criado com sucesso!' })
       }
       setDialogOpen(false)
+      loadData()
     } catch (err: any) {
       const fieldErrors = extractFieldErrors(err)
       if (Object.keys(fieldErrors).length > 0) {
@@ -144,11 +150,7 @@ export default function AdminCompradores() {
           form.setError(field as any, { message: fieldErrors[field] })
         })
       } else {
-        toast({
-          title: 'Erro ao salvar',
-          description: err.message || 'Verifique se o e-mail já está em uso.',
-          variant: 'destructive',
-        })
+        toast({ title: 'Erro ao salvar', description: err.message, variant: 'destructive' })
       }
     }
   }
@@ -156,21 +158,62 @@ export default function AdminCompradores() {
   const handleDelete = async () => {
     if (!deleteId) return
     try {
+      const tickets = await pb
+        .collection('ingressos')
+        .getFullList({ filter: `comprador_id="${deleteId}" && status="Pré-Credenciado"` })
+      if (tickets.length > 0) {
+        toast({
+          title: 'Ação Bloqueada',
+          description: 'Não é possível remover compradores com ingressos Pré-Credenciados.',
+          variant: 'destructive',
+        })
+        setDeleteId(null)
+        return
+      }
       await pb.collection('compradores').delete(deleteId)
       toast({ title: 'Comprador removido com sucesso!' })
+      if (data.length === 1 && page > 1) setPage(page - 1)
+      else loadData()
     } catch (err: any) {
-      toast({
-        title: 'Erro ao remover',
-        description: err.message || 'Verifique se não há ingressos vinculados.',
-        variant: 'destructive',
-      })
+      toast({ title: 'Erro ao remover', description: err.message, variant: 'destructive' })
     } finally {
       setDeleteId(null)
     }
   }
 
+  const handleExportCSV = async () => {
+    try {
+      const filterStr = search
+        ? `nome ~ "${search.replace(/"/g, '')}" || email ~ "${search.replace(/"/g, '')}"`
+        : ''
+      const allBuyers = await pb
+        .collection('compradores')
+        .getFullList({ filter: filterStr, sort: '-created' })
+
+      const csvContent = [
+        ['Nome', 'Email', 'Data de Criação', 'Qtd. Ingressos'],
+        ...allBuyers.map((b) => [
+          `"${b.nome}"`,
+          `"${b.email}"`,
+          `"${format(new Date(b.created), 'dd/MM/yyyy HH:mm')}"`,
+          ingressosCount[b.id] || 0,
+        ]),
+      ]
+        .map((e) => e.join(','))
+        .join('\n')
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = 'compradores.csv'
+      link.click()
+    } catch (e: any) {
+      toast({ title: 'Erro ao exportar', description: e.message, variant: 'destructive' })
+    }
+  }
+
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in pb-12">
       <div className="flex flex-col sm:flex-row justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold">Gestão de Compradores</h2>
@@ -179,6 +222,9 @@ export default function AdminCompradores() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" className="gap-2" onClick={handleExportCSV}>
+            <Download className="w-4 h-4" /> Exportar CSV
+          </Button>
           <Button className="bg-primary gap-2" onClick={handleOpenCreate}>
             <Plus className="w-4 h-4" /> Novo Comprador
           </Button>
@@ -192,68 +238,100 @@ export default function AdminCompradores() {
             placeholder="Buscar por nome ou email..."
             className="pl-9 bg-white"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setPage(1)
+            }}
           />
         </div>
       </div>
 
-      <div className="border rounded-xl bg-white overflow-hidden shadow-sm">
-        <Table>
-          <TableHeader className="bg-slate-50">
-            <TableRow>
-              <TableHead>Nome</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Data de Criação</TableHead>
-              <TableHead className="text-center">Qtd. Ingressos</TableHead>
-              <TableHead className="text-right">Ações</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading && (
+      <div className="border rounded-xl bg-white overflow-hidden shadow-sm flex flex-col">
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader className="bg-slate-50">
               <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
-                  Carregando...
-                </TableCell>
+                <TableHead>Nome</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Data de Criação</TableHead>
+                <TableHead className="text-center">Qtd. Ingressos</TableHead>
+                <TableHead className="text-right">Ações</TableHead>
               </TableRow>
-            )}
-            {!loading &&
-              filteredData.map((row) => (
-                <TableRow key={row.id}>
-                  <TableCell className="font-medium">{row.nome}</TableCell>
-                  <TableCell>{row.email}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {format(new Date(row.created), 'dd/MM/yyyy HH:mm')}
-                  </TableCell>
-                  <TableCell className="text-center font-medium">
-                    {ingressosCount[row.id] || 0}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      title="Ver Ingressos"
-                      onClick={() => setSelectedBuyer(row)}
-                    >
-                      <TicketIcon className="w-4 h-4 text-indigo-500" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleOpenEdit(row)}>
-                      <Pencil className="w-4 h-4 text-slate-500" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => setDeleteId(row.id)}>
-                      <Trash2 className="w-4 h-4 text-rose-500" />
-                    </Button>
+            </TableHeader>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    Carregando...
                   </TableCell>
                 </TableRow>
-              ))}
-            {!loading && filteredData.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                  Nenhum registro encontrado.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
+              ) : data.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    Nenhum registro encontrado.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                data.map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-medium">{row.nome}</TableCell>
+                    <TableCell>{row.email}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {format(new Date(row.created), 'dd/MM/yyyy HH:mm')}
+                    </TableCell>
+                    <TableCell className="text-center font-medium">
+                      {ingressosCount[row.id] || 0}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Ver Ingressos"
+                        onClick={() => setSelectedBuyer(row)}
+                      >
+                        <TicketIcon className="w-4 h-4 text-indigo-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleOpenEdit(row)}>
+                        <Pencil className="w-4 h-4 text-slate-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => setDeleteId(row.id)}>
+                        <Trash2 className="w-4 h-4 text-rose-500" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
+
+        {!loading && totalPages > 1 && (
+          <div className="py-4 border-t px-4 bg-slate-50/50 flex justify-end">
+            <Pagination className="mx-0 w-auto">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className={page === 1 ? 'pointer-events-none opacity-50' : 'cursor-pointer'}
+                  />
+                </PaginationItem>
+                <PaginationItem>
+                  <span className="text-sm text-muted-foreground px-4">
+                    Página {page} de {totalPages}
+                  </span>
+                </PaginationItem>
+                <PaginationItem>
+                  <PaginationNext
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    className={
+                      page === totalPages ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+                    }
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          </div>
+        )}
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -306,8 +384,7 @@ export default function AdminCompradores() {
           <AlertDialogHeader>
             <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente o comprador e seus
-              dados do servidor.
+              Esta ação não pode ser desfeita. Isso excluirá permanentemente o comprador.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -325,7 +402,7 @@ export default function AdminCompradores() {
       <BuyerTicketsSheet
         buyer={selectedBuyer}
         open={!!selectedBuyer}
-        onOpenChange={(val) => !val && setSelectedBuyer(null)}
+        onOpenChange={(val: boolean) => !val && setSelectedBuyer(null)}
       />
     </div>
   )

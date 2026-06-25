@@ -29,8 +29,8 @@ routerAdd(
         const ing = new Record(ingColl)
         ing.set('comprador_id', comp.id)
         ing.set('pedido_id', row.pedido_id)
-        ing.set('tipo_ingresso', row.tipo_ingresso || 'Standard')
-        ing.set('status', 'pendente')
+        ing.set('tipo_ingresso', row.tipo_ingresso || 'GOLD')
+        ing.set('status', 'Pendente')
         $app.save(ing)
         count++
       }
@@ -58,18 +58,18 @@ routerAdd(
       for (const ing of ingressos) {
         const st = ing.getString('status')
         const type = ing.getString('tipo_ingresso')
-        if (st === 'pendente') pendentes++
-        else if (st === 'preenchido') preenchidos++
+        if (st === 'Pendente' || st === 'pendente') pendentes++
+        else if (st === 'Pré-Credenciado' || st === 'preenchido') preenchidos++
         else if (st === 'enviado') enviados++
         else if (st === 'erro_webhook') erros++
 
-        if (type === 'VIP') {
+        if (type === 'PLATINUM' || type === 'VIP') {
           vip.total++
-          if (st === 'pendente') vip.pendentes++
+          if (st === 'Pendente' || st === 'pendente') vip.pendentes++
           else vip.preenchidos++
         } else {
           standard.total++
-          if (st === 'pendente') standard.pendentes++
+          if (st === 'Pendente' || st === 'pendente') standard.pendentes++
           else standard.preenchidos++
         }
       }

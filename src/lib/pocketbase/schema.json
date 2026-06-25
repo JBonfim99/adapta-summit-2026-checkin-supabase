@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-25T01:07:28.295Z",
+  "generatedAt": "2026-06-25T16:00:51.363Z",
   "collections": [
     {
       "name": "users",
@@ -216,17 +216,11 @@
           "system": false
         },
         {
-          "name": "tipo_ingresso",
-          "type": "text",
-          "required": true,
-          "system": false
-        },
-        {
           "name": "status",
           "type": "select",
           "required": true,
           "system": false,
-          "selectValues": ["pendente", "preenchido", "enviado", "erro_webhook"]
+          "selectValues": ["Pendente", "Pré-Credenciado", "enviado", "erro_webhook"]
         },
         {
           "name": "participante_id",
@@ -254,6 +248,13 @@
           "required": false,
           "system": false,
           "autodateTriggers": ["onCreate", "onUpdate"]
+        },
+        {
+          "name": "tipo_ingresso",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": ["GOLD", "PLATINUM"]
         }
       ],
       "indexes": []
