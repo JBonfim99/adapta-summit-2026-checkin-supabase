@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-25T20:28:25.512Z",
+  "generatedAt": "2026-06-25T20:36:41.020Z",
   "collections": [
     {
       "name": "users",
@@ -499,6 +499,24 @@
             "onCreate",
             "onUpdate"
           ]
+        },
+        {
+          "name": "evento",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "detalhe",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "payload",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": []

@@ -22,7 +22,7 @@ import AdminDashboard from '@/pages/admin/Dashboard'
 import AdminImport from '@/pages/admin/Importar'
 import AdminCompradores from '@/pages/admin/Compradores'
 import AdminParticipants from '@/pages/admin/Participantes'
-import AdminWebhooks from '@/pages/admin/Envios'
+import AdminLogs from '@/pages/admin/Logs'
 
 function PreCredenciamentoRedirect() {
   const { token } = useParams()
@@ -105,7 +105,8 @@ const App = () => (
               <Route path="importar" element={<AdminImport />} />
               <Route path="compradores" element={<AdminCompradores />} />
               <Route path="participantes" element={<AdminParticipants />} />
-              <Route path="envios" element={<AdminWebhooks />} />
+              <Route path="logs" element={<AdminLogs />} />
+              <Route path="envios" element={<Navigate to="/admin/logs" replace />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

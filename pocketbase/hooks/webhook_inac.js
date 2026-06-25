@@ -2,20 +2,30 @@
 // Integração com o INAC (entrega de pré-credenciamento p/ geração de QR Code).
 //
 // A URL de disparo vem da env var INAC_WEBHOOK_URL (Skip > Environment).
-// Sem autenticação. Enquanto a env estiver vazia, nada é enviado e o ingresso
-// fica com status_webhook = 'pendente' (dá pra reenviar pela tela de Envios).
+// Sem autenticação. Sem URL configurada, nada é enviado, NENHUM log é criado,
+// e o ingresso fica com status_webhook = 'pendente' (dá pra reenviar depois).
 //
-// OBS: no JSVM do PocketBase os callbacks rodam em VMs separadas, então NÃO dá
-// pra usar funções/constantes declaradas no topo do arquivo dentro deles. Por
-// isso toda a lógica está inline em cada callback.
+// Regra dos logs: um log só é gravado quando o webhook é EFETIVAMENTE disparado
+// (após o participante finalizar). Cada log descreve um evento com detalhe.
+//
+// OBS: no JSVM do PocketBase os callbacks rodam em VMs separadas, então toda a
+// lógica está inline em cada callback (nada de função no topo do arquivo).
 // ---------------------------------------------------------------------------
 
-// Dispara automaticamente quando um participante é criado (após o submit).
+// Dispara automaticamente quando um participante é criado (após "Finalizar").
 onRecordAfterCreateSuccess((e) => {
   const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL')
 
   const part = e.record
   const ingresso = $app.findRecordById('ingressos', part.getString('ingresso_id'))
+
+  // Sem URL: não dispara e não loga. Só deixa pendente para reenvio futuro.
+  if (!INAC_WEBHOOK_URL) {
+    ingresso.set('status_webhook', 'pendente')
+    $app.save(ingresso)
+    e.next()
+    return
+  }
 
   const payload = {
     nome_completo: part.getString('nome_completo'),
@@ -28,46 +38,50 @@ onRecordAfterCreateSuccess((e) => {
   }
 
   let status = 0
-  let body = ''
-  if (!INAC_WEBHOOK_URL) {
-    body = 'INAC_WEBHOOK_URL não configurada — envio ignorado'
-  } else {
-    try {
-      const res = $http.send({
-        url: INAC_WEBHOOK_URL,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        timeout: 10,
-      })
-      status = res.statusCode
-      body = res.body ? new TextDecoder().decode(res.body) : ''
-    } catch (err) {
-      status = 0
-      body = err.message
-    }
+  let respBody = ''
+  let erroMsg = ''
+  try {
+    const res = $http.send({
+      url: INAC_WEBHOOK_URL,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      timeout: 10,
+    })
+    status = res.statusCode
+    respBody = res.body ? new TextDecoder().decode(res.body) : ''
+  } catch (err) {
+    erroMsg = err.message
   }
 
+  const ok = status >= 200 && status < 300
+
+  // Log do evento — só aqui, porque o webhook foi efetivamente disparado.
   const logColl = $app.findCollectionByNameOrId('webhooks_log')
   const log = new Record(logColl)
   log.set('ingresso_id', ingresso.id)
+  log.set('evento', ok ? 'webhook_enviado' : 'webhook_erro')
+  log.set(
+    'detalhe',
+    ok
+      ? `Webhook enviado ao INAC após finalização (HTTP ${status})`
+      : erroMsg
+        ? `Falha de rede ao enviar webhook: ${erroMsg}`
+        : `INAC respondeu com erro (HTTP ${status})`,
+  )
   log.set('status', status)
   log.set('method', 'POST')
-  log.set('response', (body || '').substring(0, 500))
+  log.set('payload', JSON.stringify(payload))
+  log.set('response', (respBody || erroMsg || '').substring(0, 500))
   $app.save(log)
 
-  let statusWebhook
-  if (status >= 200 && status < 300) statusWebhook = 'enviado'
-  else if (status === 0) statusWebhook = 'pendente'
-  else statusWebhook = 'erro'
-
-  ingresso.set('status_webhook', statusWebhook)
+  ingresso.set('status_webhook', ok ? 'enviado' : 'erro')
   $app.save(ingresso)
 
   e.next()
 }, 'participantes')
 
-// Reenvio manual a partir da tela de Envios.
+// Reenvio manual a partir da tela de Logs.
 routerAdd(
   'POST',
   '/backend/v1/admin/retry-webhook/{ingressoId}',
@@ -79,6 +93,10 @@ routerAdd(
       const ingresso = $app.findRecordById('ingressos', id)
       const partId = ingresso.getString('participante_id')
       if (!partId) return e.badRequestError('Ingresso sem participante')
+
+      if (!INAC_WEBHOOK_URL) {
+        return e.badRequestError('INAC_WEBHOOK_URL não configurada')
+      }
 
       const part = $app.findRecordById('participantes', partId)
 
@@ -93,46 +111,49 @@ routerAdd(
       }
 
       let status = 0
-      let body = ''
-      if (!INAC_WEBHOOK_URL) {
-        body = 'INAC_WEBHOOK_URL não configurada — envio ignorado'
-      } else {
-        try {
-          const res = $http.send({
-            url: INAC_WEBHOOK_URL,
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            timeout: 10,
-          })
-          status = res.statusCode
-          body = res.body ? new TextDecoder().decode(res.body) : ''
-        } catch (err) {
-          status = 0
-          body = err.message
-        }
+      let respBody = ''
+      let erroMsg = ''
+      try {
+        const res = $http.send({
+          url: INAC_WEBHOOK_URL,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          timeout: 10,
+        })
+        status = res.statusCode
+        respBody = res.body ? new TextDecoder().decode(res.body) : ''
+      } catch (err) {
+        erroMsg = err.message
       }
+
+      const ok = status >= 200 && status < 300
 
       const logColl = $app.findCollectionByNameOrId('webhooks_log')
       const log = new Record(logColl)
       log.set('ingresso_id', ingresso.id)
+      log.set('evento', ok ? 'webhook_reenviado' : 'webhook_reenvio_erro')
+      log.set(
+        'detalhe',
+        ok
+          ? `Reenvio manual bem-sucedido (HTTP ${status})`
+          : erroMsg
+            ? `Falha de rede no reenvio manual: ${erroMsg}`
+            : `INAC respondeu com erro no reenvio (HTTP ${status})`,
+      )
       log.set('status', status)
       log.set('method', 'POST')
-      log.set('response', (body || '').substring(0, 500))
+      log.set('payload', JSON.stringify(payload))
+      log.set('response', (respBody || erroMsg || '').substring(0, 500))
       $app.save(log)
 
-      let statusWebhook
-      if (status >= 200 && status < 300) statusWebhook = 'enviado'
-      else if (status === 0) statusWebhook = 'pendente'
-      else statusWebhook = 'erro'
-
-      ingresso.set('status_webhook', statusWebhook)
+      ingresso.set('status_webhook', ok ? 'enviado' : 'erro')
       $app.save(ingresso)
 
-      if (status >= 200 && status < 300) {
+      if (ok) {
         return e.json(200, { success: true })
       }
-      return e.json(502, { success: false, status: status, error: body })
+      return e.json(502, { success: false, status: status, error: respBody || erroMsg })
     } catch (err) {
       return e.badRequestError(err.message)
     }
