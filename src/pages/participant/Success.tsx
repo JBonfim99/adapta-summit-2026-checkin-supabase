@@ -1,7 +1,13 @@
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, Ticket } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { useNavigate } from 'react-router-dom'
+import { useApp } from '@/contexts/app-context'
 
 export default function ParticipantSuccess() {
+  const navigate = useNavigate()
+  const { buyer } = useApp()
+
   return (
     <div className="flex items-center justify-center min-h-[70vh]">
       <Card className="w-full max-w-lg animate-fade-in-up text-center border-none shadow-elevation p-6">
@@ -31,6 +37,12 @@ export default function ParticipantSuccess() {
               </li>
             </ul>
           </div>
+
+          {buyer && (
+            <Button className="bg-primary gap-2 mt-2" onClick={() => navigate('/meus-ingressos')}>
+              <Ticket className="w-4 h-4" /> Ver Meus Ingressos
+            </Button>
+          )}
         </CardHeader>
       </Card>
     </div>
