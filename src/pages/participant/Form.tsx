@@ -126,7 +126,20 @@ export default function ParticipantForm() {
 
   const methods = useForm<FormValues>({
     resolver: zodResolver(formSchema),
-    defaultValues: { areas_ajuda: [] },
+    defaultValues: {
+      nome_completo: '',
+      email: '',
+      cpf: '',
+      telefone: '',
+      nome_empresa: '',
+      cargo: '',
+      nicho: '',
+      num_funcionarios: '',
+      faturamento_anual: '',
+      areas_ajuda: [],
+      expectativa_aprendizado: '',
+      expectativa_experiencia: '',
+    },
     mode: 'onTouched',
   })
 

@@ -48,7 +48,7 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
 
       ingresso.set('participante_id', part.id)
       ingresso.set('status', 'Pré-Credenciado')
-      ingresso.set('preenchido_em', new Date().toISOString().replace('T', ' '))
+      ingresso.set('preenchido_em', new Date().toISOString())
       txApp.save(ingresso)
 
       link.set('usado', true)
