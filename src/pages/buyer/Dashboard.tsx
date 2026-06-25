@@ -33,12 +33,11 @@ export default function BuyerDashboard() {
         headers: { Authorization: `Bearer ${buyer.token}` },
       })
 
-      const formatted = (data.items || []).map((t: any, index: number) => {
-        const doc = t.expand?.comprador_id?.documento || buyer.documento || '00000000000'
+      const formatted = (data.items || []).map((t: any) => {
         return {
           id: t.id,
           pedido_id: t.pedido_id,
-          displayId: `${doc}-${(index + 1).toString().padStart(2, '0')}`,
+          displayId: t.pedido_id,
           type: t.tipo_ingresso,
           status: t.status,
           participantName: t.expand?.participante_id?.nome_completo,
@@ -99,7 +98,7 @@ export default function BuyerDashboard() {
       const token = ticket.pendingLink || (await getInviteToken(ticket.id))
       setInviteTicket({
         t: ticket,
-        link: `${window.location.origin}/credenciamento?token=${token}`,
+        link: `https://summit2026.goskip.app/credenciamento?token=${token}`,
       })
       if (!ticket.pendingLink) loadTickets()
     } catch (e: any) {

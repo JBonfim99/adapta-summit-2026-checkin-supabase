@@ -20,11 +20,11 @@ export function TicketCard({ ticket, onFill, onInvite, isLoadingFill }: TicketCa
   return (
     <Card className="flex flex-col h-full overflow-hidden transition-all duration-300 hover:shadow-lg hover:border-primary/20 group">
       <CardHeader
-        className={cn('pb-4 border-b', ticket.type === 'GOLD' ? 'bg-yellow-100/50' : 'bg-muted/30')}
+        className={cn('pb-4 border-b', ticket.type === 'GOLD' ? 'bg-yellow-100' : 'bg-muted/30')}
       >
         <div className="flex justify-between items-start mb-2">
           <Badge variant="outline" className="bg-background">
-            Ingresso #{ticket.displayId || ticket.pedido_id?.slice(-6) || 'N/A'}
+            Ingresso #{ticket.pedido_id || ticket.displayId || 'N/A'}
           </Badge>
           <StatusBadge status={ticket.status} />
         </div>
