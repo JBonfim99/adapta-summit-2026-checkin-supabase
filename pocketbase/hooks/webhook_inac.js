@@ -20,8 +20,8 @@ onRecordAfterCreateSuccess((e) => {
   const payload = {
     nome_completo: part.getString('nome_completo'),
     email: part.getString('email'),
-    cpf: Number(part.getString('cpf').replace(/\D/g, '')),
-    telefone: Number(part.getString('telefone').replace(/\D/g, '')),
+    cpf: part.getString('cpf').replace(/\D/g, ''),
+    telefone: part.getString('telefone').replace(/\D/g, ''),
     nome_empresa: part.getString('nome_empresa'),
     ingresso_id: ingresso.id,
     ingresso_categoria: ingresso.getString('tipo_ingresso'),
@@ -85,8 +85,8 @@ routerAdd(
       const payload = {
         nome_completo: part.getString('nome_completo'),
         email: part.getString('email'),
-        cpf: Number(part.getString('cpf').replace(/\D/g, '')),
-        telefone: Number(part.getString('telefone').replace(/\D/g, '')),
+        cpf: part.getString('cpf').replace(/\D/g, ''),
+        telefone: part.getString('telefone').replace(/\D/g, ''),
         nome_empresa: part.getString('nome_empresa'),
         ingresso_id: ingresso.id,
         ingresso_categoria: ingresso.getString('tipo_ingresso'),
