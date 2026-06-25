@@ -2,15 +2,21 @@
 // DISPARO DE ACESSO (magic link) AOS COMPRADORES VIA SENDGRID
 // ----------------------------------------------------------------------------
 // Fluxo: o clique do admin cria uma CAMPANHA (registro em `disparos`) e
-// ENFILEIRA os compradores-alvo (UPDATE em massa, instantâneo), marcando cada
-// um com o acesso_disparo_id da campanha. Um cron drena a fila em lotes de até
-// 1000 (limite de personalizations do SendGrid), gera 1 token (60 dias) por
-// comprador e faz UMA chamada ao /v3/mail/send por lote. Ao fim de cada lote,
-// recalcula os contadores da campanha e grava no registro `disparos` — o painel
-// acompanha por realtime, sem polling.
+// ENFILEIRA os compradores-alvo (UPDATE em massa, instantâneo). O frontend então
+// orquestra o esvaziamento da fila chamando /dispatch/process em sequência —
+// um lote de até 1000 por chamada, o próximo logo após o anterior. Até 1000
+// pessoas saem num único lote (imediato); acima disso, lotes sequenciais.
+//
+// CONCORRÊNCIA: cada lote é reivindicado atomicamente (acesso_claim = id único)
+// antes de processar, então cron e frontend podem rodar juntos sem nunca pegar
+// o mesmo comprador. O cron é só rede de segurança (aba fechada).
+//
+// RETRY INTELIGENTE: 2xx = enviado; 429/5xx/erro de rede = reenfileira (até 5
+// tentativas) e sinaliza retryable pro orquestrador dar backoff; demais 4xx
+// (config: remetente/template/auth) = marca erro na hora, sem desperdiçar tries.
 //
 // REGRA JSVM: cada callback roda em VM isolada — todo helper é declarado DENTRO
-// do callback (nada no topo do arquivo).
+// do callback.
 // ============================================================================
 
 // --- Lista os dynamic templates do SendGrid (para o dropdown) ---------------
@@ -107,7 +113,6 @@ routerAdd(
         return e.badRequestError('template_id inválido (deve começar com d-)')
       }
 
-      // 1. Cria o registro da campanha.
       const disparosColl = $app.findCollectionByNameOrId('disparos')
       const disparo = new Record(disparosColl)
       disparo.set('template_id', templateId)
@@ -120,7 +125,6 @@ routerAdd(
       $app.save(disparo)
       const disparoId = disparo.id
 
-      // 2. Enfileira o cluster, marcando o acesso_disparo_id da campanha.
       let where
       if (cluster === 'pendentes') {
         where =
@@ -133,13 +137,12 @@ routerAdd(
         .db()
         .newQuery(
           "UPDATE compradores SET acesso_status = 'na_fila', acesso_template_id = {:tid}, " +
-            "acesso_disparo_id = {:did}, acesso_tentativas = 0, acesso_erro = '' WHERE " +
+            "acesso_disparo_id = {:did}, acesso_tentativas = 0, acesso_erro = '', acesso_claim = '' WHERE " +
             where,
         )
         .bind({ tid: templateId, did: disparoId })
         .execute()
 
-      // 3. Conta quantos entraram e grava o total na campanha.
       const row = new DynamicModel({ c: 0 })
       $app
         .db()
@@ -171,7 +174,7 @@ routerAdd(
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'na_fila', acesso_tentativas = 0, acesso_erro = '' " +
+          "UPDATE compradores SET acesso_status = 'na_fila', acesso_tentativas = 0, acesso_erro = '', acesso_claim = '' " +
             "WHERE acesso_disparo_id = {:did} AND acesso_status = 'erro'",
         )
         .bind({ did: disparoId })
@@ -202,15 +205,14 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- TICK manual: processa UM lote sob demanda e devolve diagnóstico --------
-// Usado pela tela (que chama enquanto há campanha em andamento) e serve de
-// fallback caso o cron não rode no ambiente. Espelha a lógica do cron.
+// --- PROCESS: reivindica e processa UM lote (até 1000). O frontend chama em
+//     sequência até esvaziar a fila. Retorna info pro orquestrador. -----------
 routerAdd(
   'POST',
-  '/backend/v1/admin/dispatch/tick',
+  '/backend/v1/admin/dispatch/process',
   (e) => {
     const apiKey = $os.getenv('SENDGRID_API_KEY')
-    if (!apiKey) return e.json(200, { ran: false, reason: 'no_api_key' })
+    if (!apiKey) return e.json(200, { ran: false, reason: 'no_api_key', remaining: 0 })
 
     const decodeBody = (body) => {
       if (body == null) return ''
@@ -224,6 +226,15 @@ routerAdd(
         return s
       } catch (_) {}
       return ''
+    }
+
+    const countNaFila = () => {
+      const r = new DynamicModel({ c: 0 })
+      $app
+        .db()
+        .newQuery("SELECT COUNT(*) as c FROM compradores WHERE acesso_status = 'na_fila'")
+        .one(r)
+      return r.c
     }
 
     const atualizaDisparo = (did) => {
@@ -261,23 +272,24 @@ routerAdd(
       } catch (_) {}
     }
 
-    // Recupera presos em 'enviando' há mais de 10min.
+    // Recupera presos em 'enviando' há mais de 10min (crash/deploy).
     try {
       const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'na_fila' WHERE acesso_status = 'enviando' AND updated < {:cut}",
+          "UPDATE compradores SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_status = 'enviando' AND updated < {:cut}",
         )
         .bind({ cut: cut })
         .execute()
     } catch (_) {}
 
+    // Campanha do topo da fila.
     let first
     try {
       first = $app.findFirstRecordByFilter('compradores', 'acesso_status = {:s}', { s: 'na_fila' })
     } catch (_) {
-      return e.json(200, { ran: false, reason: 'fila_vazia' })
+      return e.json(200, { ran: false, reason: 'fila_vazia', remaining: 0 })
     }
     const templateId = first.getString('acesso_template_id')
     const disparoId = first.getString('acesso_disparo_id')
@@ -288,44 +300,71 @@ routerAdd(
         $app.save(first)
       } catch (_) {}
       atualizaDisparo(disparoId)
-      return e.json(200, { ran: false, reason: 'sem_template' })
+      return e.json(200, { ran: false, reason: 'sem_template', remaining: countNaFila() })
     }
 
-    let batch
+    // Reivindica atomicamente até 1000 dessa campanha.
+    const claim = $security.randomString(20)
     try {
+      let sub
       if (disparoId) {
-        batch = $app.findRecordsByFilter(
-          'compradores',
-          'acesso_status = {:s} && acesso_disparo_id = {:did}',
-          'created',
-          1000,
-          0,
-          { s: 'na_fila', did: disparoId },
-        )
+        sub =
+          "SELECT id FROM compradores WHERE acesso_status = 'na_fila' AND acesso_disparo_id = {:did} ORDER BY created LIMIT 1000"
+        $app
+          .db()
+          .newQuery(
+            "UPDATE compradores SET acesso_status = 'enviando', acesso_claim = {:claim} WHERE id IN (" +
+              sub +
+              ')',
+          )
+          .bind({ claim: claim, did: disparoId })
+          .execute()
       } else {
-        batch = $app.findRecordsByFilter(
-          'compradores',
-          'acesso_status = {:s} && acesso_template_id = {:tid}',
-          'created',
-          1000,
-          0,
-          { s: 'na_fila', tid: templateId },
-        )
+        sub =
+          "SELECT id FROM compradores WHERE acesso_status = 'na_fila' AND acesso_template_id = {:tid} ORDER BY created LIMIT 1000"
+        $app
+          .db()
+          .newQuery(
+            "UPDATE compradores SET acesso_status = 'enviando', acesso_claim = {:claim} WHERE id IN (" +
+              sub +
+              ')',
+          )
+          .bind({ claim: claim, tid: templateId })
+          .execute()
       }
     } catch (err) {
-      return e.json(200, { ran: false, reason: 'erro_busca', error: err.message })
+      return e.json(200, {
+        ran: false,
+        reason: 'erro_claim',
+        error: err.message,
+        remaining: countNaFila(),
+      })
     }
-    if (!batch || batch.length === 0) return e.json(200, { ran: false, reason: 'fila_vazia' })
 
-    const idList = batch.map((c) => "'" + c.id + "'").join(',')
-
+    // Carrega exatamente o que reivindiquei.
+    let batch
     try {
-      $app
-        .db()
-        .newQuery("UPDATE compradores SET acesso_status = 'enviando' WHERE id IN (" + idList + ')')
-        .execute()
-    } catch (_) {}
+      batch = $app.findRecordsByFilter(
+        'compradores',
+        'acesso_claim = {:claim}',
+        'created',
+        1000,
+        0,
+        { claim: claim },
+      )
+    } catch (err) {
+      return e.json(200, {
+        ran: false,
+        reason: 'erro_busca',
+        error: err.message,
+        remaining: countNaFila(),
+      })
+    }
+    if (!batch || batch.length === 0) {
+      return e.json(200, { ran: false, reason: 'fila_vazia', remaining: countNaFila() })
+    }
 
+    // Gera 1 token (60 dias) por comprador e monta as personalizations.
     const personalizations = []
     const exp = new Date()
     exp.setDate(exp.getDate() + 60)
@@ -355,10 +394,18 @@ routerAdd(
       try {
         $app
           .db()
-          .newQuery("UPDATE compradores SET acesso_status = 'na_fila' WHERE id IN (" + idList + ')')
+          .newQuery(
+            "UPDATE compradores SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_claim = {:claim}",
+          )
+          .bind({ claim: claim })
           .execute()
       } catch (_) {}
-      return e.json(200, { ran: false, reason: 'erro_token', error: err.message })
+      return e.json(200, {
+        ran: false,
+        reason: 'erro_token',
+        error: err.message,
+        remaining: countNaFila(),
+      })
     }
 
     if (personalizations.length === 0) {
@@ -366,16 +413,16 @@ routerAdd(
         $app
           .db()
           .newQuery(
-            "UPDATE compradores SET acesso_status = 'erro', acesso_erro = 'Sem email' WHERE id IN (" +
-              idList +
-              ')',
+            "UPDATE compradores SET acesso_status = 'erro', acesso_erro = 'Sem email', acesso_claim = '' WHERE acesso_claim = {:claim}",
           )
+          .bind({ claim: claim })
           .execute()
       } catch (_) {}
       atualizaDisparo(disparoId)
-      return e.json(200, { ran: false, reason: 'sem_email' })
+      return e.json(200, { ran: false, reason: 'sem_email', remaining: countNaFila() })
     }
 
+    // Uma chamada ao SendGrid com o lote inteiro.
     let status = 0
     let respBody = ''
     let erroMsg = ''
@@ -398,32 +445,43 @@ routerAdd(
     }
 
     const ok = status >= 200 && status < 300
+    // Retryável: rate limit, erro de servidor do SendGrid ou falha de rede.
+    const retryable = !ok && (status === 429 || status >= 500 || status === 0)
+
     if (ok) {
       const now = new Date().toISOString()
       try {
         $app
           .db()
           .newQuery(
-            "UPDATE compradores SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '' WHERE id IN (" +
-              idList +
-              ')',
+            "UPDATE compradores SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '', acesso_claim = '' WHERE acesso_claim = {:claim}",
           )
-          .bind({ now: now })
+          .bind({ now: now, claim: claim })
           .execute()
       } catch (_) {}
-    } else {
+    } else if (retryable) {
       const errTxt = ('HTTP ' + status + ' ' + (respBody || erroMsg || '')).substring(0, 300)
       try {
         $app
           .db()
           .newQuery(
             'UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, ' +
-              "acesso_status = CASE WHEN acesso_tentativas + 1 >= 3 THEN 'erro' ELSE 'na_fila' END " +
-              'WHERE id IN (' +
-              idList +
-              ')',
+              "acesso_status = CASE WHEN acesso_tentativas + 1 >= 5 THEN 'erro' ELSE 'na_fila' END, " +
+              "acesso_claim = '' WHERE acesso_claim = {:claim}",
           )
-          .bind({ err: errTxt })
+          .bind({ err: errTxt, claim: claim })
+          .execute()
+      } catch (_) {}
+    } else {
+      // 4xx de configuração (400/401/403/413...): não adianta retentar.
+      const errTxt = ('HTTP ' + status + ' ' + (respBody || erroMsg || '')).substring(0, 300)
+      try {
+        $app
+          .db()
+          .newQuery(
+            "UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, acesso_status = 'erro', acesso_claim = '' WHERE acesso_claim = {:claim}",
+          )
+          .bind({ err: errTxt, claim: claim })
           .execute()
       } catch (_) {}
     }
@@ -432,17 +490,19 @@ routerAdd(
 
     return e.json(200, {
       ran: true,
-      reason: ok ? 'ok' : 'sendgrid_falhou',
+      reason: ok ? 'ok' : retryable ? 'retry' : 'erro_permanente',
       batch: batch.length,
+      remaining: countNaFila(),
       sg_status: status,
       sg_ok: ok,
+      retryable: retryable,
       sg_error: ok ? '' : (respBody || erroMsg || '').substring(0, 300),
     })
   },
   $apis.requireAuth(),
 )
 
-// --- CRON: drena a fila, 1 lote (1 campanha) de até 1000 por minuto ---------
+// --- CRON: rede de segurança (aba fechada). Mesma lógica de claim atômico. ---
 cronAdd('email_dispatch', '* * * * *', () => {
   const apiKey = $os.getenv('SENDGRID_API_KEY')
   if (!apiKey) return
@@ -461,7 +521,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
     return ''
   }
 
-  // Recalcula os contadores de uma campanha e grava no registro `disparos`.
   const atualizaDisparo = (did) => {
     if (!did) return
     try {
@@ -473,7 +532,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
         )
         .bind({ did: did })
         .one(cEnv)
-
       const cErr = new DynamicModel({ c: 0 })
       $app
         .db()
@@ -482,7 +540,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
         )
         .bind({ did: did })
         .one(cErr)
-
       const cRest = new DynamicModel({ c: 0 })
       $app
         .db()
@@ -491,7 +548,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
         )
         .bind({ did: did })
         .one(cRest)
-
       const disparo = $app.findRecordById('disparos', did)
       disparo.set('enviados', cEnv.c)
       disparo.set('erros', cErr.c)
@@ -500,24 +556,22 @@ cronAdd('email_dispatch', '* * * * *', () => {
     } catch (_) {}
   }
 
-  // 1. Recupera lotes presos em 'enviando' há mais de 10min (crash/deploy).
   try {
     const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
     $app
       .db()
       .newQuery(
-        "UPDATE compradores SET acesso_status = 'na_fila' WHERE acesso_status = 'enviando' AND updated < {:cut}",
+        "UPDATE compradores SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_status = 'enviando' AND updated < {:cut}",
       )
       .bind({ cut: cut })
       .execute()
   } catch (_) {}
 
-  // 2. Descobre a campanha do topo da fila.
   let first
   try {
     first = $app.findFirstRecordByFilter('compradores', 'acesso_status = {:s}', { s: 'na_fila' })
   } catch (_) {
-    return // fila vazia
+    return
   }
   const templateId = first.getString('acesso_template_id')
   const disparoId = first.getString('acesso_disparo_id')
@@ -531,51 +585,52 @@ cronAdd('email_dispatch', '* * * * *', () => {
     return
   }
 
-  // 3. Pega até 1000 da fila DESSA campanha (homogêneo: mesmo template).
+  const claim = $security.randomString(20)
+  try {
+    let sub
+    if (disparoId) {
+      sub =
+        "SELECT id FROM compradores WHERE acesso_status = 'na_fila' AND acesso_disparo_id = {:did} ORDER BY created LIMIT 1000"
+      $app
+        .db()
+        .newQuery(
+          "UPDATE compradores SET acesso_status = 'enviando', acesso_claim = {:claim} WHERE id IN (" +
+            sub +
+            ')',
+        )
+        .bind({ claim: claim, did: disparoId })
+        .execute()
+    } else {
+      sub =
+        "SELECT id FROM compradores WHERE acesso_status = 'na_fila' AND acesso_template_id = {:tid} ORDER BY created LIMIT 1000"
+      $app
+        .db()
+        .newQuery(
+          "UPDATE compradores SET acesso_status = 'enviando', acesso_claim = {:claim} WHERE id IN (" +
+            sub +
+            ')',
+        )
+        .bind({ claim: claim, tid: templateId })
+        .execute()
+    }
+  } catch (_) {
+    return
+  }
+
   let batch
   try {
-    if (disparoId) {
-      batch = $app.findRecordsByFilter(
-        'compradores',
-        'acesso_status = {:s} && acesso_disparo_id = {:did}',
-        'created',
-        1000,
-        0,
-        { s: 'na_fila', did: disparoId },
-      )
-    } else {
-      // Legado (enfileirado antes do histórico): agrupa por template.
-      batch = $app.findRecordsByFilter(
-        'compradores',
-        'acesso_status = {:s} && acesso_template_id = {:tid}',
-        'created',
-        1000,
-        0,
-        { s: 'na_fila', tid: templateId },
-      )
-    }
+    batch = $app.findRecordsByFilter('compradores', 'acesso_claim = {:claim}', 'created', 1000, 0, {
+      claim: claim,
+    })
   } catch (_) {
     return
   }
   if (!batch || batch.length === 0) return
 
-  // IDs do PocketBase são [a-z0-9]{15}, seguros para montar IN (...) à mão.
-  const idList = batch.map((c) => "'" + c.id + "'").join(',')
-
-  // 4. Reivindica o lote (na_fila -> enviando) numa tacada.
-  try {
-    $app
-      .db()
-      .newQuery("UPDATE compradores SET acesso_status = 'enviando' WHERE id IN (" + idList + ')')
-      .execute()
-  } catch (_) {}
-
-  // 5. Gera 1 token (60 dias) por comprador e monta as personalizations.
   const personalizations = []
   const exp = new Date()
   exp.setDate(exp.getDate() + 60)
   const expIso = exp.toISOString()
-
   try {
     $app.runInTransaction((txApp) => {
       const tokenColl = txApp.findCollectionByNameOrId('tokens_acesso')
@@ -589,7 +644,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
         tr.set('usado', false)
         tr.set('expira_em', expIso)
         txApp.save(tr)
-
         const nome = c.getString('nome') || ''
         const firstname = (nome.split(' ')[0] || nome || '').trim()
         personalizations.push({
@@ -598,11 +652,14 @@ cronAdd('email_dispatch', '* * * * *', () => {
         })
       }
     })
-  } catch (err) {
+  } catch (_) {
     try {
       $app
         .db()
-        .newQuery("UPDATE compradores SET acesso_status = 'na_fila' WHERE id IN (" + idList + ')')
+        .newQuery(
+          "UPDATE compradores SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_claim = {:claim}",
+        )
+        .bind({ claim: claim })
         .execute()
     } catch (_) {}
     return
@@ -613,17 +670,15 @@ cronAdd('email_dispatch', '* * * * *', () => {
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'erro', acesso_erro = 'Sem email' WHERE id IN (" +
-            idList +
-            ')',
+          "UPDATE compradores SET acesso_status = 'erro', acesso_erro = 'Sem email', acesso_claim = '' WHERE acesso_claim = {:claim}",
         )
+        .bind({ claim: claim })
         .execute()
     } catch (_) {}
     atualizaDisparo(disparoId)
     return
   }
 
-  // 6. Uma chamada ao SendGrid com o lote inteiro (template dinâmico).
   let status = 0
   let respBody = ''
   let erroMsg = ''
@@ -646,19 +701,30 @@ cronAdd('email_dispatch', '* * * * *', () => {
   }
 
   const ok = status >= 200 && status < 300
+  const retryable = !ok && (status === 429 || status >= 500 || status === 0)
 
-  // 7. Marca o resultado do lote em massa.
   if (ok) {
     const now = new Date().toISOString()
     try {
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '' WHERE id IN (" +
-            idList +
-            ')',
+          "UPDATE compradores SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '', acesso_claim = '' WHERE acesso_claim = {:claim}",
         )
-        .bind({ now: now })
+        .bind({ now: now, claim: claim })
+        .execute()
+    } catch (_) {}
+  } else if (retryable) {
+    const errTxt = ('HTTP ' + status + ' ' + (respBody || erroMsg || '')).substring(0, 300)
+    try {
+      $app
+        .db()
+        .newQuery(
+          'UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, ' +
+            "acesso_status = CASE WHEN acesso_tentativas + 1 >= 5 THEN 'erro' ELSE 'na_fila' END, " +
+            "acesso_claim = '' WHERE acesso_claim = {:claim}",
+        )
+        .bind({ err: errTxt, claim: claim })
         .execute()
     } catch (_) {}
   } else {
@@ -667,17 +733,12 @@ cronAdd('email_dispatch', '* * * * *', () => {
       $app
         .db()
         .newQuery(
-          'UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, ' +
-            "acesso_status = CASE WHEN acesso_tentativas + 1 >= 3 THEN 'erro' ELSE 'na_fila' END " +
-            'WHERE id IN (' +
-            idList +
-            ')',
+          "UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, acesso_status = 'erro', acesso_claim = '' WHERE acesso_claim = {:claim}",
         )
-        .bind({ err: errTxt })
+        .bind({ err: errTxt, claim: claim })
         .execute()
     } catch (_) {}
   }
 
-  // 8. Recalcula e grava os contadores da campanha (acompanhamento ao vivo).
   atualizaDisparo(disparoId)
 })
