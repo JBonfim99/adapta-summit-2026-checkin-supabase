@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Download, RefreshCcw, Loader2 } from 'lucide-react'
+import { Search, Download, RefreshCcw, Loader2, Link as LinkIcon } from 'lucide-react'
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import pb from '@/lib/pocketbase/client'
@@ -294,7 +294,33 @@ export default function AdminParticipants() {
                     <TableCell>
                       <StatusBadge status={row.status} />
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right flex items-center justify-end gap-2">
+                      {row.status === 'Pendente' && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-indigo-600"
+                          onClick={async () => {
+                            try {
+                              const link = await pb
+                                .collection('links_participante')
+                                .getFirstListItem(`ingresso_id = "${row.id}"`)
+                              const url = `https://adapta-summit-2026-d2d58.goskip.app/pre-credenciamento/${link.token}`
+                              await navigator.clipboard.writeText(url)
+                              toast({ title: 'Link copiado com sucesso!' })
+                            } catch (e) {
+                              toast({
+                                title: 'Erro',
+                                description: 'Link de pré-credenciamento não encontrado.',
+                                variant: 'destructive',
+                              })
+                            }
+                          }}
+                        >
+                          <LinkIcon className="w-4 h-4 mr-1" />
+                          Copiar Link
+                        </Button>
+                      )}
                       {row.expand?.participante_id && (
                         <Button
                           variant="ghost"

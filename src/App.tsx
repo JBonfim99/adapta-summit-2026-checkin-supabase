@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, useLocation, Navigate, useParams } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
@@ -23,6 +23,11 @@ import AdminImport from '@/pages/admin/Importar'
 import AdminCompradores from '@/pages/admin/Compradores'
 import AdminParticipants from '@/pages/admin/Participantes'
 import AdminWebhooks from '@/pages/admin/Envios'
+
+function PreCredenciamentoRedirect() {
+  const { token } = useParams()
+  return <Navigate to={`/participante?token=${token}`} replace />
+}
 
 function PrefillHack() {
   const location = useLocation()
@@ -85,6 +90,7 @@ const App = () => (
               <Route path="/participante/obrigado" element={<ParticipantSuccess />} />
               <Route path="/participante/expirado" element={<ParticipantExpired />} />
               <Route path="/participante" element={<ParticipantForm />} />
+              <Route path="/pre-credenciamento/:token" element={<PreCredenciamentoRedirect />} />
             </Route>
 
             <Route path="/admin/login" element={<AdminLogin />} />

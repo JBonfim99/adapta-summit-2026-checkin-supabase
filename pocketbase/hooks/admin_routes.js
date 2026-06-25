@@ -52,8 +52,8 @@ routerAdd(
       let enviados = 0
       let pendentes = 0
       let erros = 0
-      let vip = { total: 0, preenchidos: 0, pendentes: 0 }
-      let standard = { total: 0, preenchidos: 0, pendentes: 0 }
+      let platinum = { total: 0, preenchidos: 0, pendentes: 0 }
+      let gold = { total: 0, preenchidos: 0, pendentes: 0 }
 
       for (const ing of ingressos) {
         const st = ing.getString('status')
@@ -63,14 +63,14 @@ routerAdd(
         else if (st === 'enviado') enviados++
         else if (st === 'erro_webhook') erros++
 
-        if (type === 'PLATINUM' || type === 'VIP') {
-          vip.total++
-          if (st === 'Pendente' || st === 'pendente') vip.pendentes++
-          else vip.preenchidos++
-        } else {
-          standard.total++
-          if (st === 'Pendente' || st === 'pendente') standard.pendentes++
-          else standard.preenchidos++
+        if (type === 'PLATINUM') {
+          platinum.total++
+          if (st === 'Pendente' || st === 'pendente') platinum.pendentes++
+          else platinum.preenchidos++
+        } else if (type === 'GOLD') {
+          gold.total++
+          if (st === 'Pendente' || st === 'pendente') gold.pendentes++
+          else gold.preenchidos++
         }
       }
 
@@ -86,8 +86,8 @@ routerAdd(
         preenchidos: preenchidos + enviados + erros,
         pendentes,
         erros,
-        vip,
-        standard,
+        platinum,
+        gold,
         activity,
       })
     } catch (err) {
