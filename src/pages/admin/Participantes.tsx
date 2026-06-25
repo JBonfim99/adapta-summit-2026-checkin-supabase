@@ -303,25 +303,11 @@ export default function AdminParticipants() {
                           onClick={async () => {
                             try {
                               if (!row.id) throw new Error('Missing ingresso_id')
-                              let link
-                              try {
-                                link = await pb
-                                  .collection('links_participante')
-                                  .getFirstListItem(`ingresso_id = "${row.id}" && usado = false`)
-                              } catch (err: any) {
-                                if (err?.status === 401) throw err
-                                const expiraEm = new Date()
-                                expiraEm.setDate(expiraEm.getDate() + 30)
-                                link = await pb.collection('links_participante').create({
-                                  ingresso_id: row.id,
-                                  token:
-                                    Math.random().toString(36).substring(2, 15) +
-                                    Math.random().toString(36).substring(2, 15),
-                                  usado: false,
-                                  expira_em: expiraEm.toISOString(),
-                                })
-                              }
-                              const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${link.token}`
+                              const res = await pb.send(
+                                `/backend/v1/admin/ticket/${row.id}/invite-link`,
+                                { method: 'POST' },
+                              )
+                              const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${res.token}`
                               await navigator.clipboard.writeText(url)
                               toast({ title: 'Link de pré-credenciamento copiado!' })
                             } catch (e: any) {
