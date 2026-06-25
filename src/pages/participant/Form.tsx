@@ -166,7 +166,7 @@ export default function ParticipantForm() {
         body: JSON.stringify(payload),
       })
       toast({ title: 'Dados salvos com sucesso!' })
-      navigate('/participante/obrigado')
+      navigate('/participante/obrigado', { state: { participantEmail: data.email || '' } })
     } catch (e: any) {
       toast({ title: 'Erro', description: getErrorMessage(e), variant: 'destructive' })
     } finally {

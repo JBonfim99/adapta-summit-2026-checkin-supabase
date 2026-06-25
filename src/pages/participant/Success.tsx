@@ -1,12 +1,24 @@
 import { CheckCircle2, Ticket } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useApp } from '@/contexts/app-context'
 
 export default function ParticipantSuccess() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { buyer } = useApp()
+
+  const submittedEmail = (location.state as any)?.participantEmail || ''
+
+  // Só mostra o botão se há um comprador logado E o email recém-preenchido é o
+  // dele — ou seja, o próprio comprador preencheu o seu ingresso. Um participante
+  // preenchendo num navegador onde um comprador já logou submete um email
+  // diferente, então o botão não aparece.
+  const isBuyerSelfFill =
+    !!buyer &&
+    !!submittedEmail &&
+    buyer.email?.trim().toLowerCase() === submittedEmail.trim().toLowerCase()
 
   return (
     <div className="flex items-center justify-center min-h-[70vh]">
@@ -38,7 +50,7 @@ export default function ParticipantSuccess() {
             </ul>
           </div>
 
-          {buyer && (
+          {isBuyerSelfFill && (
             <Button className="bg-primary gap-2 mt-2" onClick={() => navigate('/meus-ingressos')}>
               <Ticket className="w-4 h-4" /> Ver Meus Ingressos
             </Button>
