@@ -20,6 +20,7 @@ import ParticipantExpired from '@/pages/participant/Expired'
 import AdminLogin from '@/pages/admin/Login'
 import AdminDashboard from '@/pages/admin/Dashboard'
 import AdminImport from '@/pages/admin/Importar'
+import AdminCompradores from '@/pages/admin/Compradores'
 import AdminParticipants from '@/pages/admin/Participantes'
 import AdminWebhooks from '@/pages/admin/Envios'
 
@@ -90,6 +91,7 @@ const App = () => (
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
               <Route path="importar" element={<AdminImport />} />
+              <Route path="compradores" element={<AdminCompradores />} />
               <Route path="participantes" element={<AdminParticipants />} />
               <Route path="envios" element={<AdminWebhooks />} />
             </Route>
