@@ -64,6 +64,10 @@ import { extractFieldErrors } from '@/lib/pocketbase/errors'
 const formSchema = z.object({
   nome: z.string().min(1, 'Nome é obrigatório'),
   email: z.string().email('E-mail inválido').min(1, 'E-mail é obrigatório'),
+  documento: z.string().optional(),
+  uf: z.string().optional(),
+  cidade: z.string().optional(),
+  telefone: z.string().optional(),
 })
 
 export default function AdminCompradores() {
@@ -185,13 +189,20 @@ export default function AdminCompradores() {
 
   const handleOpenCreate = () => {
     setEditingId(null)
-    form.reset({ nome: '', email: '' })
+    form.reset({ nome: '', email: '', documento: '', uf: '', cidade: '', telefone: '' })
     setDialogOpen(true)
   }
 
   const handleOpenEdit = (item: any) => {
     setEditingId(item.id)
-    form.reset({ nome: item.nome, email: item.email })
+    form.reset({
+      nome: item.nome,
+      email: item.email,
+      documento: item.documento || '',
+      uf: item.uf || '',
+      cidade: item.cidade || '',
+      telefone: item.telefone || '',
+    })
     setDialogOpen(true)
   }
 
@@ -280,14 +291,7 @@ export default function AdminCompradores() {
       }
 
       const csvContent = [
-        [
-          'Nome',
-          'Email',
-          'Documento',
-          'Telefone',
-          'Quantidade de Ingressos',
-          'Categorias de Ingressos',
-        ],
+        ['nome', 'email', 'documento', 'telefone', 'quantidade_ingressos', 'categoria_ingressos'],
         ...finalBuyers.map((b) => {
           const tickets = ticketsByBuyer[b.id] || []
           const qtd = tickets.length
@@ -295,21 +299,11 @@ export default function AdminCompradores() {
             new Set(tickets.map((t) => t.tipo_ingresso).filter(Boolean)),
           ).join(', ')
 
-          let doc = ''
-          let phone = ''
-          for (const t of tickets) {
-            const p = t.expand?.participante_id
-            if (p) {
-              if (!doc && p.cpf) doc = p.cpf
-              if (!phone && p.telefone) phone = p.telefone
-            }
-          }
-
           return [
             escapeCSV(b.nome),
             escapeCSV(b.email),
-            escapeCSV(doc),
-            escapeCSV(phone),
+            escapeCSV(b.documento || ''),
+            escapeCSV(b.telefone || ''),
             qtd,
             escapeCSV(categories),
           ]
@@ -495,6 +489,32 @@ export default function AdminCompradores() {
                     <FormLabel>Email</FormLabel>
                     <FormControl>
                       <Input placeholder="email@exemplo.com" {...field} type="email" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="documento"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Documento</FormLabel>
+                    <FormControl>
+                      <Input placeholder="CPF/CNPJ" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="telefone"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Telefone</FormLabel>
+                    <FormControl>
+                      <Input placeholder="(11) 99999-9999" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

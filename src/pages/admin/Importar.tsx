@@ -27,33 +27,64 @@ export default function AdminImport() {
         .split('\n')
         .map((l) => l.trim())
         .filter(Boolean)
-      const headers = lines[0].toLowerCase().split(',')
 
-      const emailIdx = headers.findIndex((h) => h.includes('email'))
-      const pedidoIdx = headers.findIndex((h) => h.includes('pedido') || h.includes('id'))
-      const nomeIdx = headers.findIndex((h) => h.includes('nome'))
-      const tipoIdx = headers.findIndex((h) => h.includes('tipo'))
+      const parseCSVLine = (text: string) => {
+        const result = []
+        let current = ''
+        let inQuotes = false
+        for (let i = 0; i < text.length; i++) {
+          const char = text[i]
+          if (char === '"' && text[i + 1] === '"') {
+            current += '"'
+            i++
+          } else if (char === '"') {
+            inQuotes = !inQuotes
+          } else if (char === ',' && !inQuotes) {
+            result.push(current)
+            current = ''
+          } else {
+            current += char
+          }
+        }
+        result.push(current)
+        return result
+      }
 
-      if (emailIdx === -1 || pedidoIdx === -1) {
-        throw new Error('Colunas obrigatórias não encontradas no CSV (email, pedido).')
+      const headers = parseCSVLine(lines[0]).map((h) => h?.toLowerCase().trim() || '')
+
+      const emailIdx = headers.findIndex((h) => h === 'email')
+      const nomeIdx = headers.findIndex((h) => h === 'nome')
+      const documentoIdx = headers.findIndex((h) => h === 'documento')
+      const ufIdx = headers.findIndex((h) => h === 'uf')
+      const cidadeIdx = headers.findIndex((h) => h === 'cidade')
+      const telefoneIdx = headers.findIndex((h) => h === 'telefone')
+      const qtdGoldIdx = headers.findIndex((h) => h === 'qtd gold')
+      const qtdPlatinumIdx = headers.findIndex((h) => h === 'qtd platinum')
+
+      if (emailIdx === -1) {
+        throw new Error('Coluna obrigatória não encontrada no CSV (Email).')
       }
 
       const rows = lines
         .slice(1)
         .map((l) => {
-          const cols = l.split(',')
+          const cols = parseCSVLine(l)
           return {
-            email_comprador: cols[emailIdx],
-            pedido_id: cols[pedidoIdx],
-            nome_comprador: nomeIdx !== -1 ? cols[nomeIdx] : '',
-            tipo_ingresso: tipoIdx !== -1 ? cols[tipoIdx] : 'Standard',
+            email: cols[emailIdx]?.trim(),
+            nome: nomeIdx !== -1 ? cols[nomeIdx]?.trim() : '',
+            documento: documentoIdx !== -1 ? cols[documentoIdx]?.trim() : '',
+            uf: ufIdx !== -1 ? cols[ufIdx]?.trim() : '',
+            cidade: cidadeIdx !== -1 ? cols[cidadeIdx]?.trim() : '',
+            telefone: telefoneIdx !== -1 ? cols[telefoneIdx]?.trim() : '',
+            qtd_gold: qtdGoldIdx !== -1 ? cols[qtdGoldIdx]?.trim() : '0',
+            qtd_platinum: qtdPlatinumIdx !== -1 ? cols[qtdPlatinumIdx]?.trim() : '0',
           }
         })
-        .filter((r) => r.email_comprador && r.pedido_id)
+        .filter((r) => r.email)
 
       setProgress(80)
 
-      const res = await pb.send('/backend/v1/admin/import', {
+      const res = await pb.send('/backend/v1/admin/import-buyers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rows }),
@@ -136,25 +167,33 @@ export default function AdminImport() {
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Instruções de Mapeamento</CardTitle>
-          <CardDescription>
-            A primeira linha do arquivo deve ser o cabeçalho. As colunas essenciais são
-            identificadas por partes do nome:
-          </CardDescription>
+          <CardDescription>A primeira linha do arquivo deve ser o cabeçalho exato:</CardDescription>
         </CardHeader>
         <CardContent>
           <ul className="grid grid-cols-2 gap-4 text-sm text-slate-700">
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> "pedido" ou "id" (Obrigatório)
+              <CheckCircle2 className="w-4 h-4 text-slate-300" /> Nome
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> "email" (Obrigatório)
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Email (Obrigatório)
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-slate-300" /> "nome" (Opcional)
+              <CheckCircle2 className="w-4 h-4 text-slate-300" /> documento
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-slate-300" /> "tipo" (Opcional, Padrão:
-              Standard)
+              <CheckCircle2 className="w-4 h-4 text-slate-300" /> UF
+            </li>
+            <li className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-slate-300" /> Cidade
+            </li>
+            <li className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-slate-300" /> Telefone
+            </li>
+            <li className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Qtd Gold
+            </li>
+            <li className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Qtd Platinum
             </li>
           </ul>
         </CardContent>

@@ -26,6 +26,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 export default function AdminParticipants() {
   const [data, setData] = useState<any[]>([])
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
@@ -37,11 +39,20 @@ export default function AdminParticipants() {
 
   const loadData = () => {
     setLoading(true)
-    let filterStr = ''
+    const filters = []
     if (search) {
       const s = search.replace(/"/g, '')
-      filterStr = `comprador_id.email ~ "${s}" || pedido_id ~ "${s}" || participante_id.nome_completo ~ "${s}" || participante_id.email ~ "${s}"`
+      filters.push(
+        `(comprador_id.email ~ "${s}" || pedido_id ~ "${s}" || participante_id.nome_completo ~ "${s}" || participante_id.email ~ "${s}")`,
+      )
     }
+    if (statusFilter !== 'all') {
+      filters.push(`status = "${statusFilter}"`)
+    }
+    if (typeFilter !== 'all') {
+      filters.push(`tipo_ingresso = "${typeFilter}"`)
+    }
+    const filterStr = filters.join(' && ')
 
     pb.collection('ingressos')
       .getList(page, limit, {
@@ -59,7 +70,7 @@ export default function AdminParticipants() {
 
   useEffect(() => {
     loadData()
-  }, [page, search])
+  }, [page, search, statusFilter, typeFilter])
 
   const handleExportCSV = async () => {
     try {
@@ -153,8 +164,8 @@ export default function AdminParticipants() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 max-w-sm">
-        <div className="relative w-full">
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="relative flex-1 min-w-[250px] max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar por nome, email ou pedido..."
@@ -166,6 +177,30 @@ export default function AdminParticipants() {
             }}
           />
         </div>
+        <select
+          className="h-10 px-3 py-2 rounded-md border bg-white text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">Todos os Status</option>
+          <option value="Pendente">Pendente</option>
+          <option value="Pré-Credenciado">Pré-Credenciado</option>
+        </select>
+        <select
+          className="h-10 px-3 py-2 rounded-md border bg-white text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+          value={typeFilter}
+          onChange={(e) => {
+            setTypeFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">Todos os Tipos</option>
+          <option value="GOLD">GOLD</option>
+          <option value="PLATINUM">PLATINUM</option>
+        </select>
       </div>
 
       <div className="border rounded-xl bg-white overflow-hidden shadow-sm flex flex-col">
