@@ -20,11 +20,14 @@ export default function ParticipantSuccess() {
             <ul className="space-y-3 text-muted-foreground text-sm">
               <li className="flex items-start gap-2">
                 <span className="text-accent font-bold">•</span>
-                O seu QR Code de acesso será enviado para o seu e-mail em breve pelo sistema INAC.
+                O seu QR Code de acesso ao evento será enviado para o seu e-mail daqui a alguns
+                minutos, por favor cheque também nas caixas de Spam, Promoções e Outros - o e-mail
+                pode ter ido para lá.
               </li>
               <li className="flex items-start gap-2">
                 <span className="text-accent font-bold">•</span>
-                Guarde este QR Code, ele será sua credencial na entrada do evento.
+                Sugerimos que tire um print e deixe esse QR Code de fácil acesso em seu celular.
+                Guarde ele, pois será sua credencial na entrada do evento.
               </li>
             </ul>
           </div>
