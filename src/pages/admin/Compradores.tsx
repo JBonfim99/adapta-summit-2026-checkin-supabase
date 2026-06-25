@@ -9,9 +9,10 @@ import {
 } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Plus, Pencil, Trash2 } from 'lucide-react'
+import { Search, Plus, Pencil, Trash2, Ticket as TicketIcon } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
+import { BuyerTicketsSheet } from '@/components/admin/BuyerTicketsSheet'
 import { useToast } from '@/hooks/use-toast'
 import { format } from 'date-fns'
 
@@ -59,8 +60,10 @@ export default function AdminCompradores() {
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-
   const [deleteId, setDeleteId] = useState<string | null>(null)
+
+  const [ingressosCount, setIngressosCount] = useState<Record<string, number>>({})
+  const [selectedBuyer, setSelectedBuyer] = useState<any | null>(null)
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -69,6 +72,19 @@ export default function AdminCompradores() {
       email: '',
     },
   })
+
+  const loadCounts = () => {
+    pb.collection('ingressos')
+      .getFullList({ fields: 'comprador_id' })
+      .then((res) => {
+        const counts: Record<string, number> = {}
+        res.forEach((item) => {
+          counts[item.comprador_id] = (counts[item.comprador_id] || 0) + 1
+        })
+        setIngressosCount(counts)
+      })
+      .catch(() => {})
+  }
 
   const loadData = () => {
     setLoading(true)
@@ -83,10 +99,15 @@ export default function AdminCompradores() {
 
   useEffect(() => {
     loadData()
+    loadCounts()
   }, [])
 
   useRealtime('compradores', () => {
     loadData()
+  })
+
+  useRealtime('ingressos', () => {
+    loadCounts()
   })
 
   const filteredData = data.filter((item) => {
@@ -183,6 +204,7 @@ export default function AdminCompradores() {
               <TableHead>Nome</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Data de Criação</TableHead>
+              <TableHead className="text-center">Qtd. Ingressos</TableHead>
               <TableHead className="text-right">Ações</TableHead>
             </TableRow>
           </TableHeader>
@@ -202,7 +224,18 @@ export default function AdminCompradores() {
                   <TableCell className="text-muted-foreground">
                     {format(new Date(row.created), 'dd/MM/yyyy HH:mm')}
                   </TableCell>
+                  <TableCell className="text-center font-medium">
+                    {ingressosCount[row.id] || 0}
+                  </TableCell>
                   <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      title="Ver Ingressos"
+                      onClick={() => setSelectedBuyer(row)}
+                    >
+                      <TicketIcon className="w-4 h-4 text-indigo-500" />
+                    </Button>
                     <Button variant="ghost" size="icon" onClick={() => handleOpenEdit(row)}>
                       <Pencil className="w-4 h-4 text-slate-500" />
                     </Button>
@@ -214,7 +247,7 @@ export default function AdminCompradores() {
               ))}
             {!loading && filteredData.length === 0 && (
               <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                   Nenhum registro encontrado.
                 </TableCell>
               </TableRow>
@@ -288,6 +321,12 @@ export default function AdminCompradores() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <BuyerTicketsSheet
+        buyer={selectedBuyer}
+        open={!!selectedBuyer}
+        onOpenChange={(val) => !val && setSelectedBuyer(null)}
+      />
     </div>
   )
 }
