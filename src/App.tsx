@@ -16,6 +16,7 @@ import BuyerDashboard from '@/pages/buyer/Dashboard'
 import ParticipantForm from '@/pages/participant/Form'
 import ParticipantSuccess from '@/pages/participant/Success'
 import ParticipantExpired from '@/pages/participant/Expired'
+import ParticipantTicket from '@/pages/participant/Ticket'
 
 import AdminLogin from '@/pages/admin/Login'
 import AdminDashboard from '@/pages/admin/Dashboard'
@@ -95,6 +96,7 @@ const App = () => (
 
               <Route path="/participante/obrigado" element={<ParticipantSuccess />} />
               <Route path="/participante/expirado" element={<ParticipantExpired />} />
+              <Route path="/ingresso" element={<ParticipantTicket />} />
               <Route path="/participante" element={<ParticipantForm />} />
               <Route path="/pre-credenciamento/:token" element={<PreCredenciamentoRedirect />} />
               <Route path="/credenciamento" element={<CredenciamentoRedirect />} />

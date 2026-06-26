@@ -116,6 +116,11 @@ export default function ParticipantForm() {
     }
     pb.send(`/backend/v1/participant/link/${token}`)
       .then((data) => {
+        // Já preenchido: leva à página de detalhes em vez do formulário.
+        if (data.usado) {
+          navigate(`/ingresso?token=${token}`, { replace: true })
+          return
+        }
         setTicketInfo(data)
         setLoading(false)
       })
