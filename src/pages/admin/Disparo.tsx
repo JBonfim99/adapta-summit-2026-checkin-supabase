@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -61,7 +61,6 @@ export default function AdminDispatch() {
   const [previewing, setPreviewing] = useState(false)
   const [enqueuing, setEnqueuing] = useState(false)
   const [retryingId, setRetryingId] = useState<string | null>(null)
-  const drainingRef = useRef(false)
   const [cronInfo, setCronInfo] = useState<{ last_run: string; now: string } | null>(null)
 
   const loadTemplates = useCallback(() => {
@@ -99,46 +98,6 @@ export default function AdminDispatch() {
 
   // Acompanhamento ao vivo: o cron atualiza o registro do disparo a cada lote.
   useRealtime('disparos', () => loadDisparos())
-
-  // Orquestra o esvaziamento da fila: chama /process em sequência, um lote após
-  // o outro, até zerar. ≤1000 sai num único lote (imediato); acima, lotes
-  // sequenciais. Backoff só quando o erro é retryável (429/5xx/rede).
-  const drainQueue = useCallback(async () => {
-    if (drainingRef.current) return
-    drainingRef.current = true
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-    try {
-      let guard = 0
-      while (guard < 500) {
-        guard++
-        let res: any
-        try {
-          res = await pb.send('/backend/v1/admin/dispatch/process', { method: 'POST' })
-        } catch {
-          await sleep(3000) // hiccup de rede — tenta o mesmo lote de novo
-          continue
-        }
-        loadDisparos()
-        if (res.reason === 'fila_vazia') break
-        if (res.retryable) {
-          await sleep(2500) // 429/5xx — backoff antes do próximo
-          continue
-        }
-        if ((res.remaining ?? 0) <= 0) break
-        // próximo lote imediatamente, sem espera
-      }
-      loadDisparos()
-    } finally {
-      drainingRef.current = false
-    }
-  }, [loadDisparos])
-
-  // Inicia o esvaziamento assim que existe campanha ativa — no confirm ou ao
-  // abrir a tela com algo pendente. O guard evita execuções concorrentes.
-  const hasActive = disparos.some((d) => d.status === 'em_andamento')
-  useEffect(() => {
-    if (hasActive) drainQueue()
-  }, [hasActive, drainQueue])
 
   const templateName = templates.find((t) => t.id === templateId)?.name || templateId
 
@@ -178,10 +137,9 @@ export default function AdminDispatch() {
       setConfirmOpen(false)
       toast({
         title: 'Disparo iniciado!',
-        description: `${res.enqueued} comprador(es). O envio começa agora — acompanhe abaixo.`,
+        description: `${res.enqueued} comprador(es). O envio já começou no servidor — acompanhe abaixo.`,
       })
       loadDisparos()
-      drainQueue()
     } catch (e: any) {
       toast({ title: 'Erro ao enfileirar', description: e.message, variant: 'destructive' })
     } finally {

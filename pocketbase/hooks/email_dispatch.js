@@ -1,21 +1,23 @@
 // ============================================================================
 // DISPARO DE ACESSO (magic link) AOS COMPRADORES VIA SENDGRID
 // ----------------------------------------------------------------------------
-// O BACKEND é dono do processo. No enqueue, o próprio backend drena a fila em
-// lotes sequenciais de até 1000 (limite do SendGrid), respeitando um teto de
-// tempo por requisição. O CRON roda toda hora como garantia: drena vários lotes
-// por tick. Logo, se a requisição for cortada, a aba fechar ou o PC desligar, o
-// disparo continua e termina sozinho. O frontend só observa (realtime).
+// 100% BACKEND. O frontend só enfileira e observa (realtime); nunca processa.
+//
+// enqueue  -> cria a campanha, enfileira o cluster (UPDATE em massa) e processa
+//             o PRIMEIRO lote sincronamente (≤1000 sai imediato, no servidor).
+// cron     -> a cada minuto, drena o que sobrou em LOOP com orçamento de ~50s
+//             (esvazia a fila inteira num tick). Independe de aba/PC.
 //
 // CONCORRÊNCIA: cada lote é reivindicado atomicamente (acesso_claim único) antes
 // de processar — enqueue e cron podem rodar juntos sem nunca pegar o mesmo
-// comprador (ninguém recebe e-mail repetido).
+// comprador. Sem e-mail duplicado.
 //
-// RETRY INTELIGENTE: 2xx = enviado; 429/5xx/rede = reenfileira (até 5 tentativas,
-// o cron retenta no próximo tick); demais 4xx (config) = marca erro na hora.
+// RETRY: 2xx = enviado; 429/5xx/rede = reenfileira (até 5 tentativas) e o
+// processamento recua até o próximo tick (backoff natural de 1 min); demais 4xx
+// (config: remetente/template/auth) = erro na hora, sem desperdiçar tentativa.
 //
 // REGRA JSVM: cada callback roda em VM isolada — todo helper é declarado DENTRO
-// do callback. Por isso a lógica de lote aparece duplicada em enqueue e no cron.
+// do callback (inclusive a função processOneBatch, duplicada em enqueue e cron).
 // ============================================================================
 
 // --- Lista os dynamic templates do SendGrid (para o dropdown) ---------------
@@ -47,13 +49,11 @@ routerAdd(
         headers: { Authorization: 'Bearer ' + apiKey },
         timeout: 20,
       })
-
       const txt = decodeBody(res.body)
       let parsed = {}
       try {
         parsed = JSON.parse(txt)
       } catch (_) {}
-
       const list = parsed.result || parsed.templates || []
       const templates = []
       for (const t of list) {
@@ -69,7 +69,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- HEARTBEAT + HEALTH: verifica se o cron roda neste ambiente -------------
+// --- HEARTBEAT + HEALTH: confirma que o cron está vivo no ambiente -----------
 cronAdd('cron_heartbeat', '* * * * *', () => {
   try {
     let rec
@@ -100,7 +100,6 @@ routerAdd(
     try {
       const body = e.requestInfo().body || {}
       const cluster = body.cluster
-
       let sql
       if (cluster === 'pendentes') {
         sql =
@@ -108,7 +107,6 @@ routerAdd(
       } else {
         sql = "SELECT COUNT(*) as c FROM compradores WHERE email != ''"
       }
-
       const row = new DynamicModel({ c: 0 })
       $app.db().newQuery(sql).one(row)
       return e.json(200, { count: row.c })
@@ -119,7 +117,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- Enqueue: cria a campanha, enfileira e JÁ DRENA (com teto de tempo) ------
+// --- Enqueue: cria a campanha, enfileira e JÁ processa o primeiro lote -------
 routerAdd(
   'POST',
   '/backend/v1/admin/dispatch/enqueue',
@@ -138,7 +136,6 @@ routerAdd(
       } catch (_) {}
       return ''
     }
-
     const atualizaDisparo = (did) => {
       if (!did) return
       try {
@@ -166,16 +163,17 @@ routerAdd(
           )
           .bind({ did: did })
           .one(cRest)
-        const d = $app.findRecordById('disparos', did)
-        d.set('enviados', cEnv.c)
-        d.set('erros', cErr.c)
-        d.set('status', cRest.c > 0 ? 'em_andamento' : 'concluido')
-        $app.save(d)
+        const disparo = $app.findRecordById('disparos', did)
+        disparo.set('enviados', cEnv.c)
+        disparo.set('erros', cErr.c)
+        disparo.set('status', cRest.c > 0 ? 'em_andamento' : 'concluido')
+        $app.save(disparo)
       } catch (_) {}
     }
-
-    // Processa UM lote. Retorna: 'empty' | 'sent' | 'retry' | 'perm' | 'skip'.
-    const processOneBatch = (apiKey) => {
+    // Processa UM lote. Retorna 'empty' | 'retry' | 'done'.
+    const processOneBatch = () => {
+      const apiKey = $os.getenv('SENDGRID_API_KEY')
+      if (!apiKey) return 'empty'
       let first
       try {
         first = $app.findFirstRecordByFilter('compradores', 'acesso_status = {:s}', {
@@ -193,9 +191,8 @@ routerAdd(
           $app.save(first)
         } catch (_) {}
         atualizaDisparo(disparoId)
-        return 'skip'
+        return 'done'
       }
-
       const claim = $security.randomString(20)
       try {
         const sub = disparoId
@@ -211,9 +208,8 @@ routerAdd(
           .bind({ claim: claim, k: disparoId || templateId })
           .execute()
       } catch (_) {
-        return 'retry'
+        return 'done'
       }
-
       let batch
       try {
         batch = $app.findRecordsByFilter(
@@ -227,9 +223,9 @@ routerAdd(
           },
         )
       } catch (_) {
-        return 'retry'
+        return 'done'
       }
-      if (!batch || batch.length === 0) return 'empty'
+      if (!batch || batch.length === 0) return 'done'
 
       const personalizations = []
       const exp = new Date()
@@ -249,10 +245,12 @@ routerAdd(
             tr.set('expira_em', expIso)
             txApp.save(tr)
             const nome = c.getString('nome') || ''
-            const firstname = (nome.split(' ')[0] || nome || '').trim()
             personalizations.push({
               to: [{ email: email, name: nome }],
-              dynamic_template_data: { firstname: firstname, token: token },
+              dynamic_template_data: {
+                firstname: (nome.split(' ')[0] || nome || '').trim(),
+                token: token,
+              },
             })
           }
         })
@@ -266,9 +264,8 @@ routerAdd(
             .bind({ claim: claim })
             .execute()
         } catch (_) {}
-        return 'retry'
+        return 'done'
       }
-
       if (personalizations.length === 0) {
         try {
           $app
@@ -280,7 +277,7 @@ routerAdd(
             .execute()
         } catch (_) {}
         atualizaDisparo(disparoId)
-        return 'skip'
+        return 'done'
       }
 
       let status = 0
@@ -303,10 +300,8 @@ routerAdd(
       } catch (err) {
         erroMsg = err.message
       }
-
       const ok = status >= 200 && status < 300
       const retryable = !ok && (status === 429 || status >= 500 || status === 0)
-
       if (ok) {
         const now = new Date().toISOString()
         try {
@@ -318,8 +313,6 @@ routerAdd(
             .bind({ now: now, claim: claim })
             .execute()
         } catch (_) {}
-        atualizaDisparo(disparoId)
-        return 'sent'
       } else if (retryable) {
         const errTxt = ('HTTP ' + status + ' ' + (respBody || erroMsg || '')).substring(0, 300)
         try {
@@ -333,8 +326,6 @@ routerAdd(
             .bind({ err: errTxt, claim: claim })
             .execute()
         } catch (_) {}
-        atualizaDisparo(disparoId)
-        return 'retry'
       } else {
         const errTxt = ('HTTP ' + status + ' ' + (respBody || erroMsg || '')).substring(0, 300)
         try {
@@ -346,34 +337,12 @@ routerAdd(
             .bind({ err: errTxt, claim: claim })
             .execute()
         } catch (_) {}
-        atualizaDisparo(disparoId)
-        return 'perm'
       }
+      atualizaDisparo(disparoId)
+      return retryable ? 'retry' : 'done'
     }
+    // ---- fim helpers ----
 
-    const drain = (apiKey, budgetMs) => {
-      // Recupera presos em 'enviando' há mais de 10min (crash/deploy).
-      try {
-        const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
-        $app
-          .db()
-          .newQuery(
-            "UPDATE compradores SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_status = 'enviando' AND updated < {:cut}",
-          )
-          .bind({ cut: cut })
-          .execute()
-      } catch (_) {}
-
-      const start = Date.now()
-      while (Date.now() - start < budgetMs) {
-        const r = processOneBatch(apiKey)
-        if (r === 'empty') break
-        if (r === 'retry') break // deixa o cron retentar no próximo tick (sem busy-wait)
-        // 'sent' | 'perm' | 'skip' → próximo lote imediatamente
-      }
-    }
-
-    // ---- corpo do enqueue ----
     try {
       const body = e.requestInfo().body || {}
       const cluster = body.cluster === 'pendentes' ? 'pendentes' : 'todos'
@@ -426,11 +395,10 @@ routerAdd(
       if (row.c === 0) disparo.set('status', 'concluido')
       $app.save(disparo)
 
-      // Drena já, no backend (teto ~20s). O resto, se houver, o cron termina.
-      const apiKey = $os.getenv('SENDGRID_API_KEY')
-      if (apiKey && row.c > 0) {
+      // Processa o primeiro lote JÁ (≤1000 sai imediato; resto fica pro cron).
+      if (row.c > 0) {
         try {
-          drain(apiKey, 20000)
+          processOneBatch()
         } catch (_) {}
       }
 
@@ -485,7 +453,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- CRON: garantia. Drena vários lotes por tick (teto ~45s). ---------------
+// --- CRON: drena a fila em loop (orçamento ~50s) a cada minuto ---------------
 cronAdd('email_dispatch', '* * * * *', () => {
   const apiKey = $os.getenv('SENDGRID_API_KEY')
   if (!apiKey) return
@@ -503,7 +471,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
     } catch (_) {}
     return ''
   }
-
   const atualizaDisparo = (did) => {
     if (!did) return
     try {
@@ -531,14 +498,13 @@ cronAdd('email_dispatch', '* * * * *', () => {
         )
         .bind({ did: did })
         .one(cRest)
-      const d = $app.findRecordById('disparos', did)
-      d.set('enviados', cEnv.c)
-      d.set('erros', cErr.c)
-      d.set('status', cRest.c > 0 ? 'em_andamento' : 'concluido')
-      $app.save(d)
+      const disparo = $app.findRecordById('disparos', did)
+      disparo.set('enviados', cEnv.c)
+      disparo.set('erros', cErr.c)
+      disparo.set('status', cRest.c > 0 ? 'em_andamento' : 'concluido')
+      $app.save(disparo)
     } catch (_) {}
   }
-
   const processOneBatch = () => {
     let first
     try {
@@ -555,9 +521,8 @@ cronAdd('email_dispatch', '* * * * *', () => {
         $app.save(first)
       } catch (_) {}
       atualizaDisparo(disparoId)
-      return 'skip'
+      return 'done'
     }
-
     const claim = $security.randomString(20)
     try {
       const sub = disparoId
@@ -573,9 +538,8 @@ cronAdd('email_dispatch', '* * * * *', () => {
         .bind({ claim: claim, k: disparoId || templateId })
         .execute()
     } catch (_) {
-      return 'retry'
+      return 'done'
     }
-
     let batch
     try {
       batch = $app.findRecordsByFilter(
@@ -589,9 +553,9 @@ cronAdd('email_dispatch', '* * * * *', () => {
         },
       )
     } catch (_) {
-      return 'retry'
+      return 'done'
     }
-    if (!batch || batch.length === 0) return 'empty'
+    if (!batch || batch.length === 0) return 'done'
 
     const personalizations = []
     const exp = new Date()
@@ -611,10 +575,12 @@ cronAdd('email_dispatch', '* * * * *', () => {
           tr.set('expira_em', expIso)
           txApp.save(tr)
           const nome = c.getString('nome') || ''
-          const firstname = (nome.split(' ')[0] || nome || '').trim()
           personalizations.push({
             to: [{ email: email, name: nome }],
-            dynamic_template_data: { firstname: firstname, token: token },
+            dynamic_template_data: {
+              firstname: (nome.split(' ')[0] || nome || '').trim(),
+              token: token,
+            },
           })
         }
       })
@@ -628,9 +594,8 @@ cronAdd('email_dispatch', '* * * * *', () => {
           .bind({ claim: claim })
           .execute()
       } catch (_) {}
-      return 'retry'
+      return 'done'
     }
-
     if (personalizations.length === 0) {
       try {
         $app
@@ -642,7 +607,7 @@ cronAdd('email_dispatch', '* * * * *', () => {
           .execute()
       } catch (_) {}
       atualizaDisparo(disparoId)
-      return 'skip'
+      return 'done'
     }
 
     let status = 0
@@ -665,10 +630,8 @@ cronAdd('email_dispatch', '* * * * *', () => {
     } catch (err) {
       erroMsg = err.message
     }
-
     const ok = status >= 200 && status < 300
     const retryable = !ok && (status === 429 || status >= 500 || status === 0)
-
     if (ok) {
       const now = new Date().toISOString()
       try {
@@ -680,8 +643,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
           .bind({ now: now, claim: claim })
           .execute()
       } catch (_) {}
-      atualizaDisparo(disparoId)
-      return 'sent'
     } else if (retryable) {
       const errTxt = ('HTTP ' + status + ' ' + (respBody || erroMsg || '')).substring(0, 300)
       try {
@@ -695,8 +656,6 @@ cronAdd('email_dispatch', '* * * * *', () => {
           .bind({ err: errTxt, claim: claim })
           .execute()
       } catch (_) {}
-      atualizaDisparo(disparoId)
-      return 'retry'
     } else {
       const errTxt = ('HTTP ' + status + ' ' + (respBody || erroMsg || '')).substring(0, 300)
       try {
@@ -708,12 +667,12 @@ cronAdd('email_dispatch', '* * * * *', () => {
           .bind({ err: errTxt, claim: claim })
           .execute()
       } catch (_) {}
-      atualizaDisparo(disparoId)
-      return 'perm'
     }
+    atualizaDisparo(disparoId)
+    return retryable ? 'retry' : 'done'
   }
 
-  // Recupera presos em 'enviando' há mais de 10min.
+  // Recupera presos em 'enviando' há mais de 10min (crash/deploy).
   try {
     const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
     $app
@@ -725,11 +684,11 @@ cronAdd('email_dispatch', '* * * * *', () => {
       .execute()
   } catch (_) {}
 
-  // Drena vários lotes neste tick (teto ~45s).
-  const start = Date.now()
-  while (Date.now() - start < 45000) {
+  // Drena em loop até esvaziar, recuar (retry) ou estourar o orçamento.
+  const startMs = Date.now()
+  while (Date.now() - startMs < 50000) {
     const r = processOneBatch()
     if (r === 'empty') break
-    if (r === 'retry') break // próximo tick retenta
+    if (r === 'retry') break // backoff natural até o próximo tick (1 min)
   }
 })
