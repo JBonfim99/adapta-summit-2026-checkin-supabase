@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { Input } from '@/components/ui/input'
 import {
   Select,
   SelectTrigger,
@@ -31,6 +32,7 @@ interface Template {
 
 interface Disparo {
   id: string
+  nome: string
   template_id: string
   template_nome: string
   cluster: string
@@ -43,7 +45,9 @@ interface Disparo {
 
 const CLUSTERS: Record<string, string> = {
   todos: 'Todos os compradores',
-  pendentes: 'Apenas com ingresso pendente',
+  pendentes: 'Compradores com ingresso pendente',
+  participantes_todos: 'Todos os participantes pré-credenciados',
+  participantes_recentes: 'Participantes pré-credenciados (recentes)',
 }
 
 export default function AdminDispatch() {
@@ -54,6 +58,8 @@ export default function AdminDispatch() {
 
   const [templateId, setTemplateId] = useState('')
   const [cluster, setCluster] = useState('todos')
+  const [nome, setNome] = useState('')
+  const [dias, setDias] = useState(7)
 
   const [disparos, setDisparos] = useState<Disparo[]>([])
 
@@ -101,6 +107,7 @@ export default function AdminDispatch() {
   // Acompanhamento ao vivo: o cron atualiza o registro do disparo a cada lote.
   useRealtime('disparos', () => loadDisparos())
 
+  const filteredTemplates = templates.filter((t) => (t.name || '').toLowerCase().includes('summit'))
   const templateName = templates.find((t) => t.id === templateId)?.name || templateId
 
   const cronAge =
@@ -118,7 +125,7 @@ export default function AdminDispatch() {
     try {
       const res = await pb.send('/backend/v1/admin/dispatch/preview', {
         method: 'POST',
-        body: JSON.stringify({ cluster }),
+        body: JSON.stringify({ cluster, dias }),
       })
       setPreviewCount(res.count || 0)
       setConfirmOpen(true)
@@ -134,7 +141,13 @@ export default function AdminDispatch() {
     try {
       const res = await pb.send('/backend/v1/admin/dispatch/enqueue', {
         method: 'POST',
-        body: JSON.stringify({ cluster, template_id: templateId, template_nome: templateName }),
+        body: JSON.stringify({
+          cluster,
+          dias,
+          nome,
+          template_id: templateId,
+          template_nome: templateName,
+        }),
       })
       setConfirmOpen(false)
       toast({
@@ -203,6 +216,15 @@ export default function AdminDispatch() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Nome do disparo (opcional)</label>
+            <Input
+              placeholder="Ex: Lembrete pré-credenciamento"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+            />
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium">Template (SendGrid)</label>
@@ -216,7 +238,7 @@ export default function AdminDispatch() {
                     <SelectValue placeholder="Selecione um template" />
                   </SelectTrigger>
                   <SelectContent>
-                    {templates.map((t) => (
+                    {filteredTemplates.map((t) => (
                       <SelectItem key={t.id} value={t.id}>
                         {t.name}
                       </SelectItem>
@@ -229,9 +251,9 @@ export default function AdminDispatch() {
                   <AlertTriangle className="w-3 h-3" /> {templatesError}
                 </p>
               )}
-              {!loadingTemplates && !templatesError && templates.length === 0 && (
+              {!loadingTemplates && !templatesError && filteredTemplates.length === 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Nenhum template dinâmico encontrado no SendGrid.
+                  Nenhum template com "Summit" encontrado no SendGrid.
                 </p>
               )}
             </div>
@@ -244,11 +266,29 @@ export default function AdminDispatch() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="todos">Todos os compradores</SelectItem>
-                  <SelectItem value="pendentes">Apenas com ingresso pendente</SelectItem>
+                  <SelectItem value="pendentes">Compradores com ingresso pendente</SelectItem>
+                  <SelectItem value="participantes_todos">
+                    Todos os participantes pré-credenciados
+                  </SelectItem>
+                  <SelectItem value="participantes_recentes">
+                    Participantes pré-credenciados (últimos X dias)
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
+
+          {cluster === 'participantes_recentes' && (
+            <div className="space-y-2 max-w-[240px]">
+              <label className="text-sm font-medium">Pré-credenciados nos últimos (dias)</label>
+              <Input
+                type="number"
+                min={1}
+                value={dias}
+                onChange={(e) => setDias(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              />
+            </div>
+          )}
 
           <Button
             className="bg-primary gap-2"
@@ -289,7 +329,9 @@ export default function AdminDispatch() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold truncate">{d.template_nome}</span>
+                          <span className="font-semibold truncate">
+                            {d.nome || d.template_nome}
+                          </span>
                           {emAndamento ? (
                             <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1">
                               <Loader2 className="w-3 h-3 animate-spin" /> Em andamento
@@ -367,6 +409,12 @@ export default function AdminDispatch() {
                   <span className="font-bold text-foreground">{previewCount}</span> comprador(es).
                 </p>
                 <div className="rounded-lg bg-slate-50 border p-3 space-y-1">
+                  {nome.trim() && (
+                    <div>
+                      <span className="text-muted-foreground">Nome: </span>
+                      <span className="font-medium text-foreground">{nome.trim()}</span>
+                    </div>
+                  )}
                   <div>
                     <span className="text-muted-foreground">Template: </span>
                     <span className="font-medium text-foreground">{templateName}</span>

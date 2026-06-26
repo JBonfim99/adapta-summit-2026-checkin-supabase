@@ -1,21 +1,20 @@
 // ============================================================================
-// DISPARO DE ACESSO (magic link) AOS COMPRADORES VIA SENDGRID
+// DISPARO DE ACESSO/COMUNICAÇÃO VIA SENDGRID — 100% BACKEND
 // ----------------------------------------------------------------------------
-// 100% BACKEND. O frontend só enfileira e observa (realtime); nunca processa.
+// Audiências (clusters):
+//   compradores:   'todos' | 'pendentes'           -> coleção compradores (com token)
+//   participantes: 'participantes_todos' |
+//                  'participantes_recentes' (X dias) -> coleção participantes (sem token)
 //
-// enqueue  -> cria a campanha, enfileira o cluster (UPDATE em massa) e processa
-//             o PRIMEIRO lote sincronamente (≤1000 sai imediato, no servidor).
-// cron     -> a cada minuto, drena o que sobrou em LOOP com orçamento de ~50s.
+// A fila vive como campos na própria coleção do destinatário (acesso_*), então o
+// enqueue é um UPDATE em massa (instantâneo) e o claim do cron é atômico. O cron
+// drena as DUAS coleções. processOneBatch é parametrizado por (coleção, campo de
+// nome, gerar token). Para participantes não há token — vai só o template.
 //
-// AUDITORIA: cada envio aceito/recusado vira uma linha imutável em `envios`
-// (disparo, contato, email, status, data/hora) — o detalhe do disparo fica fixo.
-//
-// CONCORRÊNCIA: cada lote é reivindicado atomicamente (acesso_claim único).
+// AUDITORIA: cada envio vira linha imutável em `envios`.
 // RETRY: 2xx=enviado; 429/5xx/rede=reenfileira (até 5x, backoff de 1 tick);
 //        demais 4xx=erro na hora.
-//
-// REGRA JSVM: cada callback roda em VM isolada — helpers declarados DENTRO de
-// cada callback (processOneBatch é duplicada em enqueue e cron de propósito).
+// REGRA JSVM: helpers declarados DENTRO de cada callback.
 // ============================================================================
 
 // --- Lista os dynamic templates do SendGrid (para o dropdown) ---------------
@@ -67,7 +66,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- HEARTBEAT + HEALTH: confirma que o cron está vivo no ambiente -----------
+// --- HEARTBEAT + HEALTH -----------------------------------------------------
 cronAdd('cron_heartbeat', '* * * * *', () => {
   try {
     let rec
@@ -90,7 +89,10 @@ routerAdd('GET', '/backend/v1/dispatch/health', (e) => {
   return e.json(200, { last_run: lastRun, now: new Date().toISOString() })
 })
 
-// --- Preview: quantos compradores o cluster atinge --------------------------
+// --- Resolve cluster -> { coll, nameField, gerarToken, where } --------------
+// (função pura reusada em preview e enqueue; declarada dentro de cada callback)
+
+// --- Preview ----------------------------------------------------------------
 routerAdd(
   'POST',
   '/backend/v1/admin/dispatch/preview',
@@ -98,13 +100,29 @@ routerAdd(
     try {
       const body = e.requestInfo().body || {}
       const cluster = body.cluster
+      const dias = parseInt(body.dias, 10) || 7
+
       let sql
       if (cluster === 'pendentes') {
         sql =
           "SELECT COUNT(*) as c FROM compradores WHERE email != '' AND id IN (SELECT comprador_id FROM ingressos WHERE status = 'Pendente')"
+      } else if (cluster === 'participantes_todos') {
+        sql = "SELECT COUNT(*) as c FROM participantes WHERE email != ''"
+      } else if (cluster === 'participantes_recentes') {
+        const cut = new Date(Date.now() - dias * 86400000).toISOString().replace('T', ' ')
+        const row = new DynamicModel({ c: 0 })
+        $app
+          .db()
+          .newQuery(
+            "SELECT COUNT(*) as c FROM participantes WHERE email != '' AND created >= {:cut}",
+          )
+          .bind({ cut: cut })
+          .one(row)
+        return e.json(200, { count: row.c })
       } else {
         sql = "SELECT COUNT(*) as c FROM compradores WHERE email != ''"
       }
+
       const row = new DynamicModel({ c: 0 })
       $app.db().newQuery(sql).one(row)
       return e.json(200, { count: row.c })
@@ -115,7 +133,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- Enqueue: cria a campanha, enfileira e JÁ processa o primeiro lote -------
+// --- Enqueue ----------------------------------------------------------------
 routerAdd(
   'POST',
   '/backend/v1/admin/dispatch/enqueue',
@@ -133,48 +151,39 @@ routerAdd(
       } catch (_) {}
       return ''
     }
-    const atualizaDisparo = (did) => {
+    const atualizaDisparo = (did, collName) => {
       if (!did) return
       try {
-        const cEnv = new DynamicModel({ c: 0 })
-        $app
-          .db()
-          .newQuery(
-            "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'enviado'",
-          )
-          .bind({ did: did })
-          .one(cEnv)
-        const cErr = new DynamicModel({ c: 0 })
-        $app
-          .db()
-          .newQuery(
-            "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'erro'",
-          )
-          .bind({ did: did })
-          .one(cErr)
-        const cRest = new DynamicModel({ c: 0 })
-        $app
-          .db()
-          .newQuery(
-            "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND (acesso_status = 'na_fila' OR acesso_status = 'enviando')",
-          )
-          .bind({ did: did })
-          .one(cRest)
+        const q = (st) => {
+          const r = new DynamicModel({ c: 0 })
+          $app
+            .db()
+            .newQuery(
+              'SELECT COUNT(*) as c FROM ' +
+                collName +
+                ' WHERE acesso_disparo_id = {:did} AND acesso_status = {:st}',
+            )
+            .bind({ did: did, st: st })
+            .one(r)
+          return r.c
+        }
+        const enviados = q('enviado')
+        const erros = q('erro')
+        const rest1 = q('na_fila')
+        const rest2 = q('enviando')
         const disparo = $app.findRecordById('disparos', did)
-        disparo.set('enviados', cEnv.c)
-        disparo.set('erros', cErr.c)
-        disparo.set('status', cRest.c > 0 ? 'em_andamento' : 'concluido')
+        disparo.set('enviados', enviados)
+        disparo.set('erros', erros)
+        disparo.set('status', rest1 + rest2 > 0 ? 'em_andamento' : 'concluido')
         $app.save(disparo)
       } catch (_) {}
     }
-    const processOneBatch = () => {
+    const processOneBatch = (collName, nameField, gerarToken) => {
       const apiKey = $os.getenv('SENDGRID_API_KEY')
       if (!apiKey) return 'empty'
       let first
       try {
-        first = $app.findFirstRecordByFilter('compradores', 'acesso_status = {:s}', {
-          s: 'na_fila',
-        })
+        first = $app.findFirstRecordByFilter(collName, 'acesso_status = {:s}', { s: 'na_fila' })
       } catch (_) {
         return 'empty'
       }
@@ -186,18 +195,24 @@ routerAdd(
         try {
           $app.save(first)
         } catch (_) {}
-        atualizaDisparo(disparoId)
+        atualizaDisparo(disparoId, collName)
         return 'done'
       }
       const claim = $security.randomString(20)
       try {
         const sub = disparoId
-          ? "SELECT id FROM compradores WHERE acesso_status = 'na_fila' AND acesso_disparo_id = {:k} ORDER BY created LIMIT 1000"
-          : "SELECT id FROM compradores WHERE acesso_status = 'na_fila' AND acesso_template_id = {:k} ORDER BY created LIMIT 1000"
+          ? 'SELECT id FROM ' +
+            collName +
+            " WHERE acesso_status = 'na_fila' AND acesso_disparo_id = {:k} ORDER BY created LIMIT 1000"
+          : 'SELECT id FROM ' +
+            collName +
+            " WHERE acesso_status = 'na_fila' AND acesso_template_id = {:k} ORDER BY created LIMIT 1000"
         $app
           .db()
           .newQuery(
-            "UPDATE compradores SET acesso_status = 'enviando', acesso_claim = {:claim} WHERE id IN (" +
+            'UPDATE ' +
+              collName +
+              " SET acesso_status = 'enviando', acesso_claim = {:claim} WHERE id IN (" +
               sub +
               ')',
           )
@@ -208,16 +223,9 @@ routerAdd(
       }
       let batch
       try {
-        batch = $app.findRecordsByFilter(
-          'compradores',
-          'acesso_claim = {:claim}',
-          'created',
-          1000,
-          0,
-          {
-            claim: claim,
-          },
-        )
+        batch = $app.findRecordsByFilter(collName, 'acesso_claim = {:claim}', 'created', 1000, 0, {
+          claim: claim,
+        })
       } catch (_) {
         return 'done'
       }
@@ -233,7 +241,7 @@ routerAdd(
               const ev = new Record(enviosColl)
               ev.set('disparo_id', disparoId)
               ev.set('comprador_id', c.id)
-              ev.set('nome', c.getString('nome') || '')
+              ev.set('nome', c.getString(nameField) || '')
               ev.set('email', em)
               ev.set('status', st)
               ev.set('enviado_em', quando)
@@ -249,24 +257,25 @@ routerAdd(
       const expIso = exp.toISOString()
       try {
         $app.runInTransaction((txApp) => {
-          const tokenColl = txApp.findCollectionByNameOrId('tokens_acesso')
+          const tokenColl = gerarToken ? txApp.findCollectionByNameOrId('tokens_acesso') : null
           for (const c of batch) {
             const email = c.getString('email')
             if (!email) continue
-            const token = $security.randomString(40)
-            const tr = new Record(tokenColl)
-            tr.set('comprador_id', c.id)
-            tr.set('token', token)
-            tr.set('usado', false)
-            tr.set('expira_em', expIso)
-            txApp.save(tr)
-            const nome = c.getString('nome') || ''
+            const nome = c.getString(nameField) || ''
+            const dtd = { firstname: (nome.split(' ')[0] || nome || '').trim() }
+            if (gerarToken) {
+              const token = $security.randomString(40)
+              const tr = new Record(tokenColl)
+              tr.set('comprador_id', c.id)
+              tr.set('token', token)
+              tr.set('usado', false)
+              tr.set('expira_em', expIso)
+              txApp.save(tr)
+              dtd.token = token
+            }
             personalizations.push({
               to: [{ email: email, name: nome }],
-              dynamic_template_data: {
-                firstname: (nome.split(' ')[0] || nome || '').trim(),
-                token: token,
-              },
+              dynamic_template_data: dtd,
             })
           }
         })
@@ -275,7 +284,9 @@ routerAdd(
           $app
             .db()
             .newQuery(
-              "UPDATE compradores SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_claim = {:claim}",
+              'UPDATE ' +
+                collName +
+                " SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_claim = {:claim}",
             )
             .bind({ claim: claim })
             .execute()
@@ -287,12 +298,14 @@ routerAdd(
           $app
             .db()
             .newQuery(
-              "UPDATE compradores SET acesso_status = 'erro', acesso_erro = 'Sem email', acesso_claim = '' WHERE acesso_claim = {:claim}",
+              'UPDATE ' +
+                collName +
+                " SET acesso_status = 'erro', acesso_erro = 'Sem email', acesso_claim = '' WHERE acesso_claim = {:claim}",
             )
             .bind({ claim: claim })
             .execute()
         } catch (_) {}
-        atualizaDisparo(disparoId)
+        atualizaDisparo(disparoId, collName)
         return 'done'
       }
 
@@ -324,7 +337,9 @@ routerAdd(
           $app
             .db()
             .newQuery(
-              "UPDATE compradores SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '', acesso_claim = '' WHERE acesso_claim = {:claim}",
+              'UPDATE ' +
+                collName +
+                " SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '', acesso_claim = '' WHERE acesso_claim = {:claim}",
             )
             .bind({ now: nowStr, claim: claim })
             .execute()
@@ -336,7 +351,9 @@ routerAdd(
           $app
             .db()
             .newQuery(
-              'UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, ' +
+              'UPDATE ' +
+                collName +
+                ' SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, ' +
                 "acesso_status = CASE WHEN acesso_tentativas + 1 >= 5 THEN 'erro' ELSE 'na_fila' END, " +
                 "acesso_claim = '' WHERE acesso_claim = {:claim}",
             )
@@ -349,33 +366,58 @@ routerAdd(
           $app
             .db()
             .newQuery(
-              "UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, acesso_status = 'erro', acesso_claim = '' WHERE acesso_claim = {:claim}",
+              'UPDATE ' +
+                collName +
+                " SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, acesso_status = 'erro', acesso_claim = '' WHERE acesso_claim = {:claim}",
             )
             .bind({ err: errTxt, claim: claim })
             .execute()
         } catch (_) {}
         registraEnvios('erro', nowStr)
       }
-      atualizaDisparo(disparoId)
+      atualizaDisparo(disparoId, collName)
       return retryable ? 'retry' : 'done'
     }
 
     try {
       const body = e.requestInfo().body || {}
-      const cluster = body.cluster === 'pendentes' ? 'pendentes' : 'todos'
+      const cluster = body.cluster || 'todos'
       const templateId = (body.template_id || '').toString().trim()
       const templateNome = (body.template_nome || '').toString().trim()
+      const nomeCampanha = (body.nome || '').toString().trim()
+      const dias = parseInt(body.dias, 10) || 7
 
       if (!templateId) return e.badRequestError('Selecione um template')
       if (templateId.indexOf('d-') !== 0) {
         return e.badRequestError('template_id inválido (deve começar com d-)')
       }
 
+      // cluster -> coleção + where + audiência
+      let coll = 'compradores'
+      let audience = 'compradores'
+      let where = "email != ''"
+      if (cluster === 'pendentes') {
+        where =
+          "email != '' AND id IN (SELECT comprador_id FROM ingressos WHERE status = 'Pendente')"
+      } else if (cluster === 'participantes_todos') {
+        coll = 'participantes'
+        audience = 'participantes'
+        where = "email != ''"
+      } else if (cluster === 'participantes_recentes') {
+        coll = 'participantes'
+        audience = 'participantes'
+        const cut = new Date(Date.now() - dias * 86400000).toISOString().replace('T', ' ')
+        where = "email != '' AND created >= '" + cut + "'"
+      }
+      where += " AND (acesso_status IS NULL OR acesso_status != 'enviando')"
+
       const disparosColl = $app.findCollectionByNameOrId('disparos')
       const disparo = new Record(disparosColl)
+      disparo.set('nome', nomeCampanha)
       disparo.set('template_id', templateId)
       disparo.set('template_nome', templateNome || templateId)
       disparo.set('cluster', cluster)
+      disparo.set('audience', audience)
       disparo.set('total', 0)
       disparo.set('enviados', 0)
       disparo.set('erros', 0)
@@ -383,18 +425,12 @@ routerAdd(
       $app.save(disparo)
       const disparoId = disparo.id
 
-      let where
-      if (cluster === 'pendentes') {
-        where =
-          "email != '' AND id IN (SELECT comprador_id FROM ingressos WHERE status = 'Pendente') AND (acesso_status IS NULL OR acesso_status != 'enviando')"
-      } else {
-        where = "email != '' AND (acesso_status IS NULL OR acesso_status != 'enviando')"
-      }
-
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'na_fila', acesso_template_id = {:tid}, " +
+          'UPDATE ' +
+            coll +
+            " SET acesso_status = 'na_fila', acesso_template_id = {:tid}, " +
             "acesso_disparo_id = {:did}, acesso_tentativas = 0, acesso_erro = '', acesso_claim = '' WHERE " +
             where,
         )
@@ -404,7 +440,7 @@ routerAdd(
       const row = new DynamicModel({ c: 0 })
       $app
         .db()
-        .newQuery('SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did}')
+        .newQuery('SELECT COUNT(*) as c FROM ' + coll + ' WHERE acesso_disparo_id = {:did}')
         .bind({ did: disparoId })
         .one(row)
 
@@ -414,7 +450,8 @@ routerAdd(
 
       if (row.c > 0) {
         try {
-          processOneBatch()
+          if (audience === 'participantes') processOneBatch('participantes', 'nome_completo', false)
+          else processOneBatch('compradores', 'nome', true)
         } catch (_) {}
       }
 
@@ -426,7 +463,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- Retry por campanha: reenfileira os 'erro' de um disparo -----------------
+// --- Retry por campanha -----------------------------------------------------
 routerAdd(
   'POST',
   '/backend/v1/admin/dispatch/{disparoId}/retry',
@@ -435,10 +472,18 @@ routerAdd(
       const disparoId = e.request.pathValue('disparoId')
       if (!disparoId) return e.badRequestError('disparoId é obrigatório')
 
+      let coll = 'compradores'
+      try {
+        const d = $app.findRecordById('disparos', disparoId)
+        if (d.getString('audience') === 'participantes') coll = 'participantes'
+      } catch (_) {}
+
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'na_fila', acesso_tentativas = 0, acesso_erro = '', acesso_claim = '' " +
+          'UPDATE ' +
+            coll +
+            " SET acesso_status = 'na_fila', acesso_tentativas = 0, acesso_erro = '', acesso_claim = '' " +
             "WHERE acesso_disparo_id = {:did} AND acesso_status = 'erro'",
         )
         .bind({ did: disparoId })
@@ -448,7 +493,9 @@ routerAdd(
       $app
         .db()
         .newQuery(
-          "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'na_fila'",
+          'SELECT COUNT(*) as c FROM ' +
+            coll +
+            " WHERE acesso_disparo_id = {:did} AND acesso_status = 'na_fila'",
         )
         .bind({ did: disparoId })
         .one(row)
@@ -469,7 +516,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- CRON: drena a fila em loop (orçamento ~50s) a cada minuto ---------------
+// --- CRON: drena compradores e participantes em loop ------------------------
 cronAdd('email_dispatch', '* * * * *', () => {
   const apiKey = $os.getenv('SENDGRID_API_KEY')
   if (!apiKey) return
@@ -487,44 +534,37 @@ cronAdd('email_dispatch', '* * * * *', () => {
     } catch (_) {}
     return ''
   }
-  const atualizaDisparo = (did) => {
+  const atualizaDisparo = (did, collName) => {
     if (!did) return
     try {
-      const cEnv = new DynamicModel({ c: 0 })
-      $app
-        .db()
-        .newQuery(
-          "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'enviado'",
-        )
-        .bind({ did: did })
-        .one(cEnv)
-      const cErr = new DynamicModel({ c: 0 })
-      $app
-        .db()
-        .newQuery(
-          "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND acesso_status = 'erro'",
-        )
-        .bind({ did: did })
-        .one(cErr)
-      const cRest = new DynamicModel({ c: 0 })
-      $app
-        .db()
-        .newQuery(
-          "SELECT COUNT(*) as c FROM compradores WHERE acesso_disparo_id = {:did} AND (acesso_status = 'na_fila' OR acesso_status = 'enviando')",
-        )
-        .bind({ did: did })
-        .one(cRest)
+      const q = (st) => {
+        const r = new DynamicModel({ c: 0 })
+        $app
+          .db()
+          .newQuery(
+            'SELECT COUNT(*) as c FROM ' +
+              collName +
+              ' WHERE acesso_disparo_id = {:did} AND acesso_status = {:st}',
+          )
+          .bind({ did: did, st: st })
+          .one(r)
+        return r.c
+      }
+      const enviados = q('enviado')
+      const erros = q('erro')
+      const rest1 = q('na_fila')
+      const rest2 = q('enviando')
       const disparo = $app.findRecordById('disparos', did)
-      disparo.set('enviados', cEnv.c)
-      disparo.set('erros', cErr.c)
-      disparo.set('status', cRest.c > 0 ? 'em_andamento' : 'concluido')
+      disparo.set('enviados', enviados)
+      disparo.set('erros', erros)
+      disparo.set('status', rest1 + rest2 > 0 ? 'em_andamento' : 'concluido')
       $app.save(disparo)
     } catch (_) {}
   }
-  const processOneBatch = () => {
+  const processOneBatch = (collName, nameField, gerarToken) => {
     let first
     try {
-      first = $app.findFirstRecordByFilter('compradores', 'acesso_status = {:s}', { s: 'na_fila' })
+      first = $app.findFirstRecordByFilter(collName, 'acesso_status = {:s}', { s: 'na_fila' })
     } catch (_) {
       return 'empty'
     }
@@ -536,18 +576,24 @@ cronAdd('email_dispatch', '* * * * *', () => {
       try {
         $app.save(first)
       } catch (_) {}
-      atualizaDisparo(disparoId)
+      atualizaDisparo(disparoId, collName)
       return 'done'
     }
     const claim = $security.randomString(20)
     try {
       const sub = disparoId
-        ? "SELECT id FROM compradores WHERE acesso_status = 'na_fila' AND acesso_disparo_id = {:k} ORDER BY created LIMIT 1000"
-        : "SELECT id FROM compradores WHERE acesso_status = 'na_fila' AND acesso_template_id = {:k} ORDER BY created LIMIT 1000"
+        ? 'SELECT id FROM ' +
+          collName +
+          " WHERE acesso_status = 'na_fila' AND acesso_disparo_id = {:k} ORDER BY created LIMIT 1000"
+        : 'SELECT id FROM ' +
+          collName +
+          " WHERE acesso_status = 'na_fila' AND acesso_template_id = {:k} ORDER BY created LIMIT 1000"
       $app
         .db()
         .newQuery(
-          "UPDATE compradores SET acesso_status = 'enviando', acesso_claim = {:claim} WHERE id IN (" +
+          'UPDATE ' +
+            collName +
+            " SET acesso_status = 'enviando', acesso_claim = {:claim} WHERE id IN (" +
             sub +
             ')',
         )
@@ -558,16 +604,9 @@ cronAdd('email_dispatch', '* * * * *', () => {
     }
     let batch
     try {
-      batch = $app.findRecordsByFilter(
-        'compradores',
-        'acesso_claim = {:claim}',
-        'created',
-        1000,
-        0,
-        {
-          claim: claim,
-        },
-      )
+      batch = $app.findRecordsByFilter(collName, 'acesso_claim = {:claim}', 'created', 1000, 0, {
+        claim: claim,
+      })
     } catch (_) {
       return 'done'
     }
@@ -583,7 +622,7 @@ cronAdd('email_dispatch', '* * * * *', () => {
             const ev = new Record(enviosColl)
             ev.set('disparo_id', disparoId)
             ev.set('comprador_id', c.id)
-            ev.set('nome', c.getString('nome') || '')
+            ev.set('nome', c.getString(nameField) || '')
             ev.set('email', em)
             ev.set('status', st)
             ev.set('enviado_em', quando)
@@ -599,25 +638,23 @@ cronAdd('email_dispatch', '* * * * *', () => {
     const expIso = exp.toISOString()
     try {
       $app.runInTransaction((txApp) => {
-        const tokenColl = txApp.findCollectionByNameOrId('tokens_acesso')
+        const tokenColl = gerarToken ? txApp.findCollectionByNameOrId('tokens_acesso') : null
         for (const c of batch) {
           const email = c.getString('email')
           if (!email) continue
-          const token = $security.randomString(40)
-          const tr = new Record(tokenColl)
-          tr.set('comprador_id', c.id)
-          tr.set('token', token)
-          tr.set('usado', false)
-          tr.set('expira_em', expIso)
-          txApp.save(tr)
-          const nome = c.getString('nome') || ''
-          personalizations.push({
-            to: [{ email: email, name: nome }],
-            dynamic_template_data: {
-              firstname: (nome.split(' ')[0] || nome || '').trim(),
-              token: token,
-            },
-          })
+          const nome = c.getString(nameField) || ''
+          const dtd = { firstname: (nome.split(' ')[0] || nome || '').trim() }
+          if (gerarToken) {
+            const token = $security.randomString(40)
+            const tr = new Record(tokenColl)
+            tr.set('comprador_id', c.id)
+            tr.set('token', token)
+            tr.set('usado', false)
+            tr.set('expira_em', expIso)
+            txApp.save(tr)
+            dtd.token = token
+          }
+          personalizations.push({ to: [{ email: email, name: nome }], dynamic_template_data: dtd })
         }
       })
     } catch (_) {
@@ -625,7 +662,9 @@ cronAdd('email_dispatch', '* * * * *', () => {
         $app
           .db()
           .newQuery(
-            "UPDATE compradores SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_claim = {:claim}",
+            'UPDATE ' +
+              collName +
+              " SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_claim = {:claim}",
           )
           .bind({ claim: claim })
           .execute()
@@ -637,12 +676,14 @@ cronAdd('email_dispatch', '* * * * *', () => {
         $app
           .db()
           .newQuery(
-            "UPDATE compradores SET acesso_status = 'erro', acesso_erro = 'Sem email', acesso_claim = '' WHERE acesso_claim = {:claim}",
+            'UPDATE ' +
+              collName +
+              " SET acesso_status = 'erro', acesso_erro = 'Sem email', acesso_claim = '' WHERE acesso_claim = {:claim}",
           )
           .bind({ claim: claim })
           .execute()
       } catch (_) {}
-      atualizaDisparo(disparoId)
+      atualizaDisparo(disparoId, collName)
       return 'done'
     }
 
@@ -674,7 +715,9 @@ cronAdd('email_dispatch', '* * * * *', () => {
         $app
           .db()
           .newQuery(
-            "UPDATE compradores SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '', acesso_claim = '' WHERE acesso_claim = {:claim}",
+            'UPDATE ' +
+              collName +
+              " SET acesso_status = 'enviado', acesso_enviado_em = {:now}, acesso_erro = '', acesso_claim = '' WHERE acesso_claim = {:claim}",
           )
           .bind({ now: nowStr, claim: claim })
           .execute()
@@ -686,7 +729,9 @@ cronAdd('email_dispatch', '* * * * *', () => {
         $app
           .db()
           .newQuery(
-            'UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, ' +
+            'UPDATE ' +
+              collName +
+              ' SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, ' +
               "acesso_status = CASE WHEN acesso_tentativas + 1 >= 5 THEN 'erro' ELSE 'na_fila' END, " +
               "acesso_claim = '' WHERE acesso_claim = {:claim}",
           )
@@ -699,32 +744,46 @@ cronAdd('email_dispatch', '* * * * *', () => {
         $app
           .db()
           .newQuery(
-            "UPDATE compradores SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, acesso_status = 'erro', acesso_claim = '' WHERE acesso_claim = {:claim}",
+            'UPDATE ' +
+              collName +
+              " SET acesso_tentativas = acesso_tentativas + 1, acesso_erro = {:err}, acesso_status = 'erro', acesso_claim = '' WHERE acesso_claim = {:claim}",
           )
           .bind({ err: errTxt, claim: claim })
           .execute()
       } catch (_) {}
       registraEnvios('erro', nowStr)
     }
-    atualizaDisparo(disparoId)
+    atualizaDisparo(disparoId, collName)
     return retryable ? 'retry' : 'done'
   }
 
-  // Recupera presos em 'enviando' há mais de 10min (crash/deploy).
+  // Recupera presos em 'enviando' há mais de 10min, nas duas coleções.
   try {
     const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
-    $app
-      .db()
-      .newQuery(
-        "UPDATE compradores SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_status = 'enviando' AND updated < {:cut}",
-      )
-      .bind({ cut: cut })
-      .execute()
+    ;['compradores', 'participantes'].forEach((coll) => {
+      try {
+        $app
+          .db()
+          .newQuery(
+            'UPDATE ' +
+              coll +
+              " SET acesso_status = 'na_fila', acesso_claim = '' WHERE acesso_status = 'enviando' AND updated < {:cut}",
+          )
+          .bind({ cut: cut })
+          .execute()
+      } catch (_) {}
+    })
   } catch (_) {}
+
+  const drainStep = () => {
+    const r = processOneBatch('compradores', 'nome', true)
+    if (r !== 'empty') return r
+    return processOneBatch('participantes', 'nome_completo', false)
+  }
 
   const startMs = Date.now()
   while (Date.now() - startMs < 50000) {
-    const r = processOneBatch()
+    const r = drainStep()
     if (r === 'empty') break
     if (r === 'retry') break
   }

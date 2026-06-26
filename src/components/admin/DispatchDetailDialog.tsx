@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast'
 
 interface DisparoLite {
   id: string
+  nome: string
   template_nome: string
   cluster: string
   total: number
@@ -33,7 +34,9 @@ interface Envio {
 
 const CLUSTERS: Record<string, string> = {
   todos: 'Todos os compradores',
-  pendentes: 'Apenas com ingresso pendente',
+  pendentes: 'Compradores com ingresso pendente',
+  participantes_todos: 'Todos os participantes pré-credenciados',
+  participantes_recentes: 'Participantes pré-credenciados (recentes)',
 }
 
 const PER_PAGE = 50
@@ -150,7 +153,9 @@ export default function DispatchDetailDialog({
           <DialogDescription asChild>
             <div className="text-sm space-y-1 pt-1">
               <div>
-                <span className="font-medium text-foreground">{disparo?.template_nome}</span>
+                <span className="font-medium text-foreground">
+                  {disparo?.nome || disparo?.template_nome}
+                </span>
               </div>
               <div className="text-muted-foreground">
                 {disparo ? CLUSTERS[disparo.cluster] || disparo.cluster : ''} · disparado em{' '}

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-26T12:26:08.926Z",
+  "generatedAt": "2026-06-26T12:52:00.917Z",
   "collections": [
     {
       "name": "users",
@@ -29,14 +29,19 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         }
       ],
       "indexes": [
@@ -72,14 +77,19 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         },
         {
           "name": "documento",
@@ -110,7 +120,12 @@
           "type": "select",
           "required": false,
           "system": false,
-          "selectValues": ["na_fila", "enviando", "enviado", "erro"]
+          "selectValues": [
+            "na_fila",
+            "enviando",
+            "enviado",
+            "erro"
+          ]
         },
         {
           "name": "acesso_template_id",
@@ -242,14 +257,19 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         },
         {
           "name": "ingresso_id",
@@ -257,6 +277,54 @@
           "required": true,
           "system": false,
           "collectionRef": "ingressos"
+        },
+        {
+          "name": "acesso_status",
+          "type": "select",
+          "required": false,
+          "system": false,
+          "selectValues": [
+            "na_fila",
+            "enviando",
+            "enviado",
+            "erro"
+          ]
+        },
+        {
+          "name": "acesso_disparo_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "acesso_template_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "acesso_enviado_em",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "acesso_tentativas",
+          "type": "number",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "acesso_erro",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "acesso_claim",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": []
@@ -290,7 +358,10 @@
           "type": "select",
           "required": true,
           "system": false,
-          "selectValues": ["Pendente", "Pré-Credenciado"]
+          "selectValues": [
+            "Pendente",
+            "Pré-Credenciado"
+          ]
         },
         {
           "name": "participante_id",
@@ -310,31 +381,45 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         },
         {
           "name": "tipo_ingresso",
           "type": "select",
           "required": false,
           "system": false,
-          "selectValues": ["GOLD", "PLATINUM"]
+          "selectValues": [
+            "GOLD",
+            "PLATINUM"
+          ]
         },
         {
           "name": "status_webhook",
           "type": "select",
           "required": false,
           "system": false,
-          "selectValues": ["pendente", "enviado", "erro"]
+          "selectValues": [
+            "pendente",
+            "enviado",
+            "erro"
+          ]
         }
       ],
-      "indexes": ["CREATE UNIQUE INDEX `idx_ingressos_pedido_id` ON `ingressos` (pedido_id)"]
+      "indexes": [
+        "CREATE UNIQUE INDEX `idx_ingressos_pedido_id` ON `ingressos` (pedido_id)"
+      ]
     },
     {
       "name": "tokens_acesso",
@@ -377,17 +462,24 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         }
       ],
-      "indexes": ["CREATE UNIQUE INDEX idx_tokens_acesso_token ON tokens_acesso (token)"]
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_tokens_acesso_token ON tokens_acesso (token)"
+      ]
     },
     {
       "name": "links_participante",
@@ -430,17 +522,24 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         }
       ],
-      "indexes": ["CREATE UNIQUE INDEX idx_links_participante_token ON links_participante (token)"]
+      "indexes": [
+        "CREATE UNIQUE INDEX idx_links_participante_token ON links_participante (token)"
+      ]
     },
     {
       "name": "webhooks_log",
@@ -483,14 +582,19 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         },
         {
           "name": "evento",
@@ -565,21 +669,41 @@
           "type": "select",
           "required": false,
           "system": false,
-          "selectValues": ["em_andamento", "concluido"]
+          "selectValues": [
+            "em_andamento",
+            "concluido"
+          ]
         },
         {
           "name": "created",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
+        },
+        {
+          "name": "nome",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "audience",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": []
@@ -606,14 +730,19 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         }
       ],
       "indexes": []
@@ -658,7 +787,10 @@
           "type": "select",
           "required": false,
           "system": false,
-          "selectValues": ["enviado", "erro"]
+          "selectValues": [
+            "enviado",
+            "erro"
+          ]
         },
         {
           "name": "enviado_em",
@@ -671,17 +803,24 @@
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate"]
+          "autodateTriggers": [
+            "onCreate"
+          ]
         },
         {
           "name": "updated",
           "type": "autodate",
           "required": false,
           "system": false,
-          "autodateTriggers": ["onCreate", "onUpdate"]
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
         }
       ],
-      "indexes": ["CREATE INDEX idx_envios_disparo ON envios (disparo_id)"]
+      "indexes": [
+        "CREATE INDEX idx_envios_disparo ON envios (disparo_id)"
+      ]
     }
   ]
 }
