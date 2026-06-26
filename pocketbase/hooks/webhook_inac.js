@@ -1,131 +1,22 @@
 // ---------------------------------------------------------------------------
-// Integração com o INAC (entrega de pré-credenciamento p/ geração de QR Code).
+// Integração com a INAC (endpoint /add — gera o QR Code de credenciamento).
 //
-// A URL de disparo vem da env var INAC_WEBHOOK_URL (Skip > Environment).
-// Sem autenticação. Sem URL configurada, nada é enviado, nenhum log é criado,
-// e o ingresso fica com status_webhook = 'pendente'.
+// IMPORTANTE: a chamada à INAC agora é SÍNCRONA, feita nos endpoints de
+// credenciamento (participant_routes.js: /participant/submit e admin_routes.js:
+// /admin/participant/create), para podermos esperar a resposta, renderizar o QR
+// na hora e persistir inac_id/inac_qr no ingresso. Por isso NÃO há mais um hook
+// onRecordAfterCreateSuccess aqui (evita chamada dupla).
 //
-// Retentativa (fluxo automático — participante e adição pelo painel):
-//   - até 4 tentativas no total (1 inicial + 3 retentativas)
-//   - timeout de 10s por tentativa
-//   - espera de 2s entre as tentativas
-//   - cada tentativa é gravada em Logs
-//   - o erro NUNCA é exibido ao usuário (o disparo roda após o commit).
-//
-// OBS: no JSVM do PocketBase os callbacks rodam em VMs separadas, então toda a
-// lógica está inline em cada callback.
+// Este arquivo mantém apenas o REENVIO MANUAL (tela de Logs): repete a /add para
+// ingressos que falharam. URL e token vêm das env vars INAC_WEBHOOK_URL e
+// INAC_AUTH_TOKEN. Idempotente: se o ingresso já tem inac_id, não reenvia.
 // ---------------------------------------------------------------------------
-
-// Dispara automaticamente quando um participante é criado (após "Finalizar").
-onRecordAfterCreateSuccess((e) => {
-  const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL')
-
-  const part = e.record
-  const ingresso = $app.findRecordById('ingressos', part.getString('ingresso_id'))
-
-  // Sem URL: não dispara e não loga. Só deixa pendente para reenvio futuro.
-  if (!INAC_WEBHOOK_URL) {
-    ingresso.set('status_webhook', 'pendente')
-    $app.save(ingresso)
-    e.next()
-    return
-  }
-
-  // Lê o corpo da resposta de forma defensiva (pode vir como string, bytes,
-  // TypedArray ou array de bytes dependendo do runtime).
-  const decodeBody = (body) => {
-    if (body == null) return ''
-    if (typeof body === 'string') return body
-    try {
-      return new TextDecoder().decode(body)
-    } catch (_) {}
-    try {
-      let s = ''
-      for (let i = 0; i < body.length; i++) s += String.fromCharCode(body[i])
-      return s
-    } catch (_) {}
-    return ''
-  }
-
-  const payload = {
-    nome_completo: part.getString('nome_completo'),
-    email: part.getString('email'),
-    cpf: part.getString('cpf').replace(/\D/g, ''),
-    telefone: part.getString('telefone').replace(/\D/g, ''),
-    nome_empresa: part.getString('nome_empresa'),
-    ingresso_id: ingresso.id,
-    ingresso_categoria: ingresso.getString('tipo_ingresso'),
-  }
-
-  const logColl = $app.findCollectionByNameOrId('webhooks_log')
-  const MAX_ATTEMPTS = 4 // 1 inicial + 3 retentativas
-  let delivered = false
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    let status = 0
-    let respBody = ''
-    let erroMsg = ''
-    try {
-      const res = $http.send({
-        url: INAC_WEBHOOK_URL,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        timeout: 10,
-      })
-      status = res.statusCode
-      respBody = decodeBody(res.body)
-    } catch (err) {
-      erroMsg = err.message
-    }
-
-    const ok = status >= 200 && status < 300
-
-    const log = new Record(logColl)
-    log.set('ingresso_id', ingresso.id)
-    log.set('evento', ok ? 'webhook_enviado' : 'webhook_erro')
-    log.set(
-      'detalhe',
-      `Tentativa ${attempt}/${MAX_ATTEMPTS} — ` +
-        (ok
-          ? `enviado ao INAC (HTTP ${status})`
-          : erroMsg
-            ? `falha de rede: ${erroMsg}`
-            : `INAC retornou erro (HTTP ${status})`),
-    )
-    log.set('status', status)
-    log.set('method', 'POST')
-    log.set('payload', JSON.stringify(payload))
-    log.set('response', (respBody || erroMsg || '').substring(0, 500))
-    $app.save(log)
-
-    if (ok) {
-      delivered = true
-      break
-    }
-
-    // Espera 2s antes da próxima tentativa (exceto após a última).
-    if (attempt < MAX_ATTEMPTS) {
-      const waitUntil = Date.now() + 2000
-      while (Date.now() < waitUntil) {
-        // aguarda
-      }
-    }
-  }
-
-  ingresso.set('status_webhook', delivered ? 'enviado' : 'erro')
-  $app.save(ingresso)
-
-  e.next()
-}, 'participantes')
-
-// Reenvio manual a partir da tela de Logs (ação explícita do admin: tentativa
-// única, com retorno do resultado para quem clicou).
 routerAdd(
   'POST',
   '/backend/v1/admin/retry-webhook/{ingressoId}',
   (e) => {
     const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL')
+    const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN')
 
     const decodeBody = (body) => {
       if (body == null) return ''
@@ -147,20 +38,38 @@ routerAdd(
       const partId = ingresso.getString('participante_id')
       if (!partId) return e.badRequestError('Ingresso sem participante')
 
-      if (!INAC_WEBHOOK_URL) {
-        return e.badRequestError('INAC_WEBHOOK_URL não configurada')
+      // Idempotência: já credenciado na INAC, não reenvia.
+      if (ingresso.getString('inac_id')) {
+        return e.json(200, {
+          success: true,
+          already: true,
+          qrcode: ingresso.getString('inac_qr'),
+        })
+      }
+
+      if (!INAC_WEBHOOK_URL || !INAC_AUTH_TOKEN) {
+        return e.badRequestError('INAC_WEBHOOK_URL/INAC_AUTH_TOKEN não configurados')
       }
 
       const part = $app.findRecordById('participantes', partId)
+      const onlyDigits = (s) => (s || '').replace(/\D/g, '')
+      let tel = onlyDigits(part.getString('telefone'))
+      if (tel && tel.length <= 11) tel = '55' + tel
+      const categoria = ingresso.getString('tipo_ingresso')
+      const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
 
       const payload = {
-        nome_completo: part.getString('nome_completo'),
-        email: part.getString('email'),
-        cpf: part.getString('cpf').replace(/\D/g, ''),
-        telefone: part.getString('telefone').replace(/\D/g, ''),
-        nome_empresa: part.getString('nome_empresa'),
-        ingresso_id: ingresso.id,
-        ingresso_categoria: ingresso.getString('tipo_ingresso'),
+        event_id: 375,
+        category_id: categoryId,
+        status: 'active',
+        fields: [
+          { id: 10133653, value: part.getString('nome_completo') },
+          { id: 10133654, value: part.getString('email') },
+          { id: 10133655, value: onlyDigits(part.getString('cpf')) },
+          { id: 10133656, value: tel },
+          { id: 10133657, value: part.getString('nome_empresa') },
+          { id: 10133665, value: ingresso.id },
+        ],
       }
 
       let status = 0
@@ -170,9 +79,9 @@ routerAdd(
         const res = $http.send({
           url: INAC_WEBHOOK_URL,
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
-          timeout: 10,
+          timeout: 20,
         })
         status = res.statusCode
         respBody = decodeBody(res.body)
@@ -180,18 +89,37 @@ routerAdd(
         erroMsg = err.message
       }
 
-      const ok = status >= 200 && status < 300
+      let inacId = ''
+      let inacQr = ''
+      let apiOk = false
+      if (status >= 200 && status < 300) {
+        try {
+          const data = JSON.parse(respBody)
+          if (data && data.status === true && data.attendee) {
+            apiOk = true
+            inacId = String(data.attendee.id || '')
+            inacQr = String(data.attendee.qrcode || '')
+          }
+        } catch (_) {}
+      }
+
+      if (apiOk && inacQr) {
+        ingresso.set('inac_id', inacId)
+        ingresso.set('inac_qr', inacQr)
+      }
+      ingresso.set('status_webhook', apiOk ? 'enviado' : 'erro')
+      $app.save(ingresso)
 
       const logColl = $app.findCollectionByNameOrId('webhooks_log')
       const log = new Record(logColl)
       log.set('ingresso_id', ingresso.id)
-      log.set('evento', ok ? 'webhook_reenviado' : 'webhook_reenvio_erro')
+      log.set('evento', apiOk ? 'webhook_reenviado' : 'webhook_reenvio_erro')
       log.set(
         'detalhe',
-        ok
-          ? `Reenvio manual bem-sucedido (HTTP ${status})`
+        apiOk
+          ? `Reenvio manual OK (id ${inacId})`
           : erroMsg
-            ? `Falha de rede no reenvio manual: ${erroMsg}`
+            ? `Falha de rede no reenvio: ${erroMsg}`
             : `INAC retornou erro no reenvio (HTTP ${status})`,
       )
       log.set('status', status)
@@ -200,11 +128,8 @@ routerAdd(
       log.set('response', (respBody || erroMsg || '').substring(0, 500))
       $app.save(log)
 
-      ingresso.set('status_webhook', ok ? 'enviado' : 'erro')
-      $app.save(ingresso)
-
-      if (ok) {
-        return e.json(200, { success: true })
+      if (apiOk) {
+        return e.json(200, { success: true, qrcode: inacQr })
       }
       return e.json(502, { success: false, status: status, error: respBody || erroMsg })
     } catch (err) {

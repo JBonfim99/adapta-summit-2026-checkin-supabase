@@ -167,12 +167,14 @@ export default function ParticipantForm() {
         expectativa_aprendizado: data.expectativa_aprendizado || '',
         expectativa_experiencia: data.expectativa_experiencia || '',
       }
-      await pb.send('/backend/v1/participant/submit', {
+      const resp: any = await pb.send('/backend/v1/participant/submit', {
         method: 'POST',
         body: JSON.stringify(payload),
       })
       toast({ title: 'Dados salvos com sucesso!' })
-      navigate('/participante/obrigado', { state: { participantEmail: data.email || '' } })
+      navigate('/participante/obrigado', {
+        state: { participantEmail: data.email || '', qrcode: resp?.qrcode || '' },
+      })
     } catch (e: any) {
       toast({ title: 'Erro', description: getErrorMessage(e), variant: 'destructive' })
     } finally {

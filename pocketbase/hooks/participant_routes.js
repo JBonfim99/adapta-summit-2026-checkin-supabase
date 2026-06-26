@@ -52,6 +52,7 @@ routerAdd('GET', '/backend/v1/participant/ticket/{token}', (e) => {
       pedido_id: ingresso.getString('pedido_id'),
       preenchido: !!participante,
       participante: participante,
+      inac_qr: ingresso.getString('inac_qr'),
     })
   } catch (err) {
     return e.badRequestError('Ingresso não encontrado')
@@ -87,6 +88,7 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
     return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro e-mail.')
   }
 
+  let ingressoId = ''
   try {
     $app.runInTransaction((txApp) => {
       const link = txApp.findFirstRecordByData('links_participante', 'token', token)
@@ -95,6 +97,7 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
       }
 
       const ingresso = txApp.findRecordById('ingressos', link.getString('ingresso_id'))
+      ingressoId = ingresso.id
 
       const partColl = txApp.findCollectionByNameOrId('participantes')
       const part = new Record(partColl)
@@ -122,8 +125,6 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
       link.set('usado', true)
       txApp.save(link)
     })
-
-    return e.json(200, { success: true })
   } catch (err) {
     const m = (err && err.message) || ''
     if (/unique/i.test(m) || m.indexOf('idx_participantes_email') !== -1) {
@@ -131,4 +132,118 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
     }
     return e.badRequestError(m)
   }
+
+  // Pós-commit: chama a INAC /add (síncrono) para gerar o QR, persiste
+  // inac_id/inac_qr no ingresso e devolve o qrcode para renderizar na hora.
+  // Idempotente: só chama se o ingresso ainda não tiver inac_id.
+  let qrcode = ''
+  try {
+    const ingresso = $app.findRecordById('ingressos', ingressoId)
+    if (ingresso.getString('inac_id')) {
+      qrcode = ingresso.getString('inac_qr')
+    } else {
+      const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL')
+      const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN')
+      const decodeBody = (b) => {
+        if (b == null) return ''
+        if (typeof b === 'string') return b
+        try {
+          return new TextDecoder().decode(b)
+        } catch (_) {}
+        try {
+          let s = ''
+          for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+          return s
+        } catch (_) {}
+        return ''
+      }
+      const onlyDigits = (s) => (s || '').replace(/\D/g, '')
+      let tel = onlyDigits(body.telefone)
+      if (tel && tel.length <= 11) tel = '55' + tel
+      const categoria = ingresso.getString('tipo_ingresso')
+      const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
+      const payload = {
+        event_id: 375,
+        category_id: categoryId,
+        status: 'active',
+        fields: [
+          { id: 10133653, value: body.nome_completo || '' },
+          { id: 10133654, value: emailNorm },
+          { id: 10133655, value: onlyDigits(body.cpf) },
+          { id: 10133656, value: tel },
+          { id: 10133657, value: body.nome_empresa || '' },
+          { id: 10133665, value: ingresso.id },
+        ],
+      }
+
+      let httpStatus = 0
+      let respBody = ''
+      let erroMsg = ''
+      if (INAC_WEBHOOK_URL && INAC_AUTH_TOKEN) {
+        try {
+          const res = $http.send({
+            url: INAC_WEBHOOK_URL,
+            method: 'POST',
+            headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            timeout: 20,
+          })
+          httpStatus = res.statusCode
+          respBody = decodeBody(res.body)
+        } catch (err) {
+          erroMsg = err.message
+        }
+      } else {
+        erroMsg = 'INAC_WEBHOOK_URL/INAC_AUTH_TOKEN não configurados'
+      }
+
+      let inacId = ''
+      let inacQr = ''
+      let apiOk = false
+      if (httpStatus >= 200 && httpStatus < 300) {
+        try {
+          const data = JSON.parse(respBody)
+          if (data && data.status === true && data.attendee) {
+            apiOk = true
+            inacId = String(data.attendee.id || '')
+            inacQr = String(data.attendee.qrcode || '')
+          }
+        } catch (_) {}
+      }
+
+      if (apiOk && inacQr) {
+        ingresso.set('inac_id', inacId)
+        ingresso.set('inac_qr', inacQr)
+        ingresso.set('status_webhook', 'enviado')
+        qrcode = inacQr
+      } else if (!INAC_WEBHOOK_URL || !INAC_AUTH_TOKEN) {
+        ingresso.set('status_webhook', 'pendente')
+      } else {
+        ingresso.set('status_webhook', 'erro')
+      }
+      $app.save(ingresso)
+
+      try {
+        const logColl = $app.findCollectionByNameOrId('webhooks_log')
+        const log = new Record(logColl)
+        log.set('ingresso_id', ingresso.id)
+        log.set('evento', apiOk ? 'webhook_enviado' : 'webhook_erro')
+        log.set(
+          'detalhe',
+          apiOk
+            ? `INAC /add OK (id ${inacId})`
+            : erroMsg
+              ? `Falha: ${erroMsg}`
+              : `INAC retornou erro (HTTP ${httpStatus})`,
+        )
+        log.set('status', httpStatus)
+        log.set('method', 'POST')
+        log.set('payload', JSON.stringify(payload))
+        log.set('response', (respBody || erroMsg || '').substring(0, 500))
+        $app.save(log)
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  return e.json(200, { success: true, qrcode: qrcode })
 })

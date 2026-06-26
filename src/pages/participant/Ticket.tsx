@@ -5,12 +5,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertCircle, Ticket as TicketIcon, CheckCircle2, Mail } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
+import QrCredential from '@/components/QrCredential'
 
 interface TicketData {
   tipo_ingresso: string
   status: string
   pedido_id: string
   preenchido: boolean
+  inac_qr?: string
   participante: {
     nome_completo: string
     email: string
@@ -129,6 +131,12 @@ export default function ParticipantTicket() {
             </Badge>
           </div>
 
+          {data.inac_qr && (
+            <div className="pt-1">
+              <QrCredential value={data.inac_qr} />
+            </div>
+          )}
+
           <div className="rounded-xl border bg-slate-50/60 divide-y">
             <Row label="Participante" value={p.nome_completo} />
             <Row label="E-mail" value={p.email} />
@@ -139,13 +147,15 @@ export default function ParticipantTicket() {
             <Row label="Nº do pedido" value={data.pedido_id} />
           </div>
 
-          <div className="flex items-start gap-2 text-sm text-muted-foreground bg-slate-50 rounded-lg p-4 border border-slate-100">
-            <Mail className="w-4 h-4 mt-0.5 shrink-0 text-accent" />
-            <span>
-              Seu QR Code de acesso é enviado por e-mail. Apresente-o na entrada do evento.
-              Verifique também as abas Spam, Promoções e Outros caso não o encontre.
-            </span>
-          </div>
+          {!data.inac_qr && (
+            <div className="flex items-start gap-2 text-sm text-muted-foreground bg-slate-50 rounded-lg p-4 border border-slate-100">
+              <Mail className="w-4 h-4 mt-0.5 shrink-0 text-accent" />
+              <span>
+                Seu QR Code de acesso é enviado por e-mail. Apresente-o na entrada do evento.
+                Verifique também as abas Spam, Promoções e Outros caso não o encontre.
+              </span>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-26T14:38:09.940Z",
+  "generatedAt": "2026-06-26T14:53:19.145Z",
   "collections": [
     {
       "name": "users",
@@ -417,6 +417,18 @@
             "enviado",
             "erro"
           ]
+        },
+        {
+          "name": "inac_id",
+          "type": "text",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "inac_qr",
+          "type": "text",
+          "required": false,
+          "system": false
         }
       ],
       "indexes": [
