@@ -239,72 +239,95 @@ routerAdd(
           ],
         }
 
-        let httpStatus = 0
-        let respBody = ''
-        let erroMsg = ''
-        if (INAC_WEBHOOK_URL && INAC_AUTH_TOKEN) {
+        const logColl = $app.findCollectionByNameOrId('webhooks_log')
+        const logAttempt = (evento, detalhe, status, resp) => {
           try {
-            const res = $http.send({
-              url: INAC_WEBHOOK_URL,
-              method: 'POST',
-              headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-              timeout: 20,
-            })
-            httpStatus = res.statusCode
-            respBody = decodeBody(res.body)
-          } catch (err) {
-            erroMsg = err.message
-          }
-        } else {
-          erroMsg = 'INAC_WEBHOOK_URL/INAC_AUTH_TOKEN não configurados'
+            const log = new Record(logColl)
+            log.set('ingresso_id', ingresso.id)
+            log.set('evento', evento)
+            log.set('detalhe', detalhe)
+            log.set('status', status)
+            log.set('method', 'POST')
+            log.set('payload', JSON.stringify(payload))
+            log.set('response', (resp || '').substring(0, 500))
+            $app.save(log)
+          } catch (_) {}
         }
 
         let inacId = ''
         let inacQr = ''
         let apiOk = false
-        if (httpStatus >= 200 && httpStatus < 300) {
-          try {
-            const data = JSON.parse(respBody)
-            if (data && data.status === true && data.attendee) {
-              apiOk = true
-              inacId = String(data.attendee.id || '')
-              inacQr = String(data.attendee.qrcode || '')
-            }
-          } catch (_) {}
-        }
 
-        if (apiOk && inacQr) {
-          ingresso.set('inac_id', inacId)
-          ingresso.set('inac_qr', inacQr)
-          ingresso.set('status_webhook', 'enviado')
-          qrcode = inacQr
-        } else if (!INAC_WEBHOOK_URL || !INAC_AUTH_TOKEN) {
+        if (!INAC_WEBHOOK_URL || !INAC_AUTH_TOKEN) {
           ingresso.set('status_webhook', 'pendente')
+          $app.save(ingresso)
+          logAttempt('webhook_erro', 'INAC_WEBHOOK_URL/INAC_AUTH_TOKEN não configurados', 0, '')
         } else {
-          ingresso.set('status_webhook', 'erro')
-        }
-        $app.save(ingresso)
+          // Retry: até 3 tentativas, com 1,5s entre elas. Cada tentativa é logada.
+          const MAX = 3
+          for (let attempt = 1; attempt <= MAX && !apiOk; attempt++) {
+            let status = 0
+            let respBody = ''
+            let erroMsg = ''
+            try {
+              const res = $http.send({
+                url: INAC_WEBHOOK_URL,
+                method: 'POST',
+                headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                timeout: 12,
+              })
+              status = res.statusCode
+              respBody = decodeBody(res.body)
+            } catch (err) {
+              erroMsg = err.message
+            }
 
-        try {
-          const logColl = $app.findCollectionByNameOrId('webhooks_log')
-          const log = new Record(logColl)
-          log.set('ingresso_id', ingresso.id)
-          log.set('evento', apiOk ? 'webhook_enviado' : 'webhook_erro')
-          log.set(
-            'detalhe',
-            apiOk
-              ? `INAC /add OK (id ${inacId})`
-              : erroMsg
-                ? `Falha: ${erroMsg}`
-                : `INAC retornou erro (HTTP ${httpStatus})`,
-          )
-          log.set('status', httpStatus)
-          log.set('method', 'POST')
-          log.set('payload', JSON.stringify(payload))
-          log.set('response', (respBody || erroMsg || '').substring(0, 500))
-          $app.save(log)
-        } catch (_) {}
+            if (status >= 200 && status < 300) {
+              try {
+                const data = JSON.parse(respBody)
+                if (data && data.status === true && data.attendee) {
+                  apiOk = true
+                  inacId = String(data.attendee.id || '')
+                  inacQr = String(data.attendee.qrcode || '')
+                }
+              } catch (_) {}
+            }
+
+            if (apiOk) {
+              logAttempt(
+                'webhook_enviado',
+                `INAC /add OK (id ${inacId}) na tentativa ${attempt}/${MAX}`,
+                status,
+                respBody,
+              )
+            } else {
+              logAttempt(
+                'webhook_erro',
+                `Tentativa ${attempt}/${MAX} falhou — ` +
+                  (erroMsg ? `rede: ${erroMsg}` : `HTTP ${status}`),
+                status,
+                respBody || erroMsg,
+              )
+              if (attempt < MAX) {
+                const until = Date.now() + 1500
+                while (Date.now() < until) {
+                  // backoff
+                }
+              }
+            }
+          }
+
+          if (apiOk && inacQr) {
+            ingresso.set('inac_id', inacId)
+            ingresso.set('inac_qr', inacQr)
+            ingresso.set('status_webhook', 'enviado')
+            qrcode = inacQr
+          } else {
+            ingresso.set('status_webhook', 'erro')
+          }
+          $app.save(ingresso)
+        }
       }
     } catch (_) {}
 
