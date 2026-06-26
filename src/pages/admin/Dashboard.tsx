@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Ticket, Users, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { Progress } from '@/components/ui/progress'
 import pb from '@/lib/pocketbase/client'
+
+const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0)
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({
@@ -78,6 +81,24 @@ export default function AdminDashboard() {
         </Card>
       </div>
 
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Taxa geral de pré-credenciamento</CardTitle>
+          <CheckCircle className="h-4 w-4 text-emerald-500" />
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-end justify-between mb-2">
+            <span className="text-3xl font-bold text-emerald-600">
+              {pct(stats.preenchidos, stats.total)}%
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {stats.preenchidos} de {stats.total} ingressos
+            </span>
+          </div>
+          <Progress value={pct(stats.preenchidos, stats.total)} />
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -90,6 +111,15 @@ export default function AdminDashboard() {
               {stats.platinum?.preenchidos || 0} credenciados • {stats.platinum?.pendentes || 0}{' '}
               pendentes
             </p>
+            <div className="mt-3 space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Taxa de pré-credenciamento</span>
+                <span className="font-semibold text-slate-800">
+                  {pct(stats.platinum?.preenchidos || 0, stats.platinum?.total || 0)}%
+                </span>
+              </div>
+              <Progress value={pct(stats.platinum?.preenchidos || 0, stats.platinum?.total || 0)} />
+            </div>
           </CardContent>
         </Card>
 
@@ -103,6 +133,15 @@ export default function AdminDashboard() {
             <p className="text-xs text-muted-foreground mt-1">
               {stats.gold?.preenchidos || 0} credenciados • {stats.gold?.pendentes || 0} pendentes
             </p>
+            <div className="mt-3 space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Taxa de pré-credenciamento</span>
+                <span className="font-semibold text-amber-600">
+                  {pct(stats.gold?.preenchidos || 0, stats.gold?.total || 0)}%
+                </span>
+              </div>
+              <Progress value={pct(stats.gold?.preenchidos || 0, stats.gold?.total || 0)} />
+            </div>
           </CardContent>
         </Card>
       </div>
