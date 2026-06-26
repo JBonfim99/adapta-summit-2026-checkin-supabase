@@ -24,6 +24,7 @@ import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useRealtime } from '@/hooks/use-realtime'
 import DispatchDetailDialog from '@/components/admin/DispatchDetailDialog'
+import DisparoIndividual from '@/components/admin/DisparoIndividual'
 
 interface Template {
   id: string
@@ -48,6 +49,7 @@ const CLUSTERS: Record<string, string> = {
   pendentes: 'Compradores com ingresso pendente',
   participantes_todos: 'Todos os participantes pré-credenciados',
   participantes_recentes: 'Participantes pré-credenciados (recentes)',
+  individual: 'Individual',
 }
 
 export default function AdminDispatch() {
@@ -304,6 +306,9 @@ export default function AdminDispatch() {
           </Button>
         </CardContent>
       </Card>
+
+      {/* Disparo individual */}
+      <DisparoIndividual templates={templates} />
 
       {/* Histórico de disparos (ao vivo via realtime) */}
       <div>

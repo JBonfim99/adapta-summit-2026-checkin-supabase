@@ -135,6 +135,40 @@ routerAdd(
   $apis.requireAuth(),
 )
 
+// --- Busca destinatário (para disparo individual) ---------------------------
+routerAdd(
+  'POST',
+  '/backend/v1/admin/dispatch/search-recipient',
+  (e) => {
+    try {
+      const body = e.requestInfo().body || {}
+      const q = (body.q || '').toString().trim()
+      const audience = body.audience === 'participantes' ? 'participantes' : 'compradores'
+      const nameField = audience === 'participantes' ? 'nome_completo' : 'nome'
+      if (!q) return e.json(200, { results: [] })
+      let recs = []
+      try {
+        recs = $app.findRecordsByFilter(
+          audience,
+          nameField + ' ~ {:q} || email ~ {:q}',
+          nameField,
+          10,
+          0,
+          { q: q },
+        )
+      } catch (_) {}
+      const results = []
+      for (const r of recs) {
+        results.push({ id: r.id, nome: r.getString(nameField), email: r.getString('email') })
+      }
+      return e.json(200, { results: results })
+    } catch (err) {
+      return e.badRequestError(err.message)
+    }
+  },
+  $apis.requireAuth(),
+)
+
 // --- Enqueue ----------------------------------------------------------------
 routerAdd(
   'POST',
@@ -437,6 +471,15 @@ routerAdd(
         audience = 'participantes'
         const cut = new Date(Date.now() - dias * 86400000).toISOString().replace('T', ' ')
         where = "email != '' AND created >= '" + cut + "'"
+      } else if (cluster === 'individual') {
+        // Mira um único destinatário pelo id (comprador ou participante).
+        const rid = (body.recipient_id || '').toString().replace(/[^a-zA-Z0-9]/g, '')
+        if (!rid) return e.badRequestError('recipient_id é obrigatório')
+        if (body.audience === 'participantes') {
+          coll = 'participantes'
+          audience = 'participantes'
+        }
+        where = "id = '" + rid + "' AND email != ''"
       }
       where += " AND (acesso_status IS NULL OR acesso_status != 'enviando')"
 

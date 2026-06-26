@@ -37,6 +37,7 @@ const CLUSTERS: Record<string, string> = {
   pendentes: 'Compradores com ingresso pendente',
   participantes_todos: 'Todos os participantes pré-credenciados',
   participantes_recentes: 'Participantes pré-credenciados (recentes)',
+  individual: 'Individual',
 }
 
 const PER_PAGE = 50
