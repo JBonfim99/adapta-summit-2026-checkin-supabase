@@ -62,6 +62,7 @@ export default function AdminDispatch() {
   const [enqueuing, setEnqueuing] = useState(false)
   const [retryingId, setRetryingId] = useState<string | null>(null)
   const drainingRef = useRef(false)
+  const [cronInfo, setCronInfo] = useState<{ last_run: string; now: string } | null>(null)
 
   const loadTemplates = useCallback(() => {
     setLoadingTemplates(true)
@@ -82,10 +83,19 @@ export default function AdminDispatch() {
       .catch(() => {})
   }, [])
 
+  const loadHealth = useCallback(() => {
+    pb.send('/backend/v1/dispatch/health', {})
+      .then((res) => setCronInfo(res))
+      .catch(() => {})
+  }, [])
+
   useEffect(() => {
     loadTemplates()
     loadDisparos()
-  }, [loadTemplates, loadDisparos])
+    loadHealth()
+    const iv = setInterval(loadHealth, 30000)
+    return () => clearInterval(iv)
+  }, [loadTemplates, loadDisparos, loadHealth])
 
   // Acompanhamento ao vivo: o cron atualiza o registro do disparo a cada lote.
   useRealtime('disparos', () => loadDisparos())
@@ -131,6 +141,12 @@ export default function AdminDispatch() {
   }, [hasActive, drainQueue])
 
   const templateName = templates.find((t) => t.id === templateId)?.name || templateId
+
+  const cronAge =
+    cronInfo && cronInfo.last_run
+      ? Math.round((Date.parse(cronInfo.now) - Date.parse(cronInfo.last_run)) / 1000)
+      : null
+  const cronAtivo = cronAge !== null && cronAge < 90
 
   const handleDisparar = async () => {
     if (!templateId) {
@@ -196,6 +212,24 @@ export default function AdminDispatch() {
         <p className="text-muted-foreground">
           Envia o e-mail com o link de acesso (válido por 60 dias) aos compradores via SendGrid.
         </p>
+        {cronInfo && (
+          <div className="mt-2">
+            {cronAge === null ? (
+              <Badge className="bg-slate-100 text-slate-600 border-slate-200">
+                Cron: sem sinal ainda (aguarde ~1 min)
+              </Badge>
+            ) : cronAtivo ? (
+              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
+                Cron ativo · última execução há {cronAge}s
+              </Badge>
+            ) : (
+              <Badge className="bg-rose-100 text-rose-700 border-rose-200">
+                Cron sem sinal há{' '}
+                {cronAge >= 120 ? Math.round(cronAge / 60) + 'min' : cronAge + 's'}
+              </Badge>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Configuração do disparo */}
