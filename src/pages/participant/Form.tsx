@@ -108,6 +108,7 @@ export default function ParticipantForm() {
   const [ticketInfo, setTicketInfo] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [emailChecking, setEmailChecking] = useState(false)
 
   useEffect(() => {
     if (!token) {
@@ -183,7 +184,30 @@ export default function ParticipantForm() {
     const fieldsToValidate =
       step === 1 ? (['nome_completo', 'email', 'cpf', 'telefone'] as const) : []
     const isValid = await methods.trigger(fieldsToValidate)
-    if (isValid) setStep(2)
+    if (!isValid) return
+
+    // Regra: e-mail único entre participantes (pode coincidir com o de um comprador).
+    const email = methods.getValues('email')
+    setEmailChecking(true)
+    try {
+      const res: any = await pb.send('/backend/v1/participant/email-check', {
+        method: 'POST',
+        body: JSON.stringify({ email }),
+      })
+      if (res && res.available === false) {
+        methods.setError('email', {
+          type: 'manual',
+          message: 'Este e-mail já foi usado por outro participante. Use outro e-mail.',
+        })
+        return
+      }
+    } catch (_) {
+      // Se a checagem falhar, segue — o backend ainda valida no envio final.
+    } finally {
+      setEmailChecking(false)
+    }
+
+    setStep(2)
   }
 
   if (loading) {
@@ -391,8 +415,14 @@ export default function ParticipantForm() {
                 )}
 
                 {step === 1 ? (
-                  <Button type="button" className="bg-primary px-8" onClick={nextStep}>
-                    Próximo <ArrowRight className="w-4 h-4 ml-2" />
+                  <Button
+                    type="button"
+                    className="bg-primary px-8"
+                    onClick={nextStep}
+                    disabled={emailChecking}
+                  >
+                    {emailChecking ? 'Verificando...' : 'Próximo'}{' '}
+                    {!emailChecking && <ArrowRight className="w-4 h-4 ml-2" />}
                   </Button>
                 ) : (
                   <Button

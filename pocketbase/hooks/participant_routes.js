@@ -58,9 +58,42 @@ routerAdd('GET', '/backend/v1/participant/ticket/{token}', (e) => {
   }
 })
 
+// Checa se um e-mail já está em uso por OUTRO participante (case-insensitive).
+// Público: o formulário do participante não é autenticado. Retorna só um booleano.
+routerAdd('POST', '/backend/v1/participant/email-check', (e) => {
+  const body = e.requestInfo().body || {}
+  const email = (body.email || '').toString().trim()
+  if (!email) return e.json(200, { available: true })
+  try {
+    const row = new DynamicModel({ c: 0 })
+    $app
+      .db()
+      .newQuery('SELECT COUNT(*) as c FROM participantes WHERE email = {:em} COLLATE NOCASE')
+      .bind({ em: email })
+      .one(row)
+    return e.json(200, { available: row.c === 0 })
+  } catch (err) {
+    return e.json(200, { available: true })
+  }
+})
+
 routerAdd('POST', '/backend/v1/participant/submit', (e) => {
   const body = e.requestInfo().body
   const token = body.token
+  const emailNorm = (body.email || '').toString().trim()
+
+  // Regra: e-mail único entre participantes (pode coincidir com o de um comprador).
+  try {
+    const row = new DynamicModel({ c: 0 })
+    $app
+      .db()
+      .newQuery('SELECT COUNT(*) as c FROM participantes WHERE email = {:em} COLLATE NOCASE')
+      .bind({ em: emailNorm })
+      .one(row)
+    if (row.c > 0) {
+      return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro e-mail.')
+    }
+  } catch (_) {}
 
   try {
     $app.runInTransaction((txApp) => {
@@ -100,6 +133,10 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
 
     return e.json(200, { success: true })
   } catch (err) {
-    return e.badRequestError(err.message)
+    const m = (err && err.message) || ''
+    if (/unique/i.test(m) || m.indexOf('idx_participantes_email') !== -1) {
+      return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro e-mail.')
+    }
+    return e.badRequestError(m)
   }
 })

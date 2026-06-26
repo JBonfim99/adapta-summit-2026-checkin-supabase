@@ -144,6 +144,22 @@ routerAdd(
     const ingressoId = body.ingresso_id
     if (!ingressoId) return e.badRequestError('ingresso_id é obrigatório')
 
+    // Regra: e-mail único entre participantes (pode coincidir com o de um comprador).
+    const emailNorm = (body.email || '').toString().trim()
+    try {
+      const row = new DynamicModel({ c: 0 })
+      $app
+        .db()
+        .newQuery('SELECT COUNT(*) as c FROM participantes WHERE email = {:em} COLLATE NOCASE')
+        .bind({ em: emailNorm })
+        .one(row)
+      if (row.c > 0) {
+        return e.badRequestError(
+          'Este e-mail já foi usado por outro participante. Use outro e-mail.',
+        )
+      }
+    } catch (_) {}
+
     try {
       $app.runInTransaction((txApp) => {
         const ingresso = txApp.findRecordById('ingressos', ingressoId)
@@ -179,7 +195,13 @@ routerAdd(
 
       return e.json(200, { success: true })
     } catch (err) {
-      return e.badRequestError(err.message)
+      const m = (err && err.message) || ''
+      if (/unique/i.test(m) || m.indexOf('idx_participantes_email') !== -1) {
+        return e.badRequestError(
+          'Este e-mail já foi usado por outro participante. Use outro e-mail.',
+        )
+      }
+      return e.badRequestError(m)
     }
   },
   $apis.requireAuth(),
