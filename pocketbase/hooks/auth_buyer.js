@@ -1,7 +1,7 @@
 // Solicitação de magic link pelo próprio comprador (tela de login). Em vez de
 // devolver o token, ENVIA o e-mail via SendGrid usando o template nomeado
 // "Skip-Summit26-Magiclink-acesso" (o link já está embutido no template,
-// composto com a variável {{token}}). Token válido por 24h.
+// composto com a variável {{token}}). Token válido por 60 dias.
 routerAdd('POST', '/backend/v1/auth/magic-link', (e) => {
   const decodeBody = (body) => {
     if (body == null) return ''
@@ -31,7 +31,7 @@ routerAdd('POST', '/backend/v1/auth/magic-link', (e) => {
   const apiKey = $os.getenv('SENDGRID_API_KEY')
   if (!apiKey) return e.badRequestError('Envio de e-mail indisponível no momento.')
 
-  // Cria o token (24h).
+  // Cria o token (60 dias).
   const tokenStr = $security.randomString(40)
   const col = $app.findCollectionByNameOrId('tokens_acesso')
   const tokenRecord = new Record(col)
@@ -39,7 +39,7 @@ routerAdd('POST', '/backend/v1/auth/magic-link', (e) => {
   tokenRecord.set('token', tokenStr)
   tokenRecord.set('usado', false)
   const expira = new Date()
-  expira.setHours(expira.getHours() + 24)
+  expira.setDate(expira.getDate() + 60)
   tokenRecord.set('expira_em', expira.toISOString())
   $app.save(tokenRecord)
 
