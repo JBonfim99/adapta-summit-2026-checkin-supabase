@@ -18,10 +18,11 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Mail, Send, Loader2, RotateCw, AlertTriangle, Inbox } from 'lucide-react'
+import { Mail, Send, Loader2, RotateCw, AlertTriangle, Inbox, Users } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useRealtime } from '@/hooks/use-realtime'
+import DispatchDetailDialog from '@/components/admin/DispatchDetailDialog'
 
 interface Template {
   id: string
@@ -62,6 +63,7 @@ export default function AdminDispatch() {
   const [enqueuing, setEnqueuing] = useState(false)
   const [retryingId, setRetryingId] = useState<string | null>(null)
   const [cronInfo, setCronInfo] = useState<{ last_run: string; now: string } | null>(null)
+  const [detailDisparo, setDetailDisparo] = useState<Disparo | null>(null)
 
   const loadTemplates = useCallback(() => {
     setLoadingTemplates(true)
@@ -323,15 +325,27 @@ export default function AdminDispatch() {
 
                     <Progress value={pct} className="h-2" />
 
-                    <div className="flex items-center gap-4 text-sm">
-                      <span className="text-emerald-700 font-medium">
-                        {enviados}{' '}
-                        <span className="text-muted-foreground font-normal">
-                          de {total} enviados
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="text-emerald-700 font-medium">
+                          {enviados}{' '}
+                          <span className="text-muted-foreground font-normal">
+                            de {total} enviados
+                          </span>
                         </span>
-                      </span>
-                      {restantes > 0 && <span className="text-amber-600">{restantes} na fila</span>}
-                      {erros > 0 && <span className="text-rose-600">{erros} com erro</span>}
+                        {restantes > 0 && (
+                          <span className="text-amber-600">{restantes} na fila</span>
+                        )}
+                        {erros > 0 && <span className="text-rose-600">{erros} com erro</span>}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1 text-primary shrink-0"
+                        onClick={() => setDetailDisparo(d)}
+                      >
+                        <Users className="w-4 h-4" /> Ver contatos
+                      </Button>
                     </div>
                   </CardContent>
                 </Card>
@@ -388,6 +402,14 @@ export default function AdminDispatch() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DispatchDetailDialog
+        disparo={detailDisparo}
+        open={!!detailDisparo}
+        onOpenChange={(o) => {
+          if (!o) setDetailDisparo(null)
+        }}
+      />
     </div>
   )
 }
