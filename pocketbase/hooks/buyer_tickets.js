@@ -108,3 +108,59 @@ routerAdd('POST', '/backend/v1/buyer/tickets/{id}/invite', (e) => {
 
   return e.json(200, { token: inviteToken })
 })
+
+// Token só para VISUALIZAR os detalhes do ingresso (/ingresso). Reaproveita
+// qualquer link válido do ingresso — inclusive já usado — e só cria um novo se
+// não houver nenhum (evita gerar tokens à toa a cada visualização).
+routerAdd('POST', '/backend/v1/buyer/tickets/{id}/view-token', (e) => {
+  const authHeader = e.request.header.get('Authorization') || ''
+  const token = authHeader.replace('Bearer ', '').trim()
+  if (!token) return e.unauthorizedError('Missing token')
+
+  let link
+  try {
+    link = $app.findFirstRecordByFilter('tokens_acesso', 'token = {:t} && expira_em > {:now}', {
+      t: token,
+      now: new Date().toISOString(),
+    })
+  } catch (err) {
+    return e.unauthorizedError('Invalid token')
+  }
+
+  const ticketId = e.request.pathValue('id')
+  let ticket
+  try {
+    ticket = $app.findRecordById('ingressos', ticketId)
+  } catch (err) {
+    return e.notFoundError('Ticket not found')
+  }
+
+  if (ticket.getString('comprador_id') !== link.getString('comprador_id')) {
+    return e.forbiddenError('Not your ticket')
+  }
+
+  let viewToken
+  try {
+    const pl = $app.findFirstRecordByFilter(
+      'links_participante',
+      'ingresso_id = {:id} && expira_em > {:now}',
+      { id: ticketId, now: new Date().toISOString() },
+    )
+    viewToken = pl.getString('token')
+  } catch (err) {}
+
+  if (!viewToken) {
+    const linksCollection = $app.findCollectionByNameOrId('links_participante')
+    const newLink = new Record(linksCollection)
+    newLink.set('ingresso_id', ticketId)
+    newLink.set('token', $security.randomString(32))
+    const exp = new Date()
+    exp.setDate(exp.getDate() + 60)
+    newLink.set('expira_em', exp.toISOString())
+    newLink.set('usado', true)
+    $app.save(newLink)
+    viewToken = newLink.getString('token')
+  }
+
+  return e.json(200, { token: viewToken })
+})

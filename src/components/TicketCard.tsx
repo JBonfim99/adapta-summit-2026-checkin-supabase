@@ -2,7 +2,7 @@ import { Ticket } from '@/types'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Mail, PenSquare, CheckCircle2, UserPlus, Loader2 } from 'lucide-react'
+import { Mail, PenSquare, CheckCircle2, UserPlus, Loader2, Eye } from 'lucide-react'
 import { StatusBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 
@@ -10,10 +10,19 @@ interface TicketCardProps {
   ticket: Ticket
   onFill: () => void
   onInvite: () => void
+  onView: () => void
   isLoadingFill?: boolean
+  isLoadingView?: boolean
 }
 
-export function TicketCard({ ticket, onFill, onInvite, isLoadingFill }: TicketCardProps) {
+export function TicketCard({
+  ticket,
+  onFill,
+  onInvite,
+  onView,
+  isLoadingFill,
+  isLoadingView,
+}: TicketCardProps) {
   const isPendente = ticket.status === 'Pendente'
   const isEnviado = ticket.status === 'enviado'
 
@@ -84,11 +93,25 @@ export function TicketCard({ ticket, onFill, onInvite, isLoadingFill }: TicketCa
             </Button>
           </div>
         )}
-        {!isPendente && (
-          <Button variant="ghost" className="w-full opacity-50 cursor-not-allowed">
-            {ticket.status === 'Pré-Credenciado' ? 'Dados preenchidos' : ticket.status}
-          </Button>
-        )}
+        {!isPendente &&
+          (ticket.status === 'Pré-Credenciado' ? (
+            <Button
+              onClick={onView}
+              disabled={isLoadingView}
+              className="w-full transition-all duration-300 hover:shadow-md hover:scale-[1.02]"
+            >
+              {isLoadingView ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Eye className="w-4 h-4 mr-2" />
+              )}
+              Ver ingresso
+            </Button>
+          ) : (
+            <Button variant="ghost" className="w-full opacity-50 cursor-not-allowed">
+              {ticket.status}
+            </Button>
+          ))}
       </CardFooter>
     </Card>
   )

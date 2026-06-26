@@ -93,6 +93,21 @@ export default function BuyerDashboard() {
     }
   }
 
+  const handleView = async (ticket: Ticket) => {
+    try {
+      setLoadingTicketId(ticket.id)
+      const data = await pb.send(`/backend/v1/buyer/tickets/${ticket.id}/view-token`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${buyer.token}` },
+      })
+      navigate(`/ingresso?token=${data.token}`)
+    } catch (e: any) {
+      toast({ title: 'Erro', description: e.message, variant: 'destructive' })
+    } finally {
+      setLoadingTicketId(null)
+    }
+  }
+
   const handleInvite = async (ticket: Ticket) => {
     try {
       const token = ticket.pendingLink || (await getInviteToken(ticket.id))
@@ -140,7 +155,9 @@ export default function BuyerDashboard() {
             ticket={ticket}
             onFill={() => handleFill(ticket)}
             onInvite={() => handleInvite(ticket)}
+            onView={() => handleView(ticket)}
             isLoadingFill={loadingTicketId === ticket.id}
+            isLoadingView={loadingTicketId === ticket.id}
           />
         ))}
       </div>
