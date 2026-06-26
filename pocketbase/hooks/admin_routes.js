@@ -235,7 +235,7 @@ routerAdd(
             { id: 10133655, value: onlyDigits(body.cpf) },
             { id: 10133656, value: tel },
             { id: 10133657, value: body.nome_empresa || '' },
-            { id: 10133665, value: ingresso.id },
+            { id: 10133665, value: ingresso.getString('pedido_id') },
           ],
         }
 
