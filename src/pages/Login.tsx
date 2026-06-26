@@ -40,13 +40,11 @@ export default function Login() {
     setLoading(true)
 
     try {
-      const res = await pb.send('/backend/v1/auth/magic-link', {
+      await pb.send('/backend/v1/auth/magic-link', {
         method: 'POST',
         body: JSON.stringify({ email }),
       })
       setSubmitted(true)
-      // Simulate the email click for the demo flow
-      setTimeout(() => navigate(`/acesso?token=${res.token}`), 2500)
     } catch (err: any) {
       toast({
         title: 'Não encontrado',
@@ -68,8 +66,8 @@ export default function Login() {
             </div>
             <CardTitle className="text-2xl">Link Enviado!</CardTitle>
             <CardDescription className="text-base mt-2">
-              Enviamos um link de acesso mágico para <strong>{email}</strong>. Verifique sua caixa
-              de entrada. (Redirecionando na demo...)
+              Enviamos um link de acesso para <strong>{email}</strong>. Verifique sua caixa de
+              entrada — e também as abas Spam, Promoções e Outros, caso não encontre.
             </CardDescription>
           </CardHeader>
         </Card>
@@ -124,9 +122,6 @@ export default function Login() {
               {loading ? 'Enviando...' : 'Enviar Link de Acesso'}
             </Button>
           </form>
-          <div className="mt-6 text-center text-sm text-muted-foreground">
-            Dica: use <span className="font-semibold text-foreground">buyer@test.com</span>
-          </div>
         </CardContent>
       </Card>
     </div>
