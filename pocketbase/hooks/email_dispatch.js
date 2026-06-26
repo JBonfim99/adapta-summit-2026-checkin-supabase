@@ -2,14 +2,19 @@
 // DISPARO DE ACESSO/COMUNICAÇÃO VIA SENDGRID — 100% BACKEND
 // ----------------------------------------------------------------------------
 // Audiências (clusters):
-//   compradores:   'todos' | 'pendentes'           -> coleção compradores (com token)
+//   compradores:   'todos' | 'pendentes'            -> coleção compradores
 //   participantes: 'participantes_todos' |
-//                  'participantes_recentes' (X dias) -> coleção participantes (sem token)
+//                  'participantes_recentes' (X dias) -> coleção participantes
 //
-// A fila vive como campos na própria coleção do destinatário (acesso_*), então o
-// enqueue é um UPDATE em massa (instantâneo) e o claim do cron é atômico. O cron
-// drena as DUAS coleções. processOneBatch é parametrizado por (coleção, campo de
-// nome, gerar token). Para participantes não há token — vai só o template.
+// A fila vive como campos na coleção do destinatário (acesso_*): enqueue = UPDATE
+// em massa (instantâneo), claim atômico, cron drena as DUAS coleções.
+// processOneBatch é parametrizado por (coleção, campo de nome, tokenMode).
+//
+// {{firstname}} = primeiro nome do destinatário (nome/nome_completo).
+// {{token}}:
+//   comprador    -> token de acesso novo (tokens_acesso, 60d) — login na plataforma.
+//   participante -> token do INGRESSO dele (links_participante; acha o existente
+//                   ou cria um de 60d).
 //
 // AUDITORIA: cada envio vira linha imutável em `envios`.
 // RETRY: 2xx=enviado; 429/5xx/rede=reenfileira (até 5x, backoff de 1 tick);
@@ -88,9 +93,6 @@ routerAdd('GET', '/backend/v1/dispatch/health', (e) => {
   } catch (_) {}
   return e.json(200, { last_run: lastRun, now: new Date().toISOString() })
 })
-
-// --- Resolve cluster -> { coll, nameField, gerarToken, where } --------------
-// (função pura reusada em preview e enqueue; declarada dentro de cada callback)
 
 // --- Preview ----------------------------------------------------------------
 routerAdd(
@@ -178,7 +180,7 @@ routerAdd(
         $app.save(disparo)
       } catch (_) {}
     }
-    const processOneBatch = (collName, nameField, gerarToken) => {
+    const processOneBatch = (collName, nameField, tokenMode) => {
       const apiKey = $os.getenv('SENDGRID_API_KEY')
       if (!apiKey) return 'empty'
       let first
@@ -257,13 +259,18 @@ routerAdd(
       const expIso = exp.toISOString()
       try {
         $app.runInTransaction((txApp) => {
-          const tokenColl = gerarToken ? txApp.findCollectionByNameOrId('tokens_acesso') : null
+          const tokenColl =
+            tokenMode === 'comprador' ? txApp.findCollectionByNameOrId('tokens_acesso') : null
+          const linkColl =
+            tokenMode === 'participante'
+              ? txApp.findCollectionByNameOrId('links_participante')
+              : null
           for (const c of batch) {
             const email = c.getString('email')
             if (!email) continue
             const nome = c.getString(nameField) || ''
             const dtd = { firstname: (nome.split(' ')[0] || nome || '').trim() }
-            if (gerarToken) {
+            if (tokenMode === 'comprador') {
               const token = $security.randomString(40)
               const tr = new Record(tokenColl)
               tr.set('comprador_id', c.id)
@@ -271,6 +278,29 @@ routerAdd(
               tr.set('usado', false)
               tr.set('expira_em', expIso)
               txApp.save(tr)
+              dtd.token = token
+            } else if (tokenMode === 'participante') {
+              // {{token}} = token do ingresso do participante (links_participante).
+              const ingressoId = c.getString('ingresso_id')
+              let token = ''
+              if (ingressoId) {
+                try {
+                  const link = $app.findFirstRecordByFilter(
+                    'links_participante',
+                    'ingresso_id = {:iid}',
+                    { iid: ingressoId },
+                  )
+                  token = link.getString('token')
+                } catch (_) {
+                  token = $security.randomString(40)
+                  const lr = new Record(linkColl)
+                  lr.set('ingresso_id', ingressoId)
+                  lr.set('token', token)
+                  lr.set('usado', false)
+                  lr.set('expira_em', expIso)
+                  txApp.save(lr)
+                }
+              }
               dtd.token = token
             }
             personalizations.push({
@@ -392,7 +422,6 @@ routerAdd(
         return e.badRequestError('template_id inválido (deve começar com d-)')
       }
 
-      // cluster -> coleção + where + audiência
       let coll = 'compradores'
       let audience = 'compradores'
       let where = "email != ''"
@@ -450,8 +479,9 @@ routerAdd(
 
       if (row.c > 0) {
         try {
-          if (audience === 'participantes') processOneBatch('participantes', 'nome_completo', false)
-          else processOneBatch('compradores', 'nome', true)
+          if (audience === 'participantes')
+            processOneBatch('participantes', 'nome_completo', 'participante')
+          else processOneBatch('compradores', 'nome', 'comprador')
         } catch (_) {}
       }
 
@@ -561,7 +591,7 @@ cronAdd('email_dispatch', '* * * * *', () => {
       $app.save(disparo)
     } catch (_) {}
   }
-  const processOneBatch = (collName, nameField, gerarToken) => {
+  const processOneBatch = (collName, nameField, tokenMode) => {
     let first
     try {
       first = $app.findFirstRecordByFilter(collName, 'acesso_status = {:s}', { s: 'na_fila' })
@@ -638,13 +668,16 @@ cronAdd('email_dispatch', '* * * * *', () => {
     const expIso = exp.toISOString()
     try {
       $app.runInTransaction((txApp) => {
-        const tokenColl = gerarToken ? txApp.findCollectionByNameOrId('tokens_acesso') : null
+        const tokenColl =
+          tokenMode === 'comprador' ? txApp.findCollectionByNameOrId('tokens_acesso') : null
+        const linkColl =
+          tokenMode === 'participante' ? txApp.findCollectionByNameOrId('links_participante') : null
         for (const c of batch) {
           const email = c.getString('email')
           if (!email) continue
           const nome = c.getString(nameField) || ''
           const dtd = { firstname: (nome.split(' ')[0] || nome || '').trim() }
-          if (gerarToken) {
+          if (tokenMode === 'comprador') {
             const token = $security.randomString(40)
             const tr = new Record(tokenColl)
             tr.set('comprador_id', c.id)
@@ -652,6 +685,28 @@ cronAdd('email_dispatch', '* * * * *', () => {
             tr.set('usado', false)
             tr.set('expira_em', expIso)
             txApp.save(tr)
+            dtd.token = token
+          } else if (tokenMode === 'participante') {
+            const ingressoId = c.getString('ingresso_id')
+            let token = ''
+            if (ingressoId) {
+              try {
+                const link = $app.findFirstRecordByFilter(
+                  'links_participante',
+                  'ingresso_id = {:iid}',
+                  { iid: ingressoId },
+                )
+                token = link.getString('token')
+              } catch (_) {
+                token = $security.randomString(40)
+                const lr = new Record(linkColl)
+                lr.set('ingresso_id', ingressoId)
+                lr.set('token', token)
+                lr.set('usado', false)
+                lr.set('expira_em', expIso)
+                txApp.save(lr)
+              }
+            }
             dtd.token = token
           }
           personalizations.push({ to: [{ email: email, name: nome }], dynamic_template_data: dtd })
@@ -776,9 +831,9 @@ cronAdd('email_dispatch', '* * * * *', () => {
   } catch (_) {}
 
   const drainStep = () => {
-    const r = processOneBatch('compradores', 'nome', true)
+    const r = processOneBatch('compradores', 'nome', 'comprador')
     if (r !== 'empty') return r
-    return processOneBatch('participantes', 'nome_completo', false)
+    return processOneBatch('participantes', 'nome_completo', 'participante')
   }
 
   const startMs = Date.now()
