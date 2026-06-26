@@ -145,20 +145,15 @@ routerAdd(
     if (!ingressoId) return e.badRequestError('ingresso_id é obrigatório')
 
     // Regra: e-mail único entre participantes (pode coincidir com o de um comprador).
-    const emailNorm = (body.email || '').toString().trim()
+    const emailNorm = (body.email || '').toString().trim().toLowerCase()
+    let emailDup = false
     try {
-      const row = new DynamicModel({ c: 0 })
-      $app
-        .db()
-        .newQuery('SELECT COUNT(*) as c FROM participantes WHERE email = {:em} COLLATE NOCASE')
-        .bind({ em: emailNorm })
-        .one(row)
-      if (row.c > 0) {
-        return e.badRequestError(
-          'Este e-mail já foi usado por outro participante. Use outro e-mail.',
-        )
-      }
+      $app.findFirstRecordByFilter('participantes', 'email = {:em}', { em: emailNorm })
+      emailDup = true
     } catch (_) {}
+    if (emailDup) {
+      return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro e-mail.')
+    }
 
     try {
       $app.runInTransaction((txApp) => {
@@ -174,7 +169,7 @@ routerAdd(
         const part = new Record(partColl)
         part.set('ingresso_id', ingresso.id)
         part.set('nome_completo', body.nome_completo)
-        part.set('email', body.email)
+        part.set('email', emailNorm)
         part.set('cpf', body.cpf)
         part.set('telefone', body.telefone)
         part.set('nome_empresa', body.nome_empresa)

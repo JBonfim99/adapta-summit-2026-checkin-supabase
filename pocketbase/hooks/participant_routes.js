@@ -62,38 +62,30 @@ routerAdd('GET', '/backend/v1/participant/ticket/{token}', (e) => {
 // Público: o formulário do participante não é autenticado. Retorna só um booleano.
 routerAdd('POST', '/backend/v1/participant/email-check', (e) => {
   const body = e.requestInfo().body || {}
-  const email = (body.email || '').toString().trim()
+  const email = (body.email || '').toString().trim().toLowerCase()
   if (!email) return e.json(200, { available: true })
+  let dup = false
   try {
-    const row = new DynamicModel({ c: 0 })
-    $app
-      .db()
-      .newQuery('SELECT COUNT(*) as c FROM participantes WHERE email = {:em} COLLATE NOCASE')
-      .bind({ em: email })
-      .one(row)
-    return e.json(200, { available: row.c === 0 })
-  } catch (err) {
-    return e.json(200, { available: true })
-  }
+    $app.findFirstRecordByFilter('participantes', 'email = {:em}', { em: email })
+    dup = true
+  } catch (_) {}
+  return e.json(200, { available: !dup })
 })
 
 routerAdd('POST', '/backend/v1/participant/submit', (e) => {
   const body = e.requestInfo().body
   const token = body.token
-  const emailNorm = (body.email || '').toString().trim()
+  const emailNorm = (body.email || '').toString().trim().toLowerCase()
 
   // Regra: e-mail único entre participantes (pode coincidir com o de um comprador).
+  let emailDup = false
   try {
-    const row = new DynamicModel({ c: 0 })
-    $app
-      .db()
-      .newQuery('SELECT COUNT(*) as c FROM participantes WHERE email = {:em} COLLATE NOCASE')
-      .bind({ em: emailNorm })
-      .one(row)
-    if (row.c > 0) {
-      return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro e-mail.')
-    }
+    $app.findFirstRecordByFilter('participantes', 'email = {:em}', { em: emailNorm })
+    emailDup = true
   } catch (_) {}
+  if (emailDup) {
+    return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro e-mail.')
+  }
 
   try {
     $app.runInTransaction((txApp) => {
@@ -108,7 +100,7 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
       const part = new Record(partColl)
       part.set('ingresso_id', ingresso.id)
       part.set('nome_completo', body.nome_completo)
-      part.set('email', body.email)
+      part.set('email', emailNorm)
       part.set('cpf', body.cpf)
       part.set('telefone', body.telefone)
       part.set('nome_empresa', body.nome_empresa)
