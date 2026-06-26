@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-25T23:51:51.505Z",
+  "generatedAt": "2026-06-26T00:08:08.790Z",
   "collections": [
     {
       "name": "users",
@@ -625,6 +625,45 @@
             "em_andamento",
             "concluido"
           ]
+        },
+        {
+          "name": "created",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate"
+          ]
+        },
+        {
+          "name": "updated",
+          "type": "autodate",
+          "required": false,
+          "system": false,
+          "autodateTriggers": [
+            "onCreate",
+            "onUpdate"
+          ]
+        }
+      ],
+      "indexes": []
+    },
+    {
+      "name": "cron_health",
+      "type": "base",
+      "apiRules": {
+        "list": null,
+        "view": null,
+        "create": null,
+        "update": null,
+        "delete": null
+      },
+      "fields": [
+        {
+          "name": "last_run",
+          "type": "text",
+          "required": false,
+          "system": false
         },
         {
           "name": "created",
