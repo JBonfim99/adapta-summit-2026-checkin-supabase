@@ -111,9 +111,10 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
       part.set('nicho', body.nicho)
       part.set('num_funcionarios', body.num_funcionarios)
       part.set('faturamento_anual', body.faturamento_anual)
-      part.set('areas_ajuda', body.areas_ajuda || [])
-      part.set('expectativa_aprendizado', body.expectativa_aprendizado || '')
-      part.set('expectativa_experiencia', body.expectativa_experiencia || '')
+      part.set('ia_uso_diario', parseInt(body.ia_uso_diario, 10) || 0)
+      part.set('ia_profundidade', parseInt(body.ia_profundidade, 10) || 0)
+      part.set('ia_ferramentas', body.ia_ferramentas || '')
+      part.set('ia_desafio', body.ia_desafio || '')
 
       txApp.save(part)
 

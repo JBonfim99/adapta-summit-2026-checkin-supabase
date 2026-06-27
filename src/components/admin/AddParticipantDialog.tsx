@@ -11,13 +11,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
-import { FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form'
+import { FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { FormInput } from '@/components/FormInput'
+import { LinearScale } from '@/components/LinearScale'
 import { CheckCircle2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { getErrorMessage } from '@/lib/pocketbase/errors'
+import { ROLES, REVENUE, EMPLOYEES } from '@/lib/form-options'
 
 const formSchema = z.object({
   nome_completo: z.string().min(3, 'Nome é obrigatório'),
@@ -26,83 +27,16 @@ const formSchema = z.object({
   telefone: z.string().min(14, 'Telefone inválido'),
   nome_empresa: z.string().min(2, 'Empresa é obrigatória'),
   cargo: z.string().min(1, 'Selecione um cargo'),
-  nicho: z.string().min(1, 'Selecione um nicho'),
-  num_funcionarios: z.string().min(1, 'Selecione o tamanho'),
   faturamento_anual: z.string().min(1, 'Selecione o faturamento'),
-  areas_ajuda: z
-    .array(z.string())
-    .min(1, 'Selecione pelo menos uma área')
-    .max(2, 'Selecione até 2 áreas'),
-  expectativa_aprendizado: z.string().min(3, 'Preenchimento obrigatório'),
-  expectativa_experiencia: z.string().min(3, 'Preenchimento obrigatório'),
+  num_funcionarios: z.string().min(1, 'Selecione o tamanho'),
+  nicho: z.string().min(2, 'Informe o segmento da empresa'),
+  ia_uso_diario: z.number().min(1, 'Selecione uma opção').max(5),
+  ia_profundidade: z.number().min(1, 'Selecione uma opção').max(5),
+  ia_ferramentas: z.string().min(2, 'Preenchimento obrigatório'),
+  ia_desafio: z.string().min(2, 'Preenchimento obrigatório'),
 })
 
 type FormValues = z.infer<typeof formSchema>
-
-const ROLES = [
-  'Empreendedor, sócio ou CEO',
-  'C-level, Diretor ou Head',
-  'Gerente ou Coordenador',
-  'Analista',
-]
-
-const NICHES = [
-  'Agronegócio',
-  'Construção',
-  'Consultoria / Projetos',
-  'Contábil',
-  'Educação',
-  'Energia',
-  'Finanças',
-  'Hospitalidade e Turismo',
-  'Imobiliário',
-  'Indústria',
-  'Mídia e Entretenimento',
-  'Saúde',
-  'Jurídico',
-  'Setor público',
-  'Tecnologia',
-  'Transporte e logística',
-  'Varejo',
-  'Fitness',
-  'Telecom',
-  'Marketing',
-  'Serviço',
-  'Outro',
-]
-
-const EMPLOYEES = [
-  '1 a 5',
-  '6 a 10',
-  '11 a 20',
-  '21 a 50',
-  '51 a 100',
-  '101 a 300',
-  '301 a 500',
-  '501 a 1.000',
-  'Mais de 1.000',
-]
-
-const REVENUE = [
-  'Até R$500.000 por ano',
-  'De R$500.000 até R$4 milhões por ano',
-  'De R$4 milhões até R$10 milhões por ano',
-  'De R$10 milhões até R$20 milhões por ano',
-  'Mais de R$20 milhões por ano',
-]
-
-const HELP_AREAS = [
-  'Gestão de Indicadores',
-  'Criação de Sistemas e Processos',
-  'Marketing',
-  'Edição de Vídeo e Geração de Criativos',
-  'Vendas',
-  'Automação e Integração de Sistemas',
-  'Atendimento ao Cliente / Suporte',
-  'Tecnologia',
-  'Administrativo / Financeiro',
-  'Gestão de Pessoas',
-]
 
 export function AddParticipantDialog({
   ticket,
@@ -127,12 +61,13 @@ export function AddParticipantDialog({
       telefone: '',
       nome_empresa: '',
       cargo: '',
-      nicho: '',
-      num_funcionarios: '',
       faturamento_anual: '',
-      areas_ajuda: [],
-      expectativa_aprendizado: '',
-      expectativa_experiencia: '',
+      num_funcionarios: '',
+      nicho: '',
+      ia_uso_diario: 0,
+      ia_profundidade: 0,
+      ia_ferramentas: '',
+      ia_desafio: '',
     },
     mode: 'onTouched',
   })
@@ -207,10 +142,10 @@ export function AddParticipantDialog({
                     placeholder="Selecione..."
                   />
                   <FormInput
-                    name="nicho"
-                    label="Nicho"
+                    name="faturamento_anual"
+                    label="Faturamento anual"
                     type="select"
-                    options={NICHES}
+                    options={REVENUE}
                     placeholder="Selecione..."
                   />
                   <FormInput
@@ -221,83 +156,63 @@ export function AddParticipantDialog({
                     placeholder="Selecione..."
                   />
                   <FormInput
-                    name="faturamento_anual"
-                    label="Faixa de faturamento"
-                    type="select"
-                    options={REVENUE}
-                    placeholder="Selecione..."
+                    name="nicho"
+                    label="Qual o segmento da sua empresa?"
+                    placeholder="Ex: Varejo de moda"
                   />
                 </div>
 
                 <FormField
                   control={methods.control}
-                  name="areas_ajuda"
-                  render={() => (
+                  name="ia_uso_diario"
+                  render={({ field }) => (
                     <FormItem>
-                      <div className="mb-2">
-                        <FormLabel className="text-base">
-                          Onde você mais precisa de ajuda? (Máx. 2)
-                        </FormLabel>
-                      </div>
-                      <div
-                        className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${methods.formState.errors.areas_ajuda ? 'p-2 border border-red-500 rounded-md bg-red-50/50' : ''}`}
-                      >
-                        {HELP_AREAS.map((item) => (
-                          <FormField
-                            key={item}
-                            control={methods.control}
-                            name="areas_ajuda"
-                            render={({ field }) => {
-                              const currentValues = field.value || []
-                              const isChecked = currentValues.includes(item)
-                              const isAtLimit = currentValues.length >= 2 && !isChecked
+                      <FormLabel className="text-base">
+                        De 1 a 5, quantas pessoas usam IA na sua empresa diariamente?
+                      </FormLabel>
+                      <LinearScale
+                        value={field.value}
+                        onChange={field.onChange}
+                        leftLabel="Ninguém"
+                        rightLabel="Todos"
+                        error={!!methods.formState.errors.ia_uso_diario}
+                      />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-                              return (
-                                <FormItem
-                                  className={`flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3 shadow-sm transition-colors ${isAtLimit ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-50 cursor-pointer'}`}
-                                >
-                                  <FormControl>
-                                    <Checkbox
-                                      checked={isChecked}
-                                      disabled={isAtLimit}
-                                      onCheckedChange={(checked) => {
-                                        return checked
-                                          ? field.onChange([...currentValues, item])
-                                          : field.onChange(
-                                              currentValues.filter(
-                                                (value: string) => value !== item,
-                                              ),
-                                            )
-                                      }}
-                                    />
-                                  </FormControl>
-                                  <FormLabel
-                                    className={`font-normal w-full ${isAtLimit ? 'cursor-not-allowed' : 'cursor-pointer'}`}
-                                  >
-                                    {item}
-                                  </FormLabel>
-                                </FormItem>
-                              )
-                            }}
-                          />
-                        ))}
-                      </div>
+                <FormField
+                  control={methods.control}
+                  name="ia_profundidade"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-base">
+                        Qual a profundidade do uso de IA dessas pessoas?
+                      </FormLabel>
+                      <LinearScale
+                        value={field.value}
+                        onChange={field.onChange}
+                        leftLabel="Usamos como Google"
+                        rightLabel="Nativo de IA"
+                        error={!!methods.formState.errors.ia_profundidade}
+                      />
                       <FormMessage />
                     </FormItem>
                   )}
                 />
 
                 <FormInput
-                  name="expectativa_aprendizado"
+                  name="ia_ferramentas"
                   type="textarea"
-                  label="O que espera aprender no evento?"
-                  placeholder="Sua expectativa..."
+                  label="Quais ferramentas de IA você utiliza atualmente?"
+                  placeholder="Ex: ChatGPT, Claude, Gemini, n8n..."
                 />
                 <FormInput
-                  name="expectativa_experiencia"
+                  name="ia_desafio"
                   type="textarea"
-                  label="Que tipo de experiência espera participar no evento?"
-                  placeholder="Sua expectativa..."
+                  label="Na sua visão, qual o maior desafio para tornar sua empresa Nativa de IA?"
+                  placeholder="Sua resposta..."
                 />
               </div>
             </div>
