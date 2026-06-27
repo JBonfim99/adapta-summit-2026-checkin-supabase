@@ -16,6 +16,31 @@ export const REVENUE = [
   'Acima de R$500 milhões',
 ]
 
+export const NICHES = [
+  'Agronegócio',
+  'Construção',
+  'Consultoria / Projetos',
+  'Contábil',
+  'Educação',
+  'Energia',
+  'Finanças',
+  'Hospitalidade e Turismo',
+  'Imobiliário',
+  'Indústria',
+  'Mídia e Entretenimento',
+  'Saúde',
+  'Jurídico',
+  'Setor público',
+  'Tecnologia',
+  'Transporte e logística',
+  'Varejo',
+  'Fitness',
+  'Telecom',
+  'Marketing',
+  'Serviço',
+  'Outro',
+]
+
 export const EMPLOYEES = [
   '1 a 5',
   '6 a 10',

@@ -18,7 +18,7 @@ import { CheckCircle2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { getErrorMessage } from '@/lib/pocketbase/errors'
-import { ROLES, REVENUE, EMPLOYEES } from '@/lib/form-options'
+import { ROLES, REVENUE, EMPLOYEES, NICHES } from '@/lib/form-options'
 
 const formSchema = z.object({
   nome_completo: z.string().min(3, 'Nome é obrigatório'),
@@ -29,7 +29,7 @@ const formSchema = z.object({
   cargo: z.string().min(1, 'Selecione um cargo'),
   faturamento_anual: z.string().min(1, 'Selecione o faturamento'),
   num_funcionarios: z.string().min(1, 'Selecione o tamanho'),
-  nicho: z.string().min(2, 'Informe o segmento da empresa'),
+  nicho: z.string().min(1, 'Selecione o segmento'),
   ia_uso_diario: z.number().min(1, 'Selecione uma opção').max(5),
   ia_profundidade: z.number().min(1, 'Selecione uma opção').max(5),
   ia_ferramentas: z.string().min(2, 'Preenchimento obrigatório'),
@@ -158,7 +158,9 @@ export function AddParticipantDialog({
                   <FormInput
                     name="nicho"
                     label="Qual o segmento da sua empresa?"
-                    placeholder="Ex: Varejo de moda"
+                    type="select"
+                    options={NICHES}
+                    placeholder="Selecione..."
                   />
                 </div>
 
