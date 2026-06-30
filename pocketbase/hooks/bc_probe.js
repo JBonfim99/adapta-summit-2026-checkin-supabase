@@ -1,10 +1,7 @@
-// TEMPORÁRIO — busca a spec OpenAPI do BotConversa (via $http.send no backend,
-// que permite setar Accept e a query ?format=openapi) e extrai os paths exatos.
-// Também sonda alguns endpoints candidatos. REMOVER depois.
-// Uso: /backend/v1/bc-probe
+// TEMPORÁRIO — busca a spec OpenAPI do BotConversa com o Accept correto
+// (drf-yasg serve como application/openapi+json) e extrai os paths exatos.
+// REMOVER depois.  Uso: /backend/v1/bc-probe
 routerAdd('GET', '/backend/v1/bc-probe', (e) => {
-  const key = $os.getenv('BOTCONVERSA_API_KEY') || ''
-
   const decodeBody = (b) => {
     if (b == null) return ''
     if (typeof b === 'string') return b
@@ -19,10 +16,10 @@ routerAdd('GET', '/backend/v1/bc-probe', (e) => {
     return ''
   }
 
-  const get = (url, headers) => {
-    const out = { url: url, status: 0, ctype: '', body: '' }
+  const get = (url, accept) => {
+    const out = { url: url, accept: accept, status: 0, ctype: '', body: '' }
     try {
-      const res = $http.send({ url: url, method: 'GET', headers: headers || {}, timeout: 20 })
+      const res = $http.send({ url: url, method: 'GET', headers: { Accept: accept }, timeout: 20 })
       out.status = res.statusCode
       try {
         out.ctype = res.headers && res.headers['Content-Type'] ? res.headers['Content-Type'][0] : ''
@@ -34,19 +31,13 @@ routerAdd('GET', '/backend/v1/bc-probe', (e) => {
     return out
   }
 
-  const result = { key_present: key.length > 0 }
+  const url = 'https://backend.botconversa.com.br/swagger/?format=openapi'
+  const accepts = ['application/openapi+json', '*/*', 'application/json, */*']
 
-  // 1) Tenta puxar a spec OpenAPI e extrair os paths
-  const specUrls = [
-    'https://backend.botconversa.com.br/swagger/?format=openapi',
-    'https://backend.botconversa.com.br/swagger.json',
-    'https://backend.botconversa.com.br/openapi.json',
-  ]
-  result.spec = null
-  for (let i = 0; i < specUrls.length; i++) {
-    const r = get(specUrls[i], { Accept: 'application/json' })
-    const looksJson = r.body && r.body.charAt(0) === '{'
-    if (r.status === 200 && looksJson) {
+  const result = {}
+  for (let i = 0; i < accepts.length; i++) {
+    const r = get(url, accepts[i])
+    if (r.status === 200 && r.body && r.body.charAt(0) === '{') {
       try {
         const spec = JSON.parse(r.body)
         const paths = spec.paths || {}
@@ -57,28 +48,24 @@ routerAdd('GET', '/backend/v1/bc-probe', (e) => {
           summary.push(methods.join(',').toUpperCase() + '  ' + keys[k])
         }
         result.spec = {
-          source: specUrls[i],
+          accept_used: accepts[i],
           title: spec.info ? spec.info.title : '',
           host: spec.host || '',
           basePath: spec.basePath || '',
           schemes: spec.schemes || [],
-          servers: spec.servers || [],
           paths: summary,
         }
       } catch (err) {
-        result.spec = {
-          source: specUrls[i],
-          parse_error: String(err),
-          head: r.body.substring(0, 800),
-        }
+        result.parse_error = String(err)
+        result.head = r.body.substring(0, 1000)
       }
       break
     } else {
-      result['spec_try_' + i] = {
-        url: specUrls[i],
+      result['try_' + i] = {
+        accept: accepts[i],
         status: r.status,
         ctype: r.ctype,
-        head: r.body.substring(0, 200),
+        head: r.body.substring(0, 150),
       }
     }
   }
