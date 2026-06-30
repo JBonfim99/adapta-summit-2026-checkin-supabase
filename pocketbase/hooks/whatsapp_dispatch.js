@@ -252,6 +252,10 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
         token = ''
       }
 
+      // Telefone no padrão WhatsApp: só dígitos, com 55 quando vier sem DDI.
+      let fone = (c.getString('telefone') || '').replace(/\D/g, '')
+      if (fone && fone.length <= 11) fone = '55' + fone
+
       let status = 0
       let erroMsg = ''
       try {
@@ -259,7 +263,7 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
           url: BC_URL_COMPRADOR,
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ full_name: nome, email: email, token: token }),
+          body: JSON.stringify({ full_name: nome, email: email, phone: fone, token: token }),
           timeout: 12,
         })
         status = res.statusCode
