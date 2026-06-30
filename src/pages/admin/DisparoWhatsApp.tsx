@@ -19,7 +19,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { MessageCircle, Send, Loader2, RotateCw, Inbox, Users } from 'lucide-react'
+import { Send, Loader2, RotateCw, Inbox, Users } from 'lucide-react'
+import { WhatsAppIcon } from '@/components/WhatsAppIcon'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -240,7 +241,7 @@ export default function AdminDisparoWhatsApp() {
       <Card className="border-none shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
-            <MessageCircle className="w-5 h-5 text-[#25D366]" /> Novo disparo
+            <WhatsAppIcon className="w-5 h-5 text-[#25D366]" /> Novo disparo
           </CardTitle>
           <CardDescription>
             A mensagem é configurada no BotConversa. Enviamos por comprador: nome, e-mail e o token
