@@ -132,6 +132,7 @@ routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
 
     let compradorId = ''
     let totalIngressos = 0
+    let emailEnfileirado = false
 
     try {
       $app.runInTransaction((txApp) => {
@@ -163,6 +164,7 @@ routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
 
         // Comprador: dedupe por email (índice único em compradores.email).
         let comprador
+        let isNewComprador = false
         try {
           comprador = txApp.findFirstRecordByData('compradores', 'email', email)
           if (nome) comprador.set('nome', nome)
@@ -178,10 +180,17 @@ routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
           comprador.set('uf', uf)
           comprador.set('cidade', cidade)
           comprador.set('telefone', telefone)
+          isNewComprador = true
         }
 
-        // Enfileira o e-mail de acesso reusando o motor de disparo (cron envia).
-        if (templateId) {
+        // Enfileira o e-mail de acesso UMA ÚNICA VEZ por comprador: só se for novo
+        // ou se ainda não foi enfileirado/enviado. Evita reenvio em compras
+        // repetidas (segundo pedido do mesmo e-mail) e em qualquer reprocessamento.
+        const statusAcesso = comprador.getString('acesso_status')
+        const jaTemAcesso =
+          !isNewComprador &&
+          (statusAcesso === 'na_fila' || statusAcesso === 'enviando' || statusAcesso === 'enviado')
+        if (templateId && !jaTemAcesso) {
           let guruDisparo
           try {
             guruDisparo = txApp.findFirstRecordByFilter('disparos', "cluster = 'guru'")
@@ -208,6 +217,7 @@ routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
           guruDisparo.set('template_id', templateId)
           guruDisparo.set('status', 'em_andamento')
           txApp.save(guruDisparo)
+          emailEnfileirado = true
         }
 
         txApp.save(comprador)
@@ -245,7 +255,10 @@ routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
         pg.set('email', email)
         pg.set('comprador_id', comprador.id)
         pg.set('ingressos', totalIngressos)
-        pg.set('email_status', templateId ? 'enfileirado' : 'sem_template')
+        pg.set(
+          'email_status',
+          emailEnfileirado ? 'enfileirado' : templateId ? 'ja_enviado' : 'sem_template',
+        )
         pg.set('payload', body)
         txApp.save(pg)
       })
@@ -263,7 +276,7 @@ routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
       transacao_id: transacaoId,
       comprador_id: compradorId,
       ingressos: totalIngressos,
-      email: templateId ? 'enfileirado' : 'sem_template',
+      email: emailEnfileirado ? 'enfileirado' : templateId ? 'ja_enviado' : 'sem_template',
     })
   } catch (err) {
     return e.json(500, { error: err && err.message ? err.message : 'erro' })

@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { RotateCw, CheckCircle2, XCircle } from 'lucide-react'
+import { RotateCw, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
 
@@ -22,6 +22,7 @@ const EVENTO_LABELS: Record<string, string> = {
 
 export default function AdminLogs() {
   const [logs, setLogs] = useState<any[]>([])
+  const [retryingAll, setRetryingAll] = useState(false)
   const { toast } = useToast()
 
   const loadData = () => {
@@ -46,15 +47,46 @@ export default function AdminLogs() {
     }
   }
 
+  const handleRetryAll = async () => {
+    setRetryingAll(true)
+    try {
+      const res: any = await pb.send('/backend/v1/admin/retry-webhook-all', { method: 'POST' })
+      toast({
+        title: 'Reenvio concluído',
+        description: `${res.ok || 0} reenviado(s), ${res.failed || 0} ainda com erro (de ${res.tried || 0} tentados).`,
+      })
+      loadData()
+    } catch (e: any) {
+      toast({ title: 'Falha', description: e.message, variant: 'destructive' })
+    } finally {
+      setRetryingAll(false)
+    }
+  }
+
   const isOk = (status: number) => status >= 200 && status < 300
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h2 className="text-2xl font-bold">Logs</h2>
-        <p className="text-muted-foreground">
-          Cada evento de envio ao INAC, registrado após a finalização do participante.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">Logs</h2>
+          <p className="text-muted-foreground">
+            Cada evento de envio ao INAC, registrado após a finalização do participante.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          className="gap-2 shrink-0"
+          onClick={handleRetryAll}
+          disabled={retryingAll}
+        >
+          {retryingAll ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <RotateCw className="w-4 h-4" />
+          )}
+          Retentar erros
+        </Button>
       </div>
 
       <div className="border rounded-xl bg-white overflow-hidden shadow-sm">

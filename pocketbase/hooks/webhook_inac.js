@@ -67,7 +67,7 @@ routerAdd(
           { id: 10133654, value: part.getString('email') },
           { id: 10133655, value: onlyDigits(part.getString('cpf')) },
           { id: 10133656, value: tel },
-          { id: 10133657, value: part.getString('nome_empresa') },
+          { id: 10133657, value: part.getString('nome_empresa') || part.getString('profissao') },
           { id: 10133665, value: ingresso.getString('pedido_id') },
         ],
       }
