@@ -406,10 +406,24 @@ export default function AdminDisparoWhatsApp() {
                     <span className="text-muted-foreground">Canal: </span>
                     <span className="font-medium text-foreground">BotConversa (WhatsApp)</span>
                   </div>
+                  <div>
+                    <span className="text-muted-foreground">Custo por mensagem: </span>
+                    <span className="font-medium text-foreground">R$ 0,50 (marketing)</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <span className="text-sm font-medium text-emerald-800">Custo total estimado</span>
+                  <span className="text-xl font-bold text-emerald-700">
+                    {(previewCount * 0.5).toLocaleString('pt-BR', {
+                      style: 'currency',
+                      currency: 'BRL',
+                    })}
+                  </span>
                 </div>
                 <p className="text-muted-foreground">
                   Cada comprador recebe um link de acesso válido por 60 dias. O envio é um a um, em
-                  segundo plano, e você acompanha no histórico.
+                  segundo plano, e você acompanha no histórico. O custo é estimado: {previewCount} ×
+                  R$ 0,50.
                 </p>
               </div>
             </DialogDescription>
