@@ -19,7 +19,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Send, Loader2, RotateCw, Inbox, Users } from 'lucide-react'
+import { Send, Loader2, RotateCw, Inbox, Users, Plus, Trash2 } from 'lucide-react'
 import { WhatsAppIcon } from '@/components/WhatsAppIcon'
 import DisparoWhatsAppIndividual from '@/components/admin/DisparoWhatsAppIndividual'
 import pb from '@/lib/pocketbase/client'
@@ -42,6 +42,36 @@ const CLUSTERS: Record<string, string> = {
   pendentes: 'Compradores com ingresso pendente',
   individual: 'Individual',
 }
+
+const PRE = 'PRE' // valor do fluxo padrão (pré-credenciamento via catch webhook)
+
+interface BcFlow {
+  id: number | string
+  name: string
+}
+interface BcField {
+  id: number | string
+  key: string
+  type: number
+}
+interface MapRow {
+  field_id: string
+  source: string
+  value: string
+}
+
+// Origens disponíveis pra alimentar as variáveis (custom fields) do fluxo.
+const SOURCES: { v: string; l: string }[] = [
+  { v: 'primeiro_nome', l: 'Primeiro nome' },
+  { v: 'nome', l: 'Nome completo' },
+  { v: 'email', l: 'E-mail' },
+  { v: 'telefone', l: 'Telefone' },
+  { v: 'documento', l: 'CPF / Documento' },
+  { v: 'pedido_id', l: 'Número do pedido' },
+  { v: 'link_acesso', l: 'Link de acesso (60d)' },
+  { v: 'token', l: 'Token de acesso' },
+  { v: 'static', l: 'Valor fixo' },
+]
 
 const WA_STATUS: Record<string, { label: string; cls: string }> = {
   enviado: { label: 'Enviado', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
@@ -125,6 +155,12 @@ export default function AdminDisparoWhatsApp() {
   const [nome, setNome] = useState('')
   const [disparos, setDisparos] = useState<DisparoWa[]>([])
 
+  const [flow, setFlow] = useState<string>(PRE)
+  const [flows, setFlows] = useState<BcFlow[]>([])
+  const [flowsErr, setFlowsErr] = useState<string>('')
+  const [fields, setFields] = useState<BcField[]>([])
+  const [mapping, setMapping] = useState<MapRow[]>([])
+
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [previewCount, setPreviewCount] = useState(0)
   const [previewing, setPreviewing] = useState(false)
@@ -146,12 +182,34 @@ export default function AdminDisparoWhatsApp() {
       .catch(() => {})
   }, [])
 
+  const loadFlows = useCallback(() => {
+    pb.send('/backend/v1/admin/whatsapp/flows', {})
+      .then((res) => {
+        if (res.ok) {
+          setFlows(res.flows || [])
+          setFlowsErr('')
+        } else {
+          setFlows([])
+          setFlowsErr(res.error || 'Não foi possível carregar os fluxos')
+        }
+      })
+      .catch((e) => setFlowsErr(e?.message || 'Falha ao carregar fluxos'))
+  }, [])
+
+  const loadFields = useCallback(() => {
+    pb.send('/backend/v1/admin/whatsapp/custom-fields', {})
+      .then((res) => setFields(res.ok ? res.fields || [] : []))
+      .catch(() => setFields([]))
+  }, [])
+
   useEffect(() => {
     loadDisparos()
     loadHealth()
+    loadFlows()
+    loadFields()
     const iv = setInterval(loadHealth, 30000)
     return () => clearInterval(iv)
-  }, [loadDisparos, loadHealth])
+  }, [loadDisparos, loadHealth, loadFlows, loadFields])
 
   useRealtime('disparos_wa', () => loadDisparos())
 
@@ -177,12 +235,27 @@ export default function AdminDisparoWhatsApp() {
     }
   }
 
+  const isPre = flow === PRE
+  const selectedFlowNome = isPre ? '' : flows.find((f) => String(f.id) === flow)?.name || ''
+  const validMapping = mapping.filter((m) => m.field_id && m.source)
+
+  const addRow = () => setMapping((m) => [...m, { field_id: '', source: '', value: '' }])
+  const removeRow = (i: number) => setMapping((m) => m.filter((_, idx) => idx !== i))
+  const updateRow = (i: number, patch: Partial<MapRow>) =>
+    setMapping((m) => m.map((row, idx) => (idx === i ? { ...row, ...patch } : row)))
+
   const handleConfirm = async () => {
     setEnqueuing(true)
     try {
       const res = await pb.send('/backend/v1/admin/whatsapp/enqueue', {
         method: 'POST',
-        body: JSON.stringify({ cluster, nome }),
+        body: JSON.stringify({
+          cluster,
+          nome,
+          flow,
+          flow_nome: selectedFlowNome,
+          mapping: isPre ? [] : validMapping,
+        }),
       })
       setConfirmOpen(false)
       toast({
@@ -272,6 +345,118 @@ export default function AdminDisparoWhatsApp() {
               </SelectContent>
             </Select>
           </div>
+
+          <div className="space-y-2 max-w-md">
+            <label className="text-sm font-medium">Fluxo</label>
+            <Select
+              value={flow}
+              onValueChange={(v) => {
+                setFlow(v)
+                if (v === PRE) setMapping([])
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={PRE}>Pré-credenciamento (padrão)</SelectItem>
+                {flows.map((f) => (
+                  <SelectItem key={String(f.id)} value={String(f.id)}>
+                    {f.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {flowsErr && <p className="text-xs text-amber-600">Fluxos indisponíveis: {flowsErr}</p>}
+            <p className="text-xs text-muted-foreground">
+              {isPre
+                ? 'Envia o link de acesso (token de 60 dias) pela automação padrão.'
+                : 'Cria/atualiza o contato no BotConversa e dispara este fluxo.'}
+            </p>
+          </div>
+
+          {!isPre && (
+            <div className="space-y-3 rounded-lg border bg-slate-50/60 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium">Mapeamento de variáveis</p>
+                  <p className="text-xs text-muted-foreground">
+                    Preencha as variáveis (custom fields) que esse fluxo usa. Se não usar nenhuma,
+                    pode disparar sem mapear.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1 shrink-0"
+                  onClick={addRow}
+                >
+                  <Plus className="w-3 h-3" /> Variável
+                </Button>
+              </div>
+
+              {mapping.length > 0 && (
+                <div className="space-y-2">
+                  {mapping.map((row, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Select
+                        value={row.field_id}
+                        onValueChange={(v) => updateRow(i, { field_id: v })}
+                      >
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Variável" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {fields.length === 0 ? (
+                            <SelectItem value="__none" disabled>
+                              Nenhum custom field
+                            </SelectItem>
+                          ) : (
+                            fields.map((f) => (
+                              <SelectItem key={String(f.id)} value={String(f.id)}>
+                                {f.key}
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <span className="text-muted-foreground text-xs shrink-0">←</span>
+                      <Select value={row.source} onValueChange={(v) => updateRow(i, { source: v })}>
+                        <SelectTrigger className="flex-1">
+                          <SelectValue placeholder="Origem" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SOURCES.map((s) => (
+                            <SelectItem key={s.v} value={s.v}>
+                              {s.l}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {row.source === 'static' && (
+                        <Input
+                          className="flex-1"
+                          placeholder="Valor fixo"
+                          value={row.value}
+                          onChange={(e) => updateRow(i, { value: e.target.value })}
+                        />
+                      )}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-muted-foreground hover:text-rose-600"
+                        onClick={() => removeRow(i)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           <Button
             className="bg-[#25D366] hover:bg-[#1ebe5a] text-white gap-2"
@@ -407,6 +592,18 @@ export default function AdminDisparoWhatsApp() {
                     <span className="font-medium text-foreground">BotConversa (WhatsApp)</span>
                   </div>
                   <div>
+                    <span className="text-muted-foreground">Fluxo: </span>
+                    <span className="font-medium text-foreground">
+                      {isPre ? 'Pré-credenciamento (padrão)' : selectedFlowNome || flow}
+                    </span>
+                  </div>
+                  {!isPre && validMapping.length > 0 && (
+                    <div>
+                      <span className="text-muted-foreground">Variáveis mapeadas: </span>
+                      <span className="font-medium text-foreground">{validMapping.length}</span>
+                    </div>
+                  )}
+                  <div>
                     <span className="text-muted-foreground">Custo por mensagem: </span>
                     <span className="font-medium text-foreground">R$ 0,50 (marketing)</span>
                   </div>
@@ -421,9 +618,11 @@ export default function AdminDisparoWhatsApp() {
                   </span>
                 </div>
                 <p className="text-muted-foreground">
-                  Cada comprador recebe um link de acesso válido por 60 dias. O envio é um a um, em
-                  segundo plano, e você acompanha no histórico. O custo é estimado: {previewCount} ×
-                  R$ 0,50.
+                  {isPre
+                    ? 'Cada comprador recebe um link de acesso válido por 60 dias. '
+                    : 'O contato é criado/atualizado no BotConversa e recebe o fluxo selecionado. '}
+                  O envio é um a um, em segundo plano, e você acompanha no histórico. O custo é
+                  estimado: {previewCount} × R$ 0,50.
                 </p>
               </div>
             </DialogDescription>

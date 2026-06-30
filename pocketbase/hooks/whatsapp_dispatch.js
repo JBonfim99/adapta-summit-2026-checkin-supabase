@@ -1,15 +1,106 @@
 // ============================================================================
 // DISPARO WHATSAPP via BotConversa — 100% backend, isolado do e-mail (campos wa_*).
 // ----------------------------------------------------------------------------
-// O BotConversa NÃO tem batch: é 1 webhook por pessoa. Mandamos, por comprador:
-//   { full_name, email, token }   (token = acesso de 60d, mesmo modelo do e-mail)
-// para a URL de automação do BotConversa (catch webhook).
+// DOIS MODOS (definidos por disparos_wa.flow):
+//
+//  (A) flow vazio = PRÉ-CREDENCIAMENTO (padrão). 1 POST por pessoa pro catch
+//      webhook de automação, payload { full_name, email, phone, token }.
+//
+//  (B) flow = id de um fluxo BotConversa. Por contato:
+//        1) acha/cria o subscriber por telefone (has_opt_in_whatsapp obrigatório);
+//        2) seta os custom fields conforme o mapeamento (disparos_wa.mapping);
+//        3) envia o fluxo (send_flow).
+//      Usa a API REST: https://backend.botconversa.com.br/api/v1/webhook
+//      Auth: header API-KEY = env BOTCONVERSA_API_KEY.
 //
 // Fila: campos wa_* na coleção compradores. enqueue = UPDATE em massa; cron drena
-// 1 a 1 com retry/erro. Histórico/contadores em disparos_wa.
-// Por enquanto só COMPRADORES (clusters todos/pendentes). Participantes depois.
+// 1 a 1 com retry/erro. Histórico/contadores + flow/mapping em disparos_wa.
 // REGRA JSVM: helpers declarados DENTRO de cada callback.
 // ============================================================================
+
+// --- Lista de fluxos do BotConversa (pra dropdown) --------------------------
+routerAdd(
+  'GET',
+  '/backend/v1/admin/whatsapp/flows',
+  (e) => {
+    const key = $os.getenv('BOTCONVERSA_API_KEY') || ''
+    if (!key)
+      return e.json(200, { ok: false, error: 'BOTCONVERSA_API_KEY não configurada', flows: [] })
+    const decodeBody = (b) => {
+      if (b == null) return ''
+      if (typeof b === 'string') return b
+      try {
+        return new TextDecoder().decode(b)
+      } catch (_) {}
+      try {
+        let s = ''
+        for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+        return s
+      } catch (_) {}
+      return ''
+    }
+    try {
+      const res = $http.send({
+        url: 'https://backend.botconversa.com.br/api/v1/webhook/flows/',
+        method: 'GET',
+        headers: { 'API-KEY': key, 'Content-Type': 'application/json' },
+        timeout: 15,
+      })
+      if (res.statusCode === 200) {
+        const arr = JSON.parse(decodeBody(res.body))
+        return e.json(200, { ok: true, flows: arr })
+      }
+      return e.json(200, { ok: false, error: 'HTTP ' + res.statusCode, flows: [] })
+    } catch (err) {
+      return e.json(200, { ok: false, error: err && err.message ? err.message : 'erro', flows: [] })
+    }
+  },
+  $apis.requireAuth(),
+)
+
+// --- Lista de custom fields (variáveis) do BotConversa ----------------------
+routerAdd(
+  'GET',
+  '/backend/v1/admin/whatsapp/custom-fields',
+  (e) => {
+    const key = $os.getenv('BOTCONVERSA_API_KEY') || ''
+    if (!key)
+      return e.json(200, { ok: false, error: 'BOTCONVERSA_API_KEY não configurada', fields: [] })
+    const decodeBody = (b) => {
+      if (b == null) return ''
+      if (typeof b === 'string') return b
+      try {
+        return new TextDecoder().decode(b)
+      } catch (_) {}
+      try {
+        let s = ''
+        for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+        return s
+      } catch (_) {}
+      return ''
+    }
+    try {
+      const res = $http.send({
+        url: 'https://backend.botconversa.com.br/api/v1/webhook/custom_fields/',
+        method: 'GET',
+        headers: { 'API-KEY': key, 'Content-Type': 'application/json' },
+        timeout: 15,
+      })
+      if (res.statusCode === 200) {
+        const arr = JSON.parse(decodeBody(res.body))
+        return e.json(200, { ok: true, fields: arr })
+      }
+      return e.json(200, { ok: false, error: 'HTTP ' + res.statusCode, fields: [] })
+    } catch (err) {
+      return e.json(200, {
+        ok: false,
+        error: err && err.message ? err.message : 'erro',
+        fields: [],
+      })
+    }
+  },
+  $apis.requireAuth(),
+)
 
 // --- Preview (contagem do público) ------------------------------------------
 routerAdd(
@@ -46,6 +137,23 @@ routerAdd(
       const cluster = body.cluster || 'todos'
       const nomeCampanha = (body.nome || '').toString().trim()
 
+      // Fluxo: '' ou 'PRE' = pré-credenciamento (catch). Senão, id do fluxo.
+      let flow = (body.flow == null ? '' : body.flow).toString().trim()
+      if (flow === 'PRE') flow = ''
+      const flowNome = (body.flow_nome || '').toString().trim()
+
+      // Mapeamento de variáveis (só faz sentido com flow != '').
+      let mapping = []
+      if (flow && Array.isArray(body.mapping)) {
+        for (let i = 0; i < body.mapping.length; i++) {
+          const m = body.mapping[i] || {}
+          const fid = (m.field_id == null ? '' : m.field_id).toString().trim()
+          const src = (m.source || '').toString().trim()
+          if (!fid || !src) continue
+          mapping.push({ field_id: fid, source: src, value: (m.value || '').toString() })
+        }
+      }
+
       let where = "email != ''"
       if (cluster === 'pendentes') {
         where =
@@ -65,6 +173,9 @@ routerAdd(
       disparo.set('enviados', 0)
       disparo.set('erros', 0)
       disparo.set('status', 'em_andamento')
+      disparo.set('flow', flow)
+      disparo.set('flow_nome', flowNome)
+      disparo.set('mapping', mapping.length ? JSON.stringify(mapping) : '')
       $app.save(disparo)
       const disparoId = disparo.id
 
@@ -140,7 +251,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- Envio INDIVIDUAL IMEDIATO (sem fila): manda na hora e retorna o status -
+// --- Envio INDIVIDUAL IMEDIATO (sem fila): pré-credenciamento (catch) --------
 routerAdd(
   'POST',
   '/backend/v1/admin/whatsapp/send-individual',
@@ -201,7 +312,6 @@ routerAdd(
       const ok = status >= 200 && status < 300
       const nowStr = new Date().toISOString()
 
-      // Registra no histórico (cluster individual) pra aparecer junto dos demais.
       let disparoId = ''
       try {
         const d = new Record($app.findCollectionByNameOrId('disparos_wa'))
@@ -237,11 +347,54 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- CRON: drena a fila do WhatsApp, 1 POST por pessoa ----------------------
+// --- CRON: drena a fila do WhatsApp -----------------------------------------
 cronAdd('whatsapp_dispatch', '* * * * *', () => {
-  // URL de automação do BotConversa para COMPRADORES (catch webhook).
   const BC_URL_COMPRADOR =
     'https://new-backend.botconversa.com.br/api/v1/webhooks-automation/catch/192716/WquemD9Wrf0h/'
+  const BC_API = 'https://backend.botconversa.com.br/api/v1/webhook'
+  const BC_KEY = $os.getenv('BOTCONVERSA_API_KEY') || ''
+  const ACESSO_BASE = 'https://summit2026.goskip.app/acesso?token='
+
+  const decodeBody = (b) => {
+    if (b == null) return ''
+    if (typeof b === 'string') return b
+    try {
+      return new TextDecoder().decode(b)
+    } catch (_) {}
+    try {
+      let s = ''
+      for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+      return s
+    } catch (_) {}
+    return ''
+  }
+  const bcGet = (url) => {
+    try {
+      const r = $http.send({
+        url: url,
+        method: 'GET',
+        headers: { 'API-KEY': BC_KEY, 'Content-Type': 'application/json' },
+        timeout: 12,
+      })
+      return { status: r.statusCode, body: decodeBody(r.body) }
+    } catch (err) {
+      return { status: 0, body: '', err: err && err.message ? err.message : 'erro' }
+    }
+  }
+  const bcPost = (url, obj) => {
+    try {
+      const r = $http.send({
+        url: url,
+        method: 'POST',
+        headers: { 'API-KEY': BC_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify(obj),
+        timeout: 12,
+      })
+      return { status: r.statusCode, body: decodeBody(r.body) }
+    } catch (err) {
+      return { status: 0, body: '', err: err && err.message ? err.message : 'erro' }
+    }
+  }
 
   const atualizaDisparo = (did) => {
     if (!did) return
@@ -269,6 +422,31 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
     } catch (_) {}
   }
 
+  const resolveSource = (source, c, fone, staticVal, token) => {
+    if (source === 'static') return staticVal || ''
+    if (source === 'nome') return c.getString('nome') || ''
+    if (source === 'primeiro_nome') {
+      const n = (c.getString('nome') || '').trim()
+      return n ? n.split(/\s+/)[0] : ''
+    }
+    if (source === 'email') return c.getString('email') || ''
+    if (source === 'telefone') return fone || ''
+    if (source === 'documento') return c.getString('documento') || ''
+    if (source === 'pedido_id') {
+      try {
+        const ing = $app.findFirstRecordByFilter('ingressos', 'comprador_id = {:cid}', {
+          cid: c.id,
+        })
+        return ing ? ing.getString('pedido_id') || '' : ''
+      } catch (_) {
+        return ''
+      }
+    }
+    if (source === 'token') return token || ''
+    if (source === 'link_acesso') return token ? ACESSO_BASE + token : ''
+    return ''
+  }
+
   const processOneBatch = (deadline) => {
     let first
     try {
@@ -277,6 +455,31 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
       return 'empty'
     }
     const disparoId = first.getString('wa_disparo_id')
+
+    // Carrega o disparo pra saber o modo (flow) e o mapeamento.
+    let flowId = ''
+    let mapping = []
+    if (disparoId) {
+      try {
+        const d = $app.findRecordById('disparos_wa', disparoId)
+        flowId = d.getString('flow') || ''
+        const mraw = d.getString('mapping') || ''
+        if (mraw) {
+          try {
+            mapping = JSON.parse(mraw) || []
+          } catch (_) {
+            mapping = []
+          }
+        }
+      } catch (_) {}
+    }
+    const flowMode = flowId && flowId !== 'PRE'
+    let needToken = false
+    for (let mi = 0; mi < mapping.length; mi++) {
+      const s = mapping[mi] && mapping[mi].source
+      if (s === 'token' || s === 'link_acesso') needToken = true
+    }
+
     const claim = $security.randomString(20)
     try {
       const sub = disparoId
@@ -312,7 +515,6 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
     let anyRetry = false
 
     for (let i = 0; i < batch.length; i++) {
-      // Respeita a janela do cron: devolve os restantes pra fila e sai.
       if (Date.now() > deadline) {
         for (let j = i; j < batch.length; j++) {
           const cc = batch[j]
@@ -327,51 +529,137 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
       }
 
       const c = batch[i]
-      const email = c.getString('email')
       const nome = c.getString('nome') || ''
-      if (!email) {
-        c.set('wa_status', 'erro')
-        c.set('wa_erro', 'Sem email')
-        c.set('wa_claim', '')
-        try {
-          $app.save(c)
-        } catch (_) {}
-        continue
-      }
-
-      // Token de acesso (60 dias).
-      let token = ''
-      try {
-        token = $security.randomString(40)
-        const tr = new Record(tokenColl)
-        tr.set('comprador_id', c.id)
-        tr.set('token', token)
-        tr.set('usado', false)
-        tr.set('expira_em', expIso)
-        $app.save(tr)
-      } catch (_) {
-        token = ''
-      }
-
-      // Telefone no padrão WhatsApp: só dígitos, com 55 quando vier sem DDI.
       let fone = (c.getString('telefone') || '').replace(/\D/g, '')
       if (fone && fone.length <= 11) fone = '55' + fone
 
       let status = 0
       let erroMsg = ''
-      try {
-        const res = $http.send({
-          url: BC_URL_COMPRADOR,
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ full_name: nome, email: email, phone: fone, token: token }),
-          timeout: 12,
-        })
-        status = res.statusCode
-      } catch (err) {
-        erroMsg = err.message
+
+      if (!flowMode) {
+        // ---- MODO A: pré-credenciamento (catch webhook) ----
+        const email = c.getString('email')
+        if (!email) {
+          c.set('wa_status', 'erro')
+          c.set('wa_erro', 'Sem email')
+          c.set('wa_claim', '')
+          try {
+            $app.save(c)
+          } catch (_) {}
+          continue
+        }
+        let token = ''
+        try {
+          token = $security.randomString(40)
+          const tr = new Record(tokenColl)
+          tr.set('comprador_id', c.id)
+          tr.set('token', token)
+          tr.set('usado', false)
+          tr.set('expira_em', expIso)
+          $app.save(tr)
+        } catch (_) {
+          token = ''
+        }
+        try {
+          const res = $http.send({
+            url: BC_URL_COMPRADOR,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ full_name: nome, email: email, phone: fone, token: token }),
+            timeout: 12,
+          })
+          status = res.statusCode
+        } catch (err) {
+          erroMsg = err.message
+        }
+      } else {
+        // ---- MODO B: fluxo via API (cria/atualiza contato + variáveis + send_flow) ----
+        if (!BC_KEY) {
+          c.set('wa_status', 'erro')
+          c.set('wa_erro', 'BOTCONVERSA_API_KEY não configurada')
+          c.set('wa_claim', '')
+          try {
+            $app.save(c)
+          } catch (_) {}
+          continue
+        }
+        if (!fone) {
+          c.set('wa_status', 'erro')
+          c.set('wa_erro', 'Sem telefone')
+          c.set('wa_claim', '')
+          try {
+            $app.save(c)
+          } catch (_) {}
+          continue
+        }
+
+        let token = ''
+        if (needToken) {
+          try {
+            token = $security.randomString(40)
+            const tr = new Record(tokenColl)
+            tr.set('comprador_id', c.id)
+            tr.set('token', token)
+            tr.set('usado', false)
+            tr.set('expira_em', expIso)
+            $app.save(tr)
+          } catch (_) {
+            token = ''
+          }
+        }
+
+        // 1) acha/cria subscriber
+        let subId = 0
+        const gp = bcGet(BC_API + '/subscriber/get_by_phone/' + fone + '/')
+        if (gp.status === 200) {
+          try {
+            subId = parseInt(JSON.parse(gp.body).id, 10) || 0
+          } catch (_) {}
+        }
+        let crStatus = 0
+        if (!subId) {
+          const parts = nome ? nome.split(/\s+/) : []
+          const fn = parts.length ? parts[0] : 'Contato'
+          const ln = parts.length > 1 ? parts.slice(1).join(' ') : ''
+          const cr = bcPost(BC_API + '/subscriber/', {
+            phone: fone,
+            first_name: fn,
+            last_name: ln,
+            has_opt_in_whatsapp: true,
+          })
+          crStatus = cr.status
+          const gp2 = bcGet(BC_API + '/subscriber/get_by_phone/' + fone + '/')
+          if (gp2.status === 200) {
+            try {
+              subId = parseInt(JSON.parse(gp2.body).id, 10) || 0
+            } catch (_) {}
+          }
+        }
+
+        if (!subId) {
+          status = crStatus || gp.status || 0
+          erroMsg = 'Sem subscriber (get=' + gp.status + ' create=' + crStatus + ')'
+        } else {
+          // 2) seta custom fields (variáveis) conforme mapeamento
+          for (let mi = 0; mi < mapping.length; mi++) {
+            const m = mapping[mi]
+            if (!m || !m.field_id) continue
+            const val = resolveSource(m.source, c, fone, m.value, token)
+            if (val === '' || val == null) continue
+            bcPost(BC_API + '/subscriber/' + subId + '/custom_fields/' + m.field_id + '/', {
+              value: String(val),
+            })
+          }
+          // 3) envia o fluxo
+          const sf = bcPost(BC_API + '/subscriber/' + subId + '/send_flow/', {
+            flow: parseInt(flowId, 10),
+          })
+          status = sf.status
+          if (sf.err) erroMsg = sf.err
+        }
       }
 
+      // ---- persistência do resultado (comum aos dois modos) ----
       const ok = status >= 200 && status < 300
       const retryable = !ok && (status === 429 || status >= 500 || status === 0)
       const nowStr = new Date().toISOString()
