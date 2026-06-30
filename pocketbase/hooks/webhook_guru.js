@@ -67,7 +67,53 @@ routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
       planned.push({ tipo: tipo, qty: qty })
     }
 
-    const templateId = ($os.getenv('GURU_ACCESS_TEMPLATE_ID') || '').toString().trim()
+    // Template do e-mail de acesso: NOME fixo, resolvido para o id (d-...) do
+    // SendGrid. O id é cacheado no disparo da Guru pra não consultar a cada webhook.
+    const TEMPLATE_NAME = 'Skip-Summit26-Send-Comprador'
+    let templateId = ''
+    try {
+      const gd = $app.findFirstRecordByFilter('disparos', "cluster = 'guru'")
+      const cached = gd.getString('template_id')
+      if (cached && cached.indexOf('d-') === 0) templateId = cached
+    } catch (_) {}
+    if (!templateId) {
+      const apiKey = $os.getenv('SENDGRID_API_KEY')
+      if (apiKey) {
+        const decodeBody = (b) => {
+          if (b == null) return ''
+          if (typeof b === 'string') return b
+          try {
+            return new TextDecoder().decode(b)
+          } catch (_) {}
+          try {
+            let s = ''
+            for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+            return s
+          } catch (_) {}
+          return ''
+        }
+        try {
+          const res = $http.send({
+            url: 'https://api.sendgrid.com/v3/templates?generations=dynamic&page_size=200',
+            method: 'GET',
+            headers: { Authorization: 'Bearer ' + apiKey },
+            timeout: 20,
+          })
+          let parsed = {}
+          try {
+            parsed = JSON.parse(decodeBody(res.body))
+          } catch (_) {}
+          const list = parsed.result || parsed.templates || []
+          for (let i = 0; i < list.length; i++) {
+            const t = list[i]
+            if (t && t.id && (t.name || '').toLowerCase() === TEMPLATE_NAME.toLowerCase()) {
+              templateId = t.id
+              break
+            }
+          }
+        } catch (_) {}
+      }
+    }
 
     // Pedido sem nenhum ingresso do Summit: registra (idempotência) e sai.
     if (planned.length === 0) {
@@ -159,6 +205,7 @@ routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
           comprador.set('acesso_erro', '')
           comprador.set('acesso_claim', '')
           guruDisparo.set('total', (parseInt(guruDisparo.get('total'), 10) || 0) + 1)
+          guruDisparo.set('template_id', templateId)
           guruDisparo.set('status', 'em_andamento')
           txApp.save(guruDisparo)
         }
