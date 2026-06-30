@@ -519,11 +519,10 @@ routerAdd(
 )
 
 // --- CRON: drena a fila do WhatsApp (workers concorrentes) ------------------
-// Cada cron roda no próprio goroutine -> WA_WORKERS rodam EM PARALELO, cada um
+// Cada cron roda no próprio goroutine -> 5 workers rodam EM PARALELO, cada um
 // drenando uma fatia distinta da fila (claim atômico). A soma dos orçamentos
-// (WA_WORKERS * BC_BUDGET) fica abaixo do limite de 650 req/min do BotConversa.
-const WA_WORKERS = 5
-for (let w = 0; w < WA_WORKERS; w++) {
+// (5 workers x 120) fica abaixo do limite de 650 req/min do BotConversa.
+for (let w = 0; w < 5; w++) {
   cronAdd('whatsapp_dispatch_' + w, '* * * * *', () => {
     const BC_URL_COMPRADOR =
       'https://new-backend.botconversa.com.br/api/v1/webhooks-automation/catch/192716/WquemD9Wrf0h/'
