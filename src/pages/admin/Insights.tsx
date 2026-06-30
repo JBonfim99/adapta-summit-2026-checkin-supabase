@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Loader2, RefreshCcw, Users, Building2, Sparkles, TrendingUp } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { ROLES, REVENUE, EMPLOYEES } from '@/lib/form-options'
+import RespostasFeed from '@/components/admin/RespostasFeed'
 
 interface Insights {
   total: number
@@ -209,6 +210,9 @@ export default function AdminInsights() {
           sub="credenciados por tipo"
         />
       </div>
+
+      {/* Respostas individuais do formulário */}
+      <RespostasFeed />
 
       {/* Maturidade em IA */}
       <Card className="border-none shadow-sm">
