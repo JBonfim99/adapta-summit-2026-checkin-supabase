@@ -9,15 +9,28 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { RotateCw, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { RotateCw, CheckCircle2, XCircle, Loader2, Eye } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
+
+// Formata JSON pra leitura; se não for JSON válido, devolve o texto cru.
+const pretty = (s: any) => {
+  if (!s && s !== 0) return ''
+  if (typeof s === 'object') return JSON.stringify(s, null, 2)
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2)
+  } catch {
+    return String(s)
+  }
+}
 
 export default function AdminLogs() {
   const [logs, setLogs] = useState<any[]>([])
   const [retryingAll, setRetryingAll] = useState(false)
   const [retryingId, setRetryingId] = useState('')
   const [filter, setFilter] = useState<'erros' | 'todos' | 'ok'>('erros')
+  const [detail, setDetail] = useState<any>(null)
   const { toast } = useToast()
 
   const loadData = () => {
@@ -65,8 +78,18 @@ export default function AdminLogs() {
   const handleRetry = async (ingressoId: string) => {
     setRetryingId(ingressoId)
     try {
-      await pb.send(`/backend/v1/admin/retry-webhook/${ingressoId}`, { method: 'POST' })
-      toast({ title: 'Sucesso', description: 'Webhook reenviado.' })
+      const res: any = await pb.send(`/backend/v1/admin/retry-webhook/${ingressoId}`, {
+        method: 'POST',
+      })
+      if (res && res.success === false) {
+        toast({
+          title: 'INAC ainda recusou',
+          description: `HTTP ${res.status || '-'}. Clique em "Detalhes" pra ver a resposta.`,
+          variant: 'destructive',
+        })
+      } else {
+        toast({ title: 'Credenciado', description: 'QR gerado com sucesso.' })
+      }
       loadData()
     } catch (e: any) {
       toast({ title: 'Falha no reenvio', description: e.message, variant: 'destructive' })
@@ -200,22 +223,32 @@ export default function AdminLogs() {
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
-                    {err && log.ingresso_id && (
+                    <div className="flex items-center justify-end gap-2">
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
                         className="h-8 gap-1"
-                        onClick={() => handleRetry(log.ingresso_id)}
-                        disabled={retryingId === log.ingresso_id}
+                        onClick={() => setDetail(log)}
                       >
-                        {retryingId === log.ingresso_id ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <RotateCw className="w-3 h-3" />
-                        )}{' '}
-                        Retentar
+                        <Eye className="w-3 h-3" /> Detalhes
                       </Button>
-                    )}
+                      {err && log.ingresso_id && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1"
+                          onClick={() => handleRetry(log.ingresso_id)}
+                          disabled={retryingId === log.ingresso_id}
+                        >
+                          {retryingId === log.ingresso_id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <RotateCw className="w-3 h-3" />
+                          )}{' '}
+                          Retentar
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               )
@@ -232,6 +265,39 @@ export default function AdminLogs() {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              Detalhe do envio — pedido {detail?.expand?.ingresso_id?.pedido_id || ''}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto text-sm">
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-slate-600">
+              <span>
+                <b>HTTP:</b> {detail?.status ?? '-'}
+              </span>
+              <span>
+                <b>Quando:</b> {detail ? new Date(detail.created).toLocaleString() : '-'}
+              </span>
+            </div>
+            {detail?.detalhe && <div className="text-slate-700">{detail.detalhe}</div>}
+            <div>
+              <h4 className="font-semibold mb-1 text-slate-800">O que enviamos à INAC (payload)</h4>
+              <pre className="text-xs bg-slate-50 border rounded p-3 overflow-x-auto whitespace-pre-wrap break-all text-slate-700">
+                {pretty(detail?.payload) || 'Não registrado'}
+              </pre>
+            </div>
+            <div>
+              <h4 className="font-semibold mb-1 text-slate-800">Resposta da INAC</h4>
+              <pre className="text-xs bg-slate-50 border rounded p-3 overflow-x-auto whitespace-pre-wrap break-all text-slate-700">
+                {pretty(detail?.response) || 'Sem corpo de resposta'}
+              </pre>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
