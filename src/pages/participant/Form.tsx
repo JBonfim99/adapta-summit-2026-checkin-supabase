@@ -14,12 +14,16 @@ import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { getErrorMessage } from '@/lib/pocketbase/errors'
 import { ROLES, REVENUE, EMPLOYEES, NICHES } from '@/lib/form-options'
+import { isValidCPF } from '@/lib/cpf'
 
 const formSchema = z
   .object({
     nome_completo: z.string().min(3, 'Nome é obrigatório'),
     email: z.string().email('E-mail inválido'),
-    cpf: z.string().min(14, 'CPF inválido'),
+    cpf: z
+      .string()
+      .min(14, 'CPF inválido')
+      .refine((v) => isValidCPF(v), 'CPF inválido — confira os dígitos'),
     telefone: z.string().min(14, 'Telefone inválido'),
     tem_empresa: z.boolean(),
     nome_empresa: z.string().optional().default(''),
