@@ -380,7 +380,15 @@ routerAdd(
         ingresso_id: p.getString('ingresso_id'),
       }))
 
+      let compradores_total = 0
+      try {
+        const r = new DynamicModel({ c: 0 })
+        $app.db().newQuery('SELECT COUNT(*) as c FROM compradores').one(r)
+        compradores_total = r.c
+      } catch (_) {}
+
       return e.json(200, {
+        compradores_total,
         total,
         preenchidos,
         pendentes,

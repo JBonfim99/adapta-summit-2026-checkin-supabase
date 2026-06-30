@@ -95,19 +95,6 @@ export default function AdminCompradores() {
     defaultValues: { nome: '', email: '' },
   })
 
-  const loadCounts = () => {
-    pb.collection('ingressos')
-      .getFullList({ fields: 'comprador_id' })
-      .then((res) => {
-        const counts: Record<string, number> = {}
-        res.forEach((item) => {
-          counts[item.comprador_id] = (counts[item.comprador_id] || 0) + 1
-        })
-        setIngressosCount(counts)
-      })
-      .catch(() => {})
-  }
-
   const loadData = async () => {
     setLoading(true)
     try {
@@ -159,12 +146,31 @@ export default function AdminCompradores() {
         }
 
         const items = filteredBuyers.slice((currentPage - 1) * limit, currentPage * limit)
+        const countsF: Record<string, number> = {}
+        items.forEach((b) => {
+          countsF[b.id] = buyerStats[b.id] ? buyerStats[b.id].total : 0
+        })
+        setIngressosCount(countsF)
         setData(items)
         setTotalPages(totalPagesCalc)
       } else {
         const res = await pb
           .collection('compradores')
           .getList(page, limit, { sort: '-created', filter: filterStr })
+        // Conta os ingressos só dos compradores desta página (rápido, sem 0-flash).
+        const ids = res.items.map((b: any) => b.id)
+        const counts: Record<string, number> = {}
+        ids.forEach((id: string) => (counts[id] = 0))
+        if (ids.length > 0) {
+          const ingFilter = ids.map((id: string) => `comprador_id = "${id}"`).join(' || ')
+          const tickets = await pb
+            .collection('ingressos')
+            .getFullList({ filter: ingFilter, fields: 'comprador_id' })
+          tickets.forEach((t: any) => {
+            counts[t.comprador_id] = (counts[t.comprador_id] || 0) + 1
+          })
+        }
+        setIngressosCount(counts)
         setData(res.items)
         setTotalPages(res.totalPages || 1)
       }
@@ -179,15 +185,8 @@ export default function AdminCompradores() {
     loadData()
   }, [page, search, filterStatus])
 
-  useEffect(() => {
-    loadCounts()
-  }, [])
-
   useRealtime('compradores', () => loadData())
-  useRealtime('ingressos', () => {
-    loadData()
-    loadCounts()
-  })
+  useRealtime('ingressos', () => loadData())
 
   const handleOpenCreate = () => {
     setEditingId(null)

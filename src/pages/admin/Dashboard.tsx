@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Ticket, Users, CheckCircle, AlertCircle, Loader2, RotateCw } from 'lucide-react'
+import {
+  Ticket,
+  Users,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  RotateCw,
+  ShoppingBag,
+} from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import pb from '@/lib/pocketbase/client'
 
@@ -9,6 +17,7 @@ const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / who
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({
+    compradores_total: 0,
     total: 0,
     preenchidos: 0,
     pendentes: 0,
@@ -66,7 +75,16 @@ export default function AdminDashboard() {
         </Button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total de Compradores</CardTitle>
+            <ShoppingBag className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{stats.compradores_total}</div>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total de Ingressos</CardTitle>
