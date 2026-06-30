@@ -123,7 +123,7 @@ export function BuyerTicketsSheet({
                 <h4 className="font-medium text-sm">Novo Ingresso</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <Label>ID do Pedido (Opcional)</Label>
+                    <Label>ID do ingresso (Opcional)</Label>
                     <Input
                       value={newTicket.pedido_id}
                       inputMode="numeric"
@@ -175,7 +175,7 @@ export function BuyerTicketsSheet({
               <Table>
                 <TableHeader className="bg-slate-50">
                   <TableRow>
-                    <TableHead>Pedido</TableHead>
+                    <TableHead>ID do ingresso</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Participante</TableHead>

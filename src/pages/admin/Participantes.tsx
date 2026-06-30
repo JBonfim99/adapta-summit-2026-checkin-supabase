@@ -196,7 +196,7 @@ export default function AdminParticipants() {
         <div className="relative flex-1 min-w-[250px] max-w-sm">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Buscar por nome, email ou pedido..."
+            placeholder="Buscar por nome, email ou ID do ingresso..."
             className="pl-9 bg-white"
             value={search}
             onChange={(e) => {
@@ -236,7 +236,7 @@ export default function AdminParticipants() {
           <Table>
             <TableHeader className="bg-slate-50">
               <TableRow>
-                <TableHead>Ingresso / Pedido</TableHead>
+                <TableHead>ID do ingresso</TableHead>
                 <TableHead>Comprador</TableHead>
                 <TableHead>Participante</TableHead>
                 <TableHead>Status</TableHead>

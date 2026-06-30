@@ -62,7 +62,7 @@ export default function AdminLogs() {
           <TableHeader className="bg-slate-50">
             <TableRow>
               <TableHead>Evento</TableHead>
-              <TableHead>Ingresso / Pedido</TableHead>
+              <TableHead>ID do ingresso</TableHead>
               <TableHead>Data</TableHead>
               <TableHead>Status HTTP</TableHead>
               <TableHead>Detalhe</TableHead>

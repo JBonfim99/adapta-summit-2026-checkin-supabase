@@ -18,8 +18,11 @@ interface TicketData {
     email: string
     cpf: string
     telefone: string
+    tem_empresa: boolean
     nome_empresa: string
     cargo: string
+    profissao: string
+    nicho: string
   } | null
 }
 
@@ -142,9 +145,18 @@ export default function ParticipantTicket() {
             <Row label="E-mail" value={p.email} />
             <Row label="CPF" value={p.cpf} />
             <Row label="Telefone" value={p.telefone} />
-            <Row label="Empresa" value={p.nome_empresa} />
-            <Row label="Cargo" value={p.cargo} />
-            <Row label="Nº do pedido" value={data.pedido_id} />
+            {p.tem_empresa ? (
+              <>
+                <Row label="Empresa" value={p.nome_empresa} />
+                <Row label="Cargo" value={p.cargo} />
+              </>
+            ) : (
+              <>
+                <Row label="Profissão" value={p.profissao} />
+                <Row label="Segmento" value={p.nicho} />
+              </>
+            )}
+            <Row label="ID do ingresso" value={data.pedido_id} />
           </div>
 
           {!data.inac_qr && (

@@ -40,8 +40,11 @@ routerAdd('GET', '/backend/v1/participant/ticket/{token}', (e) => {
           email: p.getString('email'),
           cpf: p.getString('cpf'),
           telefone: p.getString('telefone'),
+          tem_empresa: p.getBool('tem_empresa'),
           nome_empresa: p.getString('nome_empresa'),
           cargo: p.getString('cargo'),
+          profissao: p.getString('profissao'),
+          nicho: p.getString('nicho'),
         }
       } catch (_) {}
     }
