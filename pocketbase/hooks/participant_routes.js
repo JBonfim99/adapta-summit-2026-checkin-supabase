@@ -175,7 +175,7 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
           { id: 10133654, value: emailNorm },
           { id: 10133655, value: onlyDigits(body.cpf) },
           { id: 10133656, value: tel },
-          { id: 10133657, value: body.nome_empresa || '' },
+          { id: 10133657, value: body.nome_empresa || body.profissao || '' },
           { id: 10133665, value: ingresso.getString('pedido_id') },
         ],
       }
