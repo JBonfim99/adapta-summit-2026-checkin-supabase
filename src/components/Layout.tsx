@@ -49,7 +49,14 @@ export default function Layout() {
       </main>
 
       <footer className="border-t bg-white py-6 mt-auto">
-        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground max-w-7xl">
+        <div className="container mx-auto px-4 text-center text-sm text-muted-foreground max-w-7xl space-y-1">
+          <p>
+            Seus dados são tratados conforme nossa{' '}
+            <Link to="/politica-de-privacidade" className="underline hover:text-foreground">
+              Política de Privacidade
+            </Link>{' '}
+            e usados apenas para fins de credenciamento e comunicação do evento.
+          </p>
           <p>© 2026 Adapta Summit. Todos os direitos reservados.</p>
         </div>
       </footer>
