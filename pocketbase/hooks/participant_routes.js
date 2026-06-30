@@ -109,8 +109,9 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
       const temEmpresa = body.tem_empresa === true || body.tem_empresa === 'true'
       part.set('tem_empresa', temEmpresa)
       part.set('nome_empresa', temEmpresa ? body.nome_empresa || '' : '')
-      part.set('cargo', body.cargo)
-      part.set('nicho', temEmpresa ? body.nicho || '' : '')
+      part.set('cargo', temEmpresa ? body.cargo || '' : '')
+      part.set('profissao', temEmpresa ? '' : body.profissao || '')
+      part.set('nicho', body.nicho || '')
       part.set('num_funcionarios', temEmpresa ? body.num_funcionarios || '' : '')
       part.set('faturamento_anual', temEmpresa ? body.faturamento_anual || '' : '')
       part.set('ia_uso_diario', parseInt(body.ia_uso_diario, 10) || 0)

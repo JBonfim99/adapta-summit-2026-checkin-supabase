@@ -108,6 +108,7 @@ export default function AdminParticipants() {
           'Telefone',
           'Empresa',
           'Cargo',
+          'Profissão',
           'Segmento',
           'Funcionários',
           'Faturamento',
@@ -123,9 +124,13 @@ export default function AdminParticipants() {
           const hasPart = !!row.expand?.participante_id
           const isEmpresa = p.tem_empresa === true
           const perfil = hasPart ? (isEmpresa ? 'Empresa' : 'Profissional') : ''
-          // Campos exclusivos de empresa: vazio sem participante; 'N/A' se Profissional;
-          // valor real se Empresa.
+          // Exclusivos de empresa: vazio sem participante; 'N/A' se Profissional; valor se Empresa.
           const companyVal = (v: any) => (!hasPart ? '' : isEmpresa ? v || '' : 'N/A')
+          // Cargo só existe no modo Empresa; Profissão só no modo Profissional.
+          const cargoVal = !hasPart ? '' : isEmpresa ? p.cargo || '' : 'N/A'
+          const profVal = !hasPart ? '' : !isEmpresa ? p.profissao || '' : 'N/A'
+          // Segmento (nicho) é coletado nos dois modos.
+          const segVal = !hasPart ? '' : p.nicho || ''
           return [
             escapeCSV(row.pedido_id),
             escapeCSV(row.tipo_ingresso),
@@ -136,8 +141,9 @@ export default function AdminParticipants() {
             escapeCSV(p.cpf),
             escapeCSV(p.telefone),
             escapeCSV(companyVal(p.nome_empresa)),
-            escapeCSV(p.cargo),
-            escapeCSV(companyVal(p.nicho)),
+            escapeCSV(cargoVal),
+            escapeCSV(profVal),
+            escapeCSV(segVal),
             escapeCSV(companyVal(p.num_funcionarios)),
             escapeCSV(companyVal(p.faturamento_anual)),
             escapeCSV(p.ia_uso_diario),
@@ -442,16 +448,18 @@ export default function AdminParticipants() {
                     </p>
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-muted-foreground mb-1">Cargo</h4>
-                    <p className="font-medium">{selectedParticipant.cargo || '—'}</p>
+                    <h4 className="text-sm font-semibold text-muted-foreground mb-1">
+                      {selectedParticipant.tem_empresa === true ? 'Cargo' : 'Profissão'}
+                    </h4>
+                    <p className="font-medium">
+                      {selectedParticipant.tem_empresa === true
+                        ? selectedParticipant.cargo || '—'
+                        : selectedParticipant.profissao || '—'}
+                    </p>
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-muted-foreground mb-1">Segmento</h4>
-                    <p className="font-medium">
-                      {selectedParticipant.tem_empresa === true
-                        ? selectedParticipant.nicho || '—'
-                        : 'N/A'}
-                    </p>
+                    <p className="font-medium">{selectedParticipant.nicho || '—'}</p>
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-muted-foreground mb-1">

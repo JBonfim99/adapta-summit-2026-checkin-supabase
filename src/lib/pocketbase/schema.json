@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-30T15:09:45.440Z",
+  "generatedAt": "2026-06-30T15:15:57.509Z",
   "collections": [
     {
       "name": "users",
@@ -213,7 +213,7 @@
         {
           "name": "cargo",
           "type": "text",
-          "required": true,
+          "required": false,
           "system": false
         },
         {
@@ -353,6 +353,12 @@
         {
           "name": "tem_empresa",
           "type": "bool",
+          "required": false,
+          "system": false
+        },
+        {
+          "name": "profissao",
+          "type": "text",
           "required": false,
           "system": false
         }

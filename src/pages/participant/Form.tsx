@@ -23,23 +23,29 @@ const formSchema = z
     telefone: z.string().min(14, 'Telefone inválido'),
     tem_empresa: z.boolean(),
     nome_empresa: z.string().optional().default(''),
-    cargo: z.string().min(1, 'Selecione um cargo'),
+    cargo: z.string().optional().default(''),
+    profissao: z.string().optional().default(''),
     faturamento_anual: z.string().optional().default(''),
     num_funcionarios: z.string().optional().default(''),
-    nicho: z.string().optional().default(''),
+    nicho: z.string().min(1, 'Selecione o segmento'),
     ia_uso_diario: z.number().min(1, 'Selecione uma opção').max(5),
     ia_profundidade: z.number().min(1, 'Selecione uma opção').max(5),
     ia_ferramentas: z.string().min(2, 'Preenchimento obrigatório'),
     ia_desafio: z.string().min(2, 'Preenchimento obrigatório'),
   })
   .superRefine((data, ctx) => {
-    // Campos exclusivos de empresa só são obrigatórios quando tem_empresa = true.
     if (data.tem_empresa) {
       if (!data.nome_empresa || data.nome_empresa.trim().length < 2)
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['nome_empresa'],
           message: 'Empresa é obrigatória',
+        })
+      if (!data.cargo)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['cargo'],
+          message: 'Selecione um cargo',
         })
       if (!data.faturamento_anual)
         ctx.addIssue({
@@ -53,11 +59,12 @@ const formSchema = z
           path: ['num_funcionarios'],
           message: 'Selecione o tamanho',
         })
-      if (!data.nicho)
+    } else {
+      if (!data.profissao || data.profissao.trim().length < 2)
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['nicho'],
-          message: 'Selecione o segmento',
+          path: ['profissao'],
+          message: 'Informe sua profissão',
         })
     }
   })
@@ -106,6 +113,7 @@ export default function ParticipantForm() {
       tem_empresa: true,
       nome_empresa: '',
       cargo: '',
+      profissao: '',
       faturamento_anual: '',
       num_funcionarios: '',
       nicho: '',
@@ -131,8 +139,9 @@ export default function ParticipantForm() {
         telefone: data.telefone || '',
         tem_empresa: isEmpresa,
         nome_empresa: isEmpresa ? data.nome_empresa || '' : '',
-        cargo: data.cargo || '',
-        nicho: isEmpresa ? data.nicho || '' : '',
+        cargo: isEmpresa ? data.cargo || '' : '',
+        profissao: isEmpresa ? '' : data.profissao || '',
+        nicho: data.nicho || '',
         num_funcionarios: isEmpresa ? data.num_funcionarios || '' : '',
         faturamento_anual: isEmpresa ? data.faturamento_anual || '' : '',
         ia_uso_diario: data.ia_uso_diario || 0,
@@ -189,11 +198,16 @@ export default function ParticipantForm() {
     const semEmpresa = checked === true
     methods.setValue('tem_empresa', !semEmpresa)
     if (semEmpresa) {
+      // vira Profissional: limpa campos exclusivos de empresa (nicho é usado nos dois)
       methods.setValue('nome_empresa', '')
+      methods.setValue('cargo', '')
       methods.setValue('faturamento_anual', '')
       methods.setValue('num_funcionarios', '')
-      methods.setValue('nicho', '')
-      methods.clearErrors(['nome_empresa', 'faturamento_anual', 'num_funcionarios', 'nicho'])
+      methods.clearErrors(['nome_empresa', 'cargo', 'faturamento_anual', 'num_funcionarios'])
+    } else {
+      // vira Empresa: limpa profissão
+      methods.setValue('profissao', '')
+      methods.clearErrors(['profissao'])
     }
   }
 
@@ -332,13 +346,20 @@ export default function ParticipantForm() {
                       </div>
                     </>
                   ) : (
-                    <FormInput
-                      name="cargo"
-                      label="Seu Cargo"
-                      type="select"
-                      options={ROLES}
-                      placeholder="Selecione..."
-                    />
+                    <>
+                      <FormInput
+                        name="profissao"
+                        label="Sua Profissão"
+                        placeholder="Ex: Designer, Advogado, Médico..."
+                      />
+                      <FormInput
+                        name="nicho"
+                        label="Segmento da empresa que você trabalha"
+                        type="select"
+                        options={NICHES}
+                        placeholder="Selecione..."
+                      />
+                    </>
                   )}
 
                   <FormField
