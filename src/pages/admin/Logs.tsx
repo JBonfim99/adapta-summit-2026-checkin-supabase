@@ -27,6 +27,7 @@ const pretty = (s: any) => {
 
 export default function AdminLogs() {
   const [logs, setLogs] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [retryingAll, setRetryingAll] = useState(false)
   const [retryingId, setRetryingId] = useState('')
   const [filter, setFilter] = useState<'erros' | 'todos' | 'ok'>('erros')
@@ -38,6 +39,7 @@ export default function AdminLogs() {
       .getFullList({ expand: 'ingresso_id', sort: '-created' })
       .then((res) => setLogs(res))
       .catch(() => {})
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => {
@@ -253,7 +255,13 @@ export default function AdminLogs() {
                 </TableRow>
               )
             })}
-            {visible.length === 0 && (
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-10">
+                  <Loader2 className="w-5 h-5 animate-spin mx-auto text-muted-foreground" />
+                </TableCell>
+              </TableRow>
+            ) : visible.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                   {filter === 'erros'
@@ -261,7 +269,7 @@ export default function AdminLogs() {
                     : 'Nenhum registro para este filtro.'}
                 </TableCell>
               </TableRow>
-            )}
+            ) : null}
           </TableBody>
         </Table>
       </div>
