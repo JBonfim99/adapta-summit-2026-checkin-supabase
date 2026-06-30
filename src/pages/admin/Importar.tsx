@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { UploadCloud, FileType, ArrowRight } from 'lucide-react'
+import { UploadCloud, FileType, ArrowRight, AlertTriangle } from 'lucide-react'
 import {
   Card,
   CardContent,
@@ -48,6 +48,7 @@ export default function AdminImport() {
     goldTickets: 0,
     platinumTickets: 0,
     payloadRows: [] as any[],
+    skippedNoEmail: 0,
   })
 
   const parseCSVLine = (text: string) => {
@@ -122,10 +123,11 @@ export default function AdminImport() {
   }
 
   const handleMapSubmit = () => {
-    if (!mapping.email || !mapping.documento) {
+    if (!mapping.email) {
       toast({
         title: 'Atenção',
-        description: 'Você deve mapear pelo menos Email e Documento.',
+        description:
+          'Você deve mapear pelo menos o Email — é por ele que a importação agrupa os compradores.',
         variant: 'destructive',
       })
       return
@@ -144,15 +146,21 @@ export default function AdminImport() {
     const buyersSet = new Set()
     let goldTickets = 0
     let platinumTickets = 0
+    let skippedNoEmail = 0
 
     for (const line of lines) {
       const cols = parseCSVLine(line)
       const doc = docIdx !== -1 ? cols[docIdx]?.trim() : ''
       const email = emailIdx !== -1 ? cols[emailIdx]?.trim() : ''
 
-      if (!doc) continue
+      // Mesma regra do backend: agrupa/deduplica por e-mail (case-insensitive)
+      // e ignora qualquer linha sem e-mail.
+      if (!email) {
+        skippedNoEmail++
+        continue
+      }
 
-      buyersSet.add(doc)
+      buyersSet.add(email.toLowerCase())
       const g = goldIdx !== -1 ? parseInt(cols[goldIdx] || '0', 10) || 0 : 0
       const p = platIdx !== -1 ? parseInt(cols[platIdx] || '0', 10) || 0 : 0
 
@@ -177,6 +185,7 @@ export default function AdminImport() {
       goldTickets,
       platinumTickets,
       payloadRows,
+      skippedNoEmail,
     })
     setStep('summary')
   }
@@ -283,7 +292,7 @@ export default function AdminImport() {
               {Object.keys(mapping).map((key) => (
                 <div key={key} className="space-y-1">
                   <Label className="capitalize">
-                    {key.replace('_', ' ')} {['email', 'documento'].includes(key) && '*'}
+                    {key.replace('_', ' ')} {key === 'email' && '*'}
                   </Label>
                   <Select
                     value={(mapping as any)[key]}
@@ -321,17 +330,19 @@ export default function AdminImport() {
             <CardTitle>Resumo da Importação</CardTitle>
             <CardDescription>Verifique os dados antes de confirmar a importação.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <ul className="grid grid-cols-2 gap-4 text-sm text-slate-700">
               <li className="flex items-center gap-2 p-3 bg-slate-50 rounded border">
                 <div>
-                  <div className="text-xs text-muted-foreground">Linhas Válidas</div>
+                  <div className="text-xs text-muted-foreground">Linhas a importar</div>
                   <div className="font-bold text-lg">{summary.totalRows}</div>
                 </div>
               </li>
               <li className="flex items-center gap-2 p-3 bg-slate-50 rounded border">
                 <div>
-                  <div className="text-xs text-muted-foreground">Compradores Únicos</div>
+                  <div className="text-xs text-muted-foreground">
+                    Compradores únicos (por e-mail)
+                  </div>
                   <div className="font-bold text-lg">{summary.uniqueBuyers}</div>
                 </div>
               </li>
@@ -348,6 +359,25 @@ export default function AdminImport() {
                 </div>
               </li>
             </ul>
+
+            {summary.skippedNoEmail > 0 && (
+              <div className="flex items-start gap-2 p-3 rounded border border-amber-200 bg-amber-50 text-amber-800 text-sm">
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  <span className="font-semibold">
+                    {summary.skippedNoEmail} linha(s) sem e-mail serão ignoradas.
+                  </span>{' '}
+                  A importação agrupa os compradores por e-mail; linhas sem e-mail não entram e seus
+                  ingressos não são gerados. Se isso não for esperado, volte e ajuste a planilha ou
+                  o mapeamento.
+                </div>
+              </div>
+            )}
+
+            <p className="text-xs text-muted-foreground">
+              A deduplicação é por <strong>e-mail</strong> (mesma regra da importação). Se o mesmo
+              e-mail aparecer em mais de uma linha, os ingressos são somados no mesmo comprador.
+            </p>
           </CardContent>
           <CardFooter className="flex justify-end gap-2 border-t pt-4">
             <Button variant="outline" onClick={() => setStep('mapping')}>
