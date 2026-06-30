@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Ticket, Users, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Ticket, Users, CheckCircle, AlertCircle, Loader2, RotateCw } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
 import pb from '@/lib/pocketbase/client'
 
@@ -17,14 +18,22 @@ export default function AdminDashboard() {
     activity: [] as any[],
   })
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const loadStats = () => {
+    setRefreshing(true)
+    return pb
+      .send('/backend/v1/admin/stats', { method: 'GET' })
+      .then((res) => setStats(res))
+      .catch(() => {})
+      .finally(() => {
+        setLoading(false)
+        setRefreshing(false)
+      })
+  }
 
   useEffect(() => {
-    pb.send('/backend/v1/admin/stats', { method: 'GET' })
-      .then((res) => {
-        setStats(res)
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
+    loadStats()
   }, [])
 
   if (loading) {
@@ -37,9 +46,24 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in-up pb-12">
-      <div>
-        <h2 className="text-2xl font-bold">Dashboard</h2>
-        <p className="text-muted-foreground">Visão geral do evento e dos ingressos.</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">Dashboard</h2>
+          <p className="text-muted-foreground">Visão geral do evento e dos ingressos.</p>
+        </div>
+        <Button
+          variant="outline"
+          className="gap-2 shrink-0"
+          onClick={loadStats}
+          disabled={refreshing}
+        >
+          {refreshing ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <RotateCw className="w-4 h-4" />
+          )}
+          Atualizar
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
