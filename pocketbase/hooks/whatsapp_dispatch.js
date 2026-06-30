@@ -518,273 +518,232 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- CRON: drena a fila do WhatsApp -----------------------------------------
-cronAdd('whatsapp_dispatch', '* * * * *', () => {
-  const BC_URL_COMPRADOR =
-    'https://new-backend.botconversa.com.br/api/v1/webhooks-automation/catch/192716/WquemD9Wrf0h/'
-  const BC_API = 'https://backend.botconversa.com.br/api/v1/webhook'
-  const BC_KEY = $os.getenv('BOTCONVERSA_API_KEY') || ''
-  const ACESSO_BASE = 'https://summit2026.goskip.app/acesso?token='
+// --- CRON: drena a fila do WhatsApp (workers concorrentes) ------------------
+// Cada cron roda no próprio goroutine -> WA_WORKERS rodam EM PARALELO, cada um
+// drenando uma fatia distinta da fila (claim atômico). A soma dos orçamentos
+// (WA_WORKERS * BC_BUDGET) fica abaixo do limite de 650 req/min do BotConversa.
+const WA_WORKERS = 5
+for (let w = 0; w < WA_WORKERS; w++) {
+  cronAdd('whatsapp_dispatch_' + w, '* * * * *', () => {
+    const BC_URL_COMPRADOR =
+      'https://new-backend.botconversa.com.br/api/v1/webhooks-automation/catch/192716/WquemD9Wrf0h/'
+    const BC_API = 'https://backend.botconversa.com.br/api/v1/webhook'
+    const BC_KEY = $os.getenv('BOTCONVERSA_API_KEY') || ''
+    const ACESSO_BASE = 'https://summit2026.goskip.app/acesso?token='
 
-  const decodeBody = (b) => {
-    if (b == null) return ''
-    if (typeof b === 'string') return b
-    try {
-      return new TextDecoder().decode(b)
-    } catch (_) {}
-    try {
-      let s = ''
-      for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
-      return s
-    } catch (_) {}
-    return ''
-  }
-  const bcGet = (url) => {
-    try {
-      const r = $http.send({
-        url: url,
-        method: 'GET',
-        headers: { 'API-KEY': BC_KEY, 'Content-Type': 'application/json' },
-        timeout: 12,
-      })
-      return { status: r.statusCode, body: decodeBody(r.body) }
-    } catch (err) {
-      return { status: 0, body: '', err: err && err.message ? err.message : 'erro' }
+    const decodeBody = (b) => {
+      if (b == null) return ''
+      if (typeof b === 'string') return b
+      try {
+        return new TextDecoder().decode(b)
+      } catch (_) {}
+      try {
+        let s = ''
+        for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+        return s
+      } catch (_) {}
+      return ''
     }
-  }
-  const bcPost = (url, obj) => {
-    try {
-      const r = $http.send({
-        url: url,
-        method: 'POST',
-        headers: { 'API-KEY': BC_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify(obj),
-        timeout: 12,
-      })
-      return { status: r.statusCode, body: decodeBody(r.body) }
-    } catch (err) {
-      return { status: 0, body: '', err: err && err.message ? err.message : 'erro' }
+    const bcGet = (url) => {
+      try {
+        const r = $http.send({
+          url: url,
+          method: 'GET',
+          headers: { 'API-KEY': BC_KEY, 'Content-Type': 'application/json' },
+          timeout: 12,
+        })
+        return { status: r.statusCode, body: decodeBody(r.body) }
+      } catch (err) {
+        return { status: 0, body: '', err: err && err.message ? err.message : 'erro' }
+      }
     }
-  }
+    const bcPost = (url, obj) => {
+      try {
+        const r = $http.send({
+          url: url,
+          method: 'POST',
+          headers: { 'API-KEY': BC_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify(obj),
+          timeout: 12,
+        })
+        return { status: r.statusCode, body: decodeBody(r.body) }
+      } catch (err) {
+        return { status: 0, body: '', err: err && err.message ? err.message : 'erro' }
+      }
+    }
 
-  // Rate limit BotConversa (650 req/min). Teto estimado de requests por execução
-  // (o cron roda 1x/min); ao atingir, devolve o restante pra fila e sai.
-  const BC_BUDGET = 600
-  let bcCount = 0
+    // Orçamento POR WORKER. WA_WORKERS(5) x BC_BUDGET(120) = 600 req/min no total,
+    // abaixo dos 650/min do BotConversa. Ao atingir, devolve o restante pra fila.
+    const BC_BUDGET = 120
+    let bcCount = 0
 
-  const atualizaDisparo = (did) => {
-    if (!did) return
-    try {
-      const q = (st) => {
-        const r = new DynamicModel({ c: 0 })
+    const atualizaDisparo = (did) => {
+      if (!did) return
+      try {
+        const q = (st) => {
+          const r = new DynamicModel({ c: 0 })
+          $app
+            .db()
+            .newQuery(
+              'SELECT COUNT(*) as c FROM compradores WHERE wa_disparo_id = {:did} AND wa_status = {:st}',
+            )
+            .bind({ did: did, st: st })
+            .one(r)
+          return r.c
+        }
+        const enviados = q('enviado')
+        const erros = q('erro')
+        const rest1 = q('na_fila')
+        const rest2 = q('enviando')
+        const d = $app.findRecordById('disparos_wa', did)
+        d.set('enviados', enviados)
+        d.set('erros', erros)
+        d.set('status', rest1 + rest2 > 0 ? 'em_andamento' : 'concluido')
+        $app.save(d)
+      } catch (_) {}
+    }
+
+    const resolveSource = (source, c, fone, staticVal, token) => {
+      if (source === 'static') return staticVal || ''
+      if (source === 'nome') return c.getString('nome') || ''
+      if (source === 'primeiro_nome') {
+        const n = (c.getString('nome') || '').trim()
+        return n ? n.split(/\s+/)[0] : ''
+      }
+      if (source === 'email') return c.getString('email') || ''
+      if (source === 'telefone') return fone || ''
+      if (source === 'documento') return c.getString('documento') || ''
+      if (source === 'pedido_id') {
+        try {
+          const ing = $app.findFirstRecordByFilter('ingressos', 'comprador_id = {:cid}', {
+            cid: c.id,
+          })
+          return ing ? ing.getString('pedido_id') || '' : ''
+        } catch (_) {
+          return ''
+        }
+      }
+      if (source === 'token') return token || ''
+      if (source === 'link_acesso') return token ? ACESSO_BASE + token : ''
+      return ''
+    }
+
+    const processOneBatch = (deadline) => {
+      let first
+      try {
+        first = $app.findFirstRecordByFilter('compradores', 'wa_status = {:s}', { s: 'na_fila' })
+      } catch (_) {
+        return 'empty'
+      }
+      const disparoId = first.getString('wa_disparo_id')
+
+      // Carrega o disparo pra saber o modo (flow) e o mapeamento.
+      let flowId = ''
+      let mapping = []
+      if (disparoId) {
+        try {
+          const d = $app.findRecordById('disparos_wa', disparoId)
+          flowId = d.getString('flow') || ''
+          const mraw = d.getString('mapping') || ''
+          if (mraw) {
+            try {
+              mapping = JSON.parse(mraw) || []
+            } catch (_) {
+              mapping = []
+            }
+          }
+        } catch (_) {}
+      }
+      const flowMode = flowId && flowId !== 'PRE'
+      let needToken = false
+      for (let mi = 0; mi < mapping.length; mi++) {
+        const s = mapping[mi] && mapping[mi].source
+        if (s === 'token' || s === 'link_acesso') needToken = true
+      }
+
+      const claim = $security.randomString(20)
+      try {
+        const sub = disparoId
+          ? "SELECT id FROM compradores WHERE wa_status = 'na_fila' AND wa_disparo_id = {:k} ORDER BY created LIMIT 60"
+          : "SELECT id FROM compradores WHERE wa_status = 'na_fila' ORDER BY created LIMIT 60"
         $app
           .db()
           .newQuery(
-            'SELECT COUNT(*) as c FROM compradores WHERE wa_disparo_id = {:did} AND wa_status = {:st}',
+            "UPDATE compradores SET wa_status = 'enviando', wa_claim = {:claim} WHERE id IN (" +
+              sub +
+              ')',
           )
-          .bind({ did: did, st: st })
-          .one(r)
-        return r.c
-      }
-      const enviados = q('enviado')
-      const erros = q('erro')
-      const rest1 = q('na_fila')
-      const rest2 = q('enviando')
-      const d = $app.findRecordById('disparos_wa', did)
-      d.set('enviados', enviados)
-      d.set('erros', erros)
-      d.set('status', rest1 + rest2 > 0 ? 'em_andamento' : 'concluido')
-      $app.save(d)
-    } catch (_) {}
-  }
-
-  const resolveSource = (source, c, fone, staticVal, token) => {
-    if (source === 'static') return staticVal || ''
-    if (source === 'nome') return c.getString('nome') || ''
-    if (source === 'primeiro_nome') {
-      const n = (c.getString('nome') || '').trim()
-      return n ? n.split(/\s+/)[0] : ''
-    }
-    if (source === 'email') return c.getString('email') || ''
-    if (source === 'telefone') return fone || ''
-    if (source === 'documento') return c.getString('documento') || ''
-    if (source === 'pedido_id') {
-      try {
-        const ing = $app.findFirstRecordByFilter('ingressos', 'comprador_id = {:cid}', {
-          cid: c.id,
-        })
-        return ing ? ing.getString('pedido_id') || '' : ''
+          .bind({ claim: claim, k: disparoId || '' })
+          .execute()
       } catch (_) {
-        return ''
+        return 'done'
       }
-    }
-    if (source === 'token') return token || ''
-    if (source === 'link_acesso') return token ? ACESSO_BASE + token : ''
-    return ''
-  }
 
-  const processOneBatch = (deadline) => {
-    let first
-    try {
-      first = $app.findFirstRecordByFilter('compradores', 'wa_status = {:s}', { s: 'na_fila' })
-    } catch (_) {
-      return 'empty'
-    }
-    const disparoId = first.getString('wa_disparo_id')
-
-    // Carrega o disparo pra saber o modo (flow) e o mapeamento.
-    let flowId = ''
-    let mapping = []
-    if (disparoId) {
+      let batch
       try {
-        const d = $app.findRecordById('disparos_wa', disparoId)
-        flowId = d.getString('flow') || ''
-        const mraw = d.getString('mapping') || ''
-        if (mraw) {
-          try {
-            mapping = JSON.parse(mraw) || []
-          } catch (_) {
-            mapping = []
+        batch = $app.findRecordsByFilter('compradores', 'wa_claim = {:claim}', 'created', 60, 0, {
+          claim: claim,
+        })
+      } catch (_) {
+        return 'done'
+      }
+      if (!batch || batch.length === 0) return 'done'
+
+      const tokenColl = $app.findCollectionByNameOrId('tokens_acesso')
+      const exp = new Date()
+      exp.setDate(exp.getDate() + 60)
+      const expIso = exp.toISOString()
+      let anyRetry = false
+
+      for (let i = 0; i < batch.length; i++) {
+        if (Date.now() > deadline) {
+          for (let j = i; j < batch.length; j++) {
+            const cc = batch[j]
+            cc.set('wa_status', 'na_fila')
+            cc.set('wa_claim', '')
+            try {
+              $app.save(cc)
+            } catch (_) {}
           }
+          atualizaDisparo(disparoId)
+          return 'timeout'
         }
-      } catch (_) {}
-    }
-    const flowMode = flowId && flowId !== 'PRE'
-    let needToken = false
-    for (let mi = 0; mi < mapping.length; mi++) {
-      const s = mapping[mi] && mapping[mi].source
-      if (s === 'token' || s === 'link_acesso') needToken = true
-    }
-
-    const claim = $security.randomString(20)
-    try {
-      const sub = disparoId
-        ? "SELECT id FROM compradores WHERE wa_status = 'na_fila' AND wa_disparo_id = {:k} ORDER BY created LIMIT 60"
-        : "SELECT id FROM compradores WHERE wa_status = 'na_fila' ORDER BY created LIMIT 60"
-      $app
-        .db()
-        .newQuery(
-          "UPDATE compradores SET wa_status = 'enviando', wa_claim = {:claim} WHERE id IN (" +
-            sub +
-            ')',
-        )
-        .bind({ claim: claim, k: disparoId || '' })
-        .execute()
-    } catch (_) {
-      return 'done'
-    }
-
-    let batch
-    try {
-      batch = $app.findRecordsByFilter('compradores', 'wa_claim = {:claim}', 'created', 60, 0, {
-        claim: claim,
-      })
-    } catch (_) {
-      return 'done'
-    }
-    if (!batch || batch.length === 0) return 'done'
-
-    const tokenColl = $app.findCollectionByNameOrId('tokens_acesso')
-    const exp = new Date()
-    exp.setDate(exp.getDate() + 60)
-    const expIso = exp.toISOString()
-    let anyRetry = false
-
-    for (let i = 0; i < batch.length; i++) {
-      if (Date.now() > deadline) {
-        for (let j = i; j < batch.length; j++) {
-          const cc = batch[j]
-          cc.set('wa_status', 'na_fila')
-          cc.set('wa_claim', '')
-          try {
-            $app.save(cc)
-          } catch (_) {}
+        // Respeita o rate limit do BotConversa: para ao atingir o teto da execução.
+        if (bcCount >= BC_BUDGET) {
+          for (let j = i; j < batch.length; j++) {
+            const cc = batch[j]
+            cc.set('wa_status', 'na_fila')
+            cc.set('wa_claim', '')
+            try {
+              $app.save(cc)
+            } catch (_) {}
+          }
+          atualizaDisparo(disparoId)
+          return 'budget'
         }
-        atualizaDisparo(disparoId)
-        return 'timeout'
-      }
-      // Respeita o rate limit do BotConversa: para ao atingir o teto da execução.
-      if (bcCount >= BC_BUDGET) {
-        for (let j = i; j < batch.length; j++) {
-          const cc = batch[j]
-          cc.set('wa_status', 'na_fila')
-          cc.set('wa_claim', '')
-          try {
-            $app.save(cc)
-          } catch (_) {}
-        }
-        atualizaDisparo(disparoId)
-        return 'budget'
-      }
-      bcCount += flowMode ? 4 + mapping.length : 1
+        bcCount += flowMode ? 4 + mapping.length : 1
 
-      const c = batch[i]
-      const nome = c.getString('nome') || ''
-      let fone = (c.getString('telefone') || '').replace(/\D/g, '')
-      if (fone && fone.length <= 11) fone = '55' + fone
+        const c = batch[i]
+        const nome = c.getString('nome') || ''
+        let fone = (c.getString('telefone') || '').replace(/\D/g, '')
+        if (fone && fone.length <= 11) fone = '55' + fone
 
-      let status = 0
-      let erroMsg = ''
+        let status = 0
+        let erroMsg = ''
 
-      if (!flowMode) {
-        // ---- MODO A: pré-credenciamento (catch webhook) ----
-        const email = c.getString('email')
-        if (!email) {
-          c.set('wa_status', 'erro')
-          c.set('wa_erro', 'Sem email')
-          c.set('wa_claim', '')
-          try {
-            $app.save(c)
-          } catch (_) {}
-          continue
-        }
-        let token = ''
-        try {
-          token = $security.randomString(40)
-          const tr = new Record(tokenColl)
-          tr.set('comprador_id', c.id)
-          tr.set('token', token)
-          tr.set('usado', false)
-          tr.set('expira_em', expIso)
-          $app.save(tr)
-        } catch (_) {
-          token = ''
-        }
-        try {
-          const res = $http.send({
-            url: BC_URL_COMPRADOR,
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ full_name: nome, email: email, phone: fone, token: token }),
-            timeout: 12,
-          })
-          status = res.statusCode
-        } catch (err) {
-          erroMsg = err.message
-        }
-      } else {
-        // ---- MODO B: fluxo via API (cria/atualiza contato + variáveis + send_flow) ----
-        if (!BC_KEY) {
-          c.set('wa_status', 'erro')
-          c.set('wa_erro', 'BOTCONVERSA_API_KEY não configurada')
-          c.set('wa_claim', '')
-          try {
-            $app.save(c)
-          } catch (_) {}
-          continue
-        }
-        if (!fone) {
-          c.set('wa_status', 'erro')
-          c.set('wa_erro', 'Sem telefone')
-          c.set('wa_claim', '')
-          try {
-            $app.save(c)
-          } catch (_) {}
-          continue
-        }
-
-        let token = ''
-        if (needToken) {
+        if (!flowMode) {
+          // ---- MODO A: pré-credenciamento (catch webhook) ----
+          const email = c.getString('email')
+          if (!email) {
+            c.set('wa_status', 'erro')
+            c.set('wa_erro', 'Sem email')
+            c.set('wa_claim', '')
+            try {
+              $app.save(c)
+            } catch (_) {}
+            continue
+          }
+          let token = ''
           try {
             token = $security.randomString(40)
             const tr = new Record(tokenColl)
@@ -796,111 +755,158 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
           } catch (_) {
             token = ''
           }
-        }
-
-        // 1) acha/cria subscriber
-        let subId = 0
-        const gp = bcGet(BC_API + '/subscriber/get_by_phone/' + fone + '/')
-        if (gp.status === 200) {
           try {
-            subId = parseInt(JSON.parse(gp.body).id, 10) || 0
-          } catch (_) {}
-        }
-        let crStatus = 0
-        if (!subId) {
-          const parts = nome ? nome.split(/\s+/) : []
-          const fn = parts.length ? parts[0] : 'Contato'
-          const ln = parts.length > 1 ? parts.slice(1).join(' ') : ''
-          const cr = bcPost(BC_API + '/subscriber/', {
-            phone: fone,
-            first_name: fn,
-            last_name: ln,
-            has_opt_in_whatsapp: true,
-          })
-          crStatus = cr.status
-          const gp2 = bcGet(BC_API + '/subscriber/get_by_phone/' + fone + '/')
-          if (gp2.status === 200) {
+            const res = $http.send({
+              url: BC_URL_COMPRADOR,
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ full_name: nome, email: email, phone: fone, token: token }),
+              timeout: 12,
+            })
+            status = res.statusCode
+          } catch (err) {
+            erroMsg = err.message
+          }
+        } else {
+          // ---- MODO B: fluxo via API (cria/atualiza contato + variáveis + send_flow) ----
+          if (!BC_KEY) {
+            c.set('wa_status', 'erro')
+            c.set('wa_erro', 'BOTCONVERSA_API_KEY não configurada')
+            c.set('wa_claim', '')
             try {
-              subId = parseInt(JSON.parse(gp2.body).id, 10) || 0
+              $app.save(c)
+            } catch (_) {}
+            continue
+          }
+          if (!fone) {
+            c.set('wa_status', 'erro')
+            c.set('wa_erro', 'Sem telefone')
+            c.set('wa_claim', '')
+            try {
+              $app.save(c)
+            } catch (_) {}
+            continue
+          }
+
+          let token = ''
+          if (needToken) {
+            try {
+              token = $security.randomString(40)
+              const tr = new Record(tokenColl)
+              tr.set('comprador_id', c.id)
+              tr.set('token', token)
+              tr.set('usado', false)
+              tr.set('expira_em', expIso)
+              $app.save(tr)
+            } catch (_) {
+              token = ''
+            }
+          }
+
+          // 1) acha/cria subscriber
+          let subId = 0
+          const gp = bcGet(BC_API + '/subscriber/get_by_phone/' + fone + '/')
+          if (gp.status === 200) {
+            try {
+              subId = parseInt(JSON.parse(gp.body).id, 10) || 0
             } catch (_) {}
           }
-        }
-
-        if (!subId) {
-          status = crStatus || gp.status || 0
-          erroMsg = 'Sem subscriber (get=' + gp.status + ' create=' + crStatus + ')'
-        } else {
-          // 2) seta custom fields (variáveis) conforme mapeamento
-          for (let mi = 0; mi < mapping.length; mi++) {
-            const m = mapping[mi]
-            if (!m || !m.field_id) continue
-            const val = resolveSource(m.source, c, fone, m.value, token)
-            if (val === '' || val == null) continue
-            bcPost(BC_API + '/subscriber/' + subId + '/custom_fields/' + m.field_id + '/', {
-              value: String(val),
+          let crStatus = 0
+          if (!subId) {
+            const parts = nome ? nome.split(/\s+/) : []
+            const fn = parts.length ? parts[0] : 'Contato'
+            const ln = parts.length > 1 ? parts.slice(1).join(' ') : ''
+            const cr = bcPost(BC_API + '/subscriber/', {
+              phone: fone,
+              first_name: fn,
+              last_name: ln,
+              has_opt_in_whatsapp: true,
             })
+            crStatus = cr.status
+            const gp2 = bcGet(BC_API + '/subscriber/get_by_phone/' + fone + '/')
+            if (gp2.status === 200) {
+              try {
+                subId = parseInt(JSON.parse(gp2.body).id, 10) || 0
+              } catch (_) {}
+            }
           }
-          // 3) envia o fluxo
-          const sf = bcPost(BC_API + '/subscriber/' + subId + '/send_flow/', {
-            flow: parseInt(flowId, 10),
-          })
-          status = sf.status
-          if (sf.err) erroMsg = sf.err
+
+          if (!subId) {
+            status = crStatus || gp.status || 0
+            erroMsg = 'Sem subscriber (get=' + gp.status + ' create=' + crStatus + ')'
+          } else {
+            // 2) seta custom fields (variáveis) conforme mapeamento
+            for (let mi = 0; mi < mapping.length; mi++) {
+              const m = mapping[mi]
+              if (!m || !m.field_id) continue
+              const val = resolveSource(m.source, c, fone, m.value, token)
+              if (val === '' || val == null) continue
+              bcPost(BC_API + '/subscriber/' + subId + '/custom_fields/' + m.field_id + '/', {
+                value: String(val),
+              })
+            }
+            // 3) envia o fluxo
+            const sf = bcPost(BC_API + '/subscriber/' + subId + '/send_flow/', {
+              flow: parseInt(flowId, 10),
+            })
+            status = sf.status
+            if (sf.err) erroMsg = sf.err
+          }
+        }
+
+        // ---- persistência do resultado (comum aos dois modos) ----
+        const ok = status >= 200 && status < 300
+        const retryable = !ok && (status === 429 || status >= 500 || status === 0)
+        const nowStr = new Date().toISOString()
+        if (ok) {
+          c.set('wa_status', 'enviado')
+          c.set('wa_enviado_em', nowStr)
+          c.set('wa_erro', '')
+          c.set('wa_claim', '')
+          try {
+            $app.save(c)
+          } catch (_) {}
+        } else {
+          const tent = (parseInt(c.get('wa_tentativas'), 10) || 0) + 1
+          c.set('wa_tentativas', tent)
+          c.set('wa_erro', ('HTTP ' + status + ' ' + (erroMsg || '')).substring(0, 300))
+          if (retryable && tent < 5) {
+            c.set('wa_status', 'na_fila')
+            anyRetry = true
+          } else {
+            c.set('wa_status', 'erro')
+          }
+          c.set('wa_claim', '')
+          try {
+            $app.save(c)
+          } catch (_) {}
         }
       }
 
-      // ---- persistência do resultado (comum aos dois modos) ----
-      const ok = status >= 200 && status < 300
-      const retryable = !ok && (status === 429 || status >= 500 || status === 0)
-      const nowStr = new Date().toISOString()
-      if (ok) {
-        c.set('wa_status', 'enviado')
-        c.set('wa_enviado_em', nowStr)
-        c.set('wa_erro', '')
-        c.set('wa_claim', '')
-        try {
-          $app.save(c)
-        } catch (_) {}
-      } else {
-        const tent = (parseInt(c.get('wa_tentativas'), 10) || 0) + 1
-        c.set('wa_tentativas', tent)
-        c.set('wa_erro', ('HTTP ' + status + ' ' + (erroMsg || '')).substring(0, 300))
-        if (retryable && tent < 5) {
-          c.set('wa_status', 'na_fila')
-          anyRetry = true
-        } else {
-          c.set('wa_status', 'erro')
-        }
-        c.set('wa_claim', '')
-        try {
-          $app.save(c)
-        } catch (_) {}
-      }
+      atualizaDisparo(disparoId)
+      return anyRetry ? 'retry' : 'done'
     }
 
-    atualizaDisparo(disparoId)
-    return anyRetry ? 'retry' : 'done'
-  }
+    // Recupera presos em 'enviando' há mais de 10min.
+    try {
+      const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
+      $app
+        .db()
+        .newQuery(
+          "UPDATE compradores SET wa_status = 'na_fila', wa_claim = '' WHERE wa_status = 'enviando' AND updated < {:cut}",
+        )
+        .bind({ cut: cut })
+        .execute()
+    } catch (_) {}
 
-  // Recupera presos em 'enviando' há mais de 10min.
-  try {
-    const cut = new Date(Date.now() - 10 * 60 * 1000).toISOString().replace('T', ' ')
-    $app
-      .db()
-      .newQuery(
-        "UPDATE compradores SET wa_status = 'na_fila', wa_claim = '' WHERE wa_status = 'enviando' AND updated < {:cut}",
-      )
-      .bind({ cut: cut })
-      .execute()
-  } catch (_) {}
-
-  const startMs = Date.now()
-  const deadline = startMs + 45000
-  while (Date.now() - startMs < 48000) {
-    const r = processOneBatch(deadline)
-    if (r === 'empty') break
-    if (r === 'retry') break
-    if (r === 'timeout') break
-    if (r === 'budget') break
-  }
-})
+    const startMs = Date.now()
+    const deadline = startMs + 45000
+    while (Date.now() - startMs < 48000) {
+      const r = processOneBatch(deadline)
+      if (r === 'empty') break
+      if (r === 'retry') break
+      if (r === 'timeout') break
+      if (r === 'budget') break
+    }
+  })
+}
