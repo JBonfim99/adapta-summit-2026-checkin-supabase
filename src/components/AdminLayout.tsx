@@ -1,6 +1,15 @@
 import { Outlet, Navigate, Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/hooks/use-auth'
-import { LayoutDashboard, Users, Upload, Send, LogOut, ShoppingBag, Mail } from 'lucide-react'
+import {
+  LayoutDashboard,
+  Users,
+  Upload,
+  Send,
+  LogOut,
+  ShoppingBag,
+  Mail,
+  BarChart3,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 export function AdminLayout() {
@@ -15,6 +24,7 @@ export function AdminLayout() {
     { name: 'Importar', path: '/admin/importar', icon: Upload },
     { name: 'Compradores', path: '/admin/compradores', icon: ShoppingBag },
     { name: 'Participantes', path: '/admin/participantes', icon: Users },
+    { name: 'Insights', path: '/admin/insights', icon: BarChart3 },
     { name: 'Disparo', path: '/admin/disparo', icon: Mail },
     { name: 'Logs', path: '/admin/logs', icon: Send },
   ]
