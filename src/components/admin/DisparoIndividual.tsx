@@ -34,14 +34,20 @@ export default function DisparoIndividual({ templates }: { templates: Tpl[] }) {
   const [nome, setNome] = useState('')
   const [sending, setSending] = useState(false)
 
-  const filteredTemplates = templates.filter((t) => (t.name || '').toLowerCase().includes('summit'))
+  // Filtro compatível com o público: contém "skip-summit26" E a palavra do público.
+  const filteredTemplates = templates.filter((t) => {
+    const n = (t.name || '').toLowerCase()
+    if (!n.includes('skip-summit26')) return false
+    return audience === 'participantes' ? n.includes('participante') : n.includes('comprador')
+  })
   const templateName = templates.find((t) => t.id === templateId)?.name || templateId
 
-  // Troca de público limpa a seleção e a busca.
+  // Troca de público limpa a seleção, a busca e o template.
   useEffect(() => {
     setSelected(null)
     setResults([])
     setQuery('')
+    setTemplateId('')
   }, [audience])
 
   // Busca com debounce (não busca enquanto já há um selecionado).

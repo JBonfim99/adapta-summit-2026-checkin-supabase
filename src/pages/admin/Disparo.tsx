@@ -109,7 +109,14 @@ export default function AdminDispatch() {
   // Acompanhamento ao vivo: o cron atualiza o registro do disparo a cada lote.
   useRealtime('disparos', () => loadDisparos())
 
-  const filteredTemplates = templates.filter((t) => (t.name || '').toLowerCase().includes('summit'))
+  // Filtro de template compatível com o público do cluster:
+  // precisa conter "skip-summit26" E a palavra do público (comprador/participante).
+  const audience = cluster.startsWith('participantes') ? 'participantes' : 'compradores'
+  const filteredTemplates = templates.filter((t) => {
+    const n = (t.name || '').toLowerCase()
+    if (!n.includes('skip-summit26')) return false
+    return audience === 'participantes' ? n.includes('participante') : n.includes('comprador')
+  })
   const templateName = templates.find((t) => t.id === templateId)?.name || templateId
 
   const cronAge =
@@ -255,14 +262,25 @@ export default function AdminDispatch() {
               )}
               {!loadingTemplates && !templatesError && filteredTemplates.length === 0 && (
                 <p className="text-xs text-muted-foreground">
-                  Nenhum template com "Summit" encontrado no SendGrid.
+                  Nenhum template "Skip-Summit26" de{' '}
+                  {audience === 'participantes' ? 'participantes' : 'compradores'} encontrado.
                 </p>
               )}
             </div>
 
             <div className="space-y-2">
               <label className="text-sm font-medium">Público (cluster)</label>
-              <Select value={cluster} onValueChange={setCluster}>
+              <Select
+                value={cluster}
+                onValueChange={(v) => {
+                  const newAud = v.startsWith('participantes') ? 'participantes' : 'compradores'
+                  const oldAud = cluster.startsWith('participantes')
+                    ? 'participantes'
+                    : 'compradores'
+                  if (newAud !== oldAud) setTemplateId('')
+                  setCluster(v)
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
