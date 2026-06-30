@@ -86,15 +86,6 @@ function StatCard({
   )
 }
 
-function heatClass(v: number, max: number) {
-  if (v === 0) return 'bg-slate-50 text-slate-300'
-  const r = max > 0 ? v / max : 0
-  if (r > 0.75) return 'bg-indigo-600 text-white'
-  if (r > 0.5) return 'bg-indigo-400 text-white'
-  if (r > 0.25) return 'bg-indigo-200 text-indigo-900'
-  return 'bg-indigo-100 text-indigo-900'
-}
-
 export default function InsightsResumo() {
   const [data, setData] = useState<Insights | null>(null)
   const [loading, setLoading] = useState(true)
@@ -156,7 +147,6 @@ export default function InsightsResumo() {
   const maxDes = Math.max(1, ...desRows.map((x) => x.v))
   const maxUso = Math.max(1, ...data.ia.uso_dist)
   const maxProf = Math.max(1, ...data.ia.prof_dist)
-  const maxMatriz = Math.max(1, ...data.ia.matriz.flat())
 
   const dias = Object.keys(data.por_dia)
     .sort()
@@ -248,59 +238,6 @@ export default function InsightsResumo() {
                     color="bg-accent"
                   />
                 ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Matriz uso x profundidade */}
-          <div>
-            <h4 className="font-semibold text-sm mb-1">Mapa de calor — uso × profundidade</h4>
-            <p className="text-xs text-muted-foreground mb-4">
-              Cada célula é quantos participantes têm aquela combinação. O canto superior direito é
-              o público "nativo de IA" (usa muito e com profundidade).
-            </p>
-            <div className="flex gap-3">
-              {/* eixo Y */}
-              <div className="flex flex-col justify-between py-1 text-[10px] text-muted-foreground text-right w-16 shrink-0">
-                <span>↑ Mais uso</span>
-                <span>↓ Menos uso</span>
-              </div>
-              <div className="flex-1">
-                <div className="space-y-1.5">
-                  {[5, 4, 3, 2, 1].map((uso) => (
-                    <div key={uso} className="flex items-center gap-1.5">
-                      <span className="w-4 text-xs text-muted-foreground text-right">{uso}</span>
-                      <div className="flex gap-1.5 flex-1">
-                        {[1, 2, 3, 4, 5].map((prof) => {
-                          const v = data.ia.matriz[uso - 1][prof - 1]
-                          return (
-                            <div
-                              key={prof}
-                              className={`flex-1 aspect-square rounded-md flex items-center justify-center text-sm font-semibold ${heatClass(v, maxMatriz)}`}
-                              title={`${USO_LABELS[uso - 1]} × ${PROF_LABELS[prof - 1]}: ${v}`}
-                            >
-                              {v || ''}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-4" />
-                    <div className="flex gap-1.5 flex-1 text-center text-xs text-muted-foreground">
-                      {[1, 2, 3, 4, 5].map((p) => (
-                        <span key={p} className="flex-1">
-                          {p}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex justify-between text-[10px] text-muted-foreground pl-6 pt-1">
-                    <span>← Como Google</span>
-                    <span>Nativo de IA →</span>
-                  </div>
-                </div>
               </div>
             </div>
           </div>

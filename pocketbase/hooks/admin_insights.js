@@ -48,6 +48,7 @@ routerAdd(
 
       // Detecção de ferramentas por palavra-chave (case-insensitive).
       const TOOLS = [
+        ['Adapta', ['adapta one', 'adapta']],
         ['ChatGPT', ['chatgpt', 'chat gpt', 'gpt-', 'gpt ', 'openai']],
         ['Claude', ['claude']],
         ['Gemini', ['gemini', 'bard']],
