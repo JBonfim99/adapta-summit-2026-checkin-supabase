@@ -140,6 +140,103 @@ routerAdd(
   $apis.requireAuth(),
 )
 
+// --- Envio INDIVIDUAL IMEDIATO (sem fila): manda na hora e retorna o status -
+routerAdd(
+  'POST',
+  '/backend/v1/admin/whatsapp/send-individual',
+  (e) => {
+    const BC_URL_COMPRADOR =
+      'https://new-backend.botconversa.com.br/api/v1/webhooks-automation/catch/192716/WquemD9Wrf0h/'
+    try {
+      const body = e.requestInfo().body || {}
+      const rid = (body.recipient_id || '').toString().replace(/[^a-zA-Z0-9]/g, '')
+      const nomeCampanha = (body.nome || '').toString().trim()
+      if (!rid) return e.badRequestError('recipient_id é obrigatório')
+
+      let c
+      try {
+        c = $app.findRecordById('compradores', rid)
+      } catch (_) {
+        return e.json(200, { success: false, error: 'Comprador não encontrado' })
+      }
+
+      const email = c.getString('email')
+      const nome = c.getString('nome') || ''
+      if (!email) return e.json(200, { success: false, error: 'Comprador sem e-mail' })
+
+      let fone = (c.getString('telefone') || '').replace(/\D/g, '')
+      if (fone && fone.length <= 11) fone = '55' + fone
+
+      // Token de acesso (60 dias).
+      let token = ''
+      try {
+        token = $security.randomString(40)
+        const tr = new Record($app.findCollectionByNameOrId('tokens_acesso'))
+        tr.set('comprador_id', c.id)
+        tr.set('token', token)
+        tr.set('usado', false)
+        const exp = new Date()
+        exp.setDate(exp.getDate() + 60)
+        tr.set('expira_em', exp.toISOString())
+        $app.save(tr)
+      } catch (_) {
+        token = ''
+      }
+
+      let status = 0
+      let erroMsg = ''
+      try {
+        const res = $http.send({
+          url: BC_URL_COMPRADOR,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ full_name: nome, email: email, phone: fone, token: token }),
+          timeout: 12,
+        })
+        status = res.statusCode
+      } catch (err) {
+        erroMsg = err.message
+      }
+
+      const ok = status >= 200 && status < 300
+      const nowStr = new Date().toISOString()
+
+      // Registra no histórico (cluster individual) pra aparecer junto dos demais.
+      let disparoId = ''
+      try {
+        const d = new Record($app.findCollectionByNameOrId('disparos_wa'))
+        d.set('nome', nomeCampanha || 'Individual — ' + (nome || email))
+        d.set('cluster', 'individual')
+        d.set('total', 1)
+        d.set('enviados', ok ? 1 : 0)
+        d.set('erros', ok ? 0 : 1)
+        d.set('status', 'concluido')
+        $app.save(d)
+        disparoId = d.id
+      } catch (_) {}
+
+      try {
+        c.set('wa_disparo_id', disparoId)
+        c.set('wa_status', ok ? 'enviado' : 'erro')
+        c.set('wa_enviado_em', ok ? nowStr : '')
+        c.set('wa_erro', ok ? '' : ('HTTP ' + status + ' ' + (erroMsg || '')).substring(0, 300))
+        c.set('wa_claim', '')
+        $app.save(c)
+      } catch (_) {}
+
+      if (ok) return e.json(200, { success: true })
+      return e.json(200, {
+        success: false,
+        status: status,
+        error: erroMsg || 'HTTP ' + status,
+      })
+    } catch (err) {
+      return e.json(200, { success: false, error: err && err.message ? err.message : 'erro' })
+    }
+  },
+  $apis.requireAuth(),
+)
+
 // --- CRON: drena a fila do WhatsApp, 1 POST por pessoa ----------------------
 cronAdd('whatsapp_dispatch', '* * * * *', () => {
   // URL de automação do BotConversa para COMPRADORES (catch webhook).

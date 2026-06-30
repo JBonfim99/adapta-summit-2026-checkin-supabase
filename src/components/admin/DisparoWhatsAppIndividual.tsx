@@ -55,23 +55,28 @@ export default function DisparoWhatsAppIndividual({ onSent }: { onSent?: () => v
     if (!selected) return
     setSending(true)
     try {
-      await pb.send('/backend/v1/admin/whatsapp/enqueue', {
+      const res: any = await pb.send('/backend/v1/admin/whatsapp/send-individual', {
         method: 'POST',
-        body: JSON.stringify({
-          cluster: 'individual',
-          recipient_id: selected.id,
-          nome,
-        }),
+        body: JSON.stringify({ recipient_id: selected.id, nome }),
       })
-      toast({
-        title: 'WhatsApp individual na fila!',
-        description: `${selected.nome || selected.email} • começa em ~1 min`,
-      })
-      setSelected(null)
-      setQuery('')
-      setResults([])
-      setNome('')
-      onSent?.()
+      if (res && res.success === false) {
+        // Mantém a seleção pra permitir tentar de novo.
+        toast({
+          title: 'Falha no envio',
+          description: res.error || `HTTP ${res.status || '-'}`,
+          variant: 'destructive',
+        })
+      } else {
+        toast({
+          title: 'WhatsApp enviado!',
+          description: `${selected.nome || selected.email}`,
+        })
+        setSelected(null)
+        setQuery('')
+        setResults([])
+        setNome('')
+        onSent?.()
+      }
     } catch (e: any) {
       toast({ title: 'Erro ao enviar', description: e.message, variant: 'destructive' })
     } finally {
@@ -85,7 +90,9 @@ export default function DisparoWhatsAppIndividual({ onSent }: { onSent?: () => v
         <CardTitle className="flex items-center gap-2 text-lg">
           <User className="w-5 h-5" /> Disparo individual
         </CardTitle>
-        <CardDescription>Envie o WhatsApp de acesso para um comprador específico.</CardDescription>
+        <CardDescription>
+          Envio imediato do WhatsApp de acesso para um comprador específico.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="space-y-2">
