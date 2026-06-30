@@ -4,6 +4,7 @@ import { useForm, FormProvider } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { FormInput } from '@/components/FormInput'
 import { LinearScale } from '@/components/LinearScale'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -14,21 +15,52 @@ import pb from '@/lib/pocketbase/client'
 import { getErrorMessage } from '@/lib/pocketbase/errors'
 import { ROLES, REVENUE, EMPLOYEES, NICHES } from '@/lib/form-options'
 
-const formSchema = z.object({
-  nome_completo: z.string().min(3, 'Nome é obrigatório'),
-  email: z.string().email('E-mail inválido'),
-  cpf: z.string().min(14, 'CPF inválido'),
-  telefone: z.string().min(14, 'Telefone inválido'),
-  nome_empresa: z.string().min(2, 'Empresa é obrigatória'),
-  cargo: z.string().min(1, 'Selecione um cargo'),
-  faturamento_anual: z.string().min(1, 'Selecione o faturamento'),
-  num_funcionarios: z.string().min(1, 'Selecione o tamanho'),
-  nicho: z.string().min(1, 'Selecione o segmento'),
-  ia_uso_diario: z.number().min(1, 'Selecione uma opção').max(5),
-  ia_profundidade: z.number().min(1, 'Selecione uma opção').max(5),
-  ia_ferramentas: z.string().min(2, 'Preenchimento obrigatório'),
-  ia_desafio: z.string().min(2, 'Preenchimento obrigatório'),
-})
+const formSchema = z
+  .object({
+    nome_completo: z.string().min(3, 'Nome é obrigatório'),
+    email: z.string().email('E-mail inválido'),
+    cpf: z.string().min(14, 'CPF inválido'),
+    telefone: z.string().min(14, 'Telefone inválido'),
+    tem_empresa: z.boolean(),
+    nome_empresa: z.string().optional().default(''),
+    cargo: z.string().min(1, 'Selecione um cargo'),
+    faturamento_anual: z.string().optional().default(''),
+    num_funcionarios: z.string().optional().default(''),
+    nicho: z.string().optional().default(''),
+    ia_uso_diario: z.number().min(1, 'Selecione uma opção').max(5),
+    ia_profundidade: z.number().min(1, 'Selecione uma opção').max(5),
+    ia_ferramentas: z.string().min(2, 'Preenchimento obrigatório'),
+    ia_desafio: z.string().min(2, 'Preenchimento obrigatório'),
+  })
+  .superRefine((data, ctx) => {
+    // Campos exclusivos de empresa só são obrigatórios quando tem_empresa = true.
+    if (data.tem_empresa) {
+      if (!data.nome_empresa || data.nome_empresa.trim().length < 2)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['nome_empresa'],
+          message: 'Empresa é obrigatória',
+        })
+      if (!data.faturamento_anual)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['faturamento_anual'],
+          message: 'Selecione o faturamento',
+        })
+      if (!data.num_funcionarios)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['num_funcionarios'],
+          message: 'Selecione o tamanho',
+        })
+      if (!data.nicho)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['nicho'],
+          message: 'Selecione o segmento',
+        })
+    }
+  })
 
 type FormValues = z.infer<typeof formSchema>
 
@@ -71,6 +103,7 @@ export default function ParticipantForm() {
       email: '',
       cpf: '',
       telefone: '',
+      tem_empresa: true,
       nome_empresa: '',
       cargo: '',
       faturamento_anual: '',
@@ -84,20 +117,24 @@ export default function ParticipantForm() {
     mode: 'onTouched',
   })
 
+  const temEmpresa = methods.watch('tem_empresa')
+
   const onSubmit = async (data: FormValues) => {
     setSubmitting(true)
     try {
+      const isEmpresa = !!data.tem_empresa
       const payload = {
         token,
         nome_completo: data.nome_completo || '',
         email: data.email || '',
         cpf: data.cpf || '',
         telefone: data.telefone || '',
-        nome_empresa: data.nome_empresa || '',
+        tem_empresa: isEmpresa,
+        nome_empresa: isEmpresa ? data.nome_empresa || '' : '',
         cargo: data.cargo || '',
-        nicho: data.nicho || '',
-        num_funcionarios: data.num_funcionarios || '',
-        faturamento_anual: data.faturamento_anual || '',
+        nicho: isEmpresa ? data.nicho || '' : '',
+        num_funcionarios: isEmpresa ? data.num_funcionarios || '' : '',
+        faturamento_anual: isEmpresa ? data.faturamento_anual || '' : '',
         ia_uso_diario: data.ia_uso_diario || 0,
         ia_profundidade: data.ia_profundidade || 0,
         ia_ferramentas: data.ia_ferramentas || '',
@@ -146,6 +183,18 @@ export default function ParticipantForm() {
     }
 
     setStep(2)
+  }
+
+  const handleSemEmpresa = (checked: boolean) => {
+    const semEmpresa = checked === true
+    methods.setValue('tem_empresa', !semEmpresa)
+    if (semEmpresa) {
+      methods.setValue('nome_empresa', '')
+      methods.setValue('faturamento_anual', '')
+      methods.setValue('num_funcionarios', '')
+      methods.setValue('nicho', '')
+      methods.clearErrors(['nome_empresa', 'faturamento_anual', 'num_funcionarios', 'nicho'])
+    }
   }
 
   if (loading) {
@@ -230,41 +279,67 @@ export default function ParticipantForm() {
 
               <div className={step === 2 ? 'block animate-slide-in-right' : 'hidden'}>
                 <div className="space-y-6">
-                  <FormInput
-                    name="nome_empresa"
-                    label="Nome da Empresa"
-                    placeholder="Sua Empresa Ltda"
-                  />
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex items-center gap-3 rounded-lg border p-3 bg-slate-50/50">
+                    <Checkbox
+                      id="sem-empresa"
+                      checked={!temEmpresa}
+                      onCheckedChange={(c) => handleSemEmpresa(c === true)}
+                    />
+                    <label
+                      htmlFor="sem-empresa"
+                      className="text-sm font-medium cursor-pointer select-none"
+                    >
+                      Não tenho empresa
+                    </label>
+                  </div>
+
+                  {temEmpresa ? (
+                    <>
+                      <FormInput
+                        name="nome_empresa"
+                        label="Nome da Empresa"
+                        placeholder="Sua Empresa Ltda"
+                      />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FormInput
+                          name="cargo"
+                          label="Cargo"
+                          type="select"
+                          options={ROLES}
+                          placeholder="Selecione..."
+                        />
+                        <FormInput
+                          name="faturamento_anual"
+                          label="Faturamento anual"
+                          type="select"
+                          options={REVENUE}
+                          placeholder="Selecione..."
+                        />
+                        <FormInput
+                          name="num_funcionarios"
+                          label="Número de funcionários"
+                          type="select"
+                          options={EMPLOYEES}
+                          placeholder="Selecione..."
+                        />
+                        <FormInput
+                          name="nicho"
+                          label="Qual o segmento da sua empresa?"
+                          type="select"
+                          options={NICHES}
+                          placeholder="Selecione..."
+                        />
+                      </div>
+                    </>
+                  ) : (
                     <FormInput
                       name="cargo"
-                      label="Cargo"
+                      label="Seu Cargo"
                       type="select"
                       options={ROLES}
                       placeholder="Selecione..."
                     />
-                    <FormInput
-                      name="faturamento_anual"
-                      label="Faturamento anual"
-                      type="select"
-                      options={REVENUE}
-                      placeholder="Selecione..."
-                    />
-                    <FormInput
-                      name="num_funcionarios"
-                      label="Número de funcionários"
-                      type="select"
-                      options={EMPLOYEES}
-                      placeholder="Selecione..."
-                    />
-                    <FormInput
-                      name="nicho"
-                      label="Qual o segmento da sua empresa?"
-                      type="select"
-                      options={NICHES}
-                      placeholder="Selecione..."
-                    />
-                  </div>
+                  )}
 
                   <FormField
                     control={methods.control}
@@ -272,13 +347,15 @@ export default function ParticipantForm() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-base">
-                          De 1 a 5, quantas pessoas usam IA na sua empresa diariamente?
+                          {temEmpresa
+                            ? 'De 1 a 5, quantas pessoas usam IA na sua empresa diariamente?'
+                            : 'De 1 a 5, quanto você usa IA diariamente?'}
                         </FormLabel>
                         <LinearScale
                           value={field.value}
                           onChange={field.onChange}
-                          leftLabel="Ninguém"
-                          rightLabel="Todos"
+                          leftLabel={temEmpresa ? 'Ninguém' : 'Nunca'}
+                          rightLabel={temEmpresa ? 'Todos' : 'O tempo todo'}
                           error={!!methods.formState.errors.ia_uso_diario}
                         />
                         <FormMessage />
@@ -292,12 +369,14 @@ export default function ParticipantForm() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-base">
-                          Qual a profundidade do uso de IA dessas pessoas?
+                          {temEmpresa
+                            ? 'Qual a profundidade do uso de IA dessas pessoas?'
+                            : 'Qual a sua profundidade de uso de IA?'}
                         </FormLabel>
                         <LinearScale
                           value={field.value}
                           onChange={field.onChange}
-                          leftLabel="Usamos como Google"
+                          leftLabel={temEmpresa ? 'Usamos como Google' : 'Uso como Google'}
                           rightLabel="Nativo de IA"
                           error={!!methods.formState.errors.ia_profundidade}
                         />
@@ -315,7 +394,11 @@ export default function ParticipantForm() {
                   <FormInput
                     name="ia_desafio"
                     type="textarea"
-                    label="Na sua visão, qual o maior desafio para tornar sua empresa Nativa de IA?"
+                    label={
+                      temEmpresa
+                        ? 'Na sua visão, qual o maior desafio para tornar sua empresa Nativa de IA?'
+                        : 'Na sua visão, qual o maior desafio que você enfrenta com a IA atualmente?'
+                    }
                     placeholder="Sua resposta..."
                   />
                 </div>

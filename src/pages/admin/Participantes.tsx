@@ -100,6 +100,7 @@ export default function AdminParticipants() {
         [
           'ID do Ingresso',
           'Tipo',
+          'Perfil',
           'Comprador Email',
           'Participante Nome',
           'Participante Email',
@@ -107,35 +108,43 @@ export default function AdminParticipants() {
           'Telefone',
           'Empresa',
           'Cargo',
-          'Nicho',
+          'Segmento',
           'Funcionários',
           'Faturamento',
+          'Uso diário de IA (1-5)',
+          'Profundidade de IA (1-5)',
+          'Ferramentas de IA',
+          'Maior desafio com IA',
           'Status',
-          'Áreas de Ajuda',
-          'Expectativa de Aprendizado',
-          'Expectativa da Experiência',
         ],
         ...allTickets.map((row) => {
           const p = row.expand?.participante_id || {}
           const c = row.expand?.comprador_id || {}
-          const areas = Array.isArray(p.areas_ajuda) ? p.areas_ajuda.join('; ') : ''
+          const hasPart = !!row.expand?.participante_id
+          const isEmpresa = p.tem_empresa === true
+          const perfil = hasPart ? (isEmpresa ? 'Empresa' : 'Profissional') : ''
+          // Campos exclusivos de empresa: vazio sem participante; 'N/A' se Profissional;
+          // valor real se Empresa.
+          const companyVal = (v: any) => (!hasPart ? '' : isEmpresa ? v || '' : 'N/A')
           return [
             escapeCSV(row.pedido_id),
             escapeCSV(row.tipo_ingresso),
+            escapeCSV(perfil),
             escapeCSV(c.email),
             escapeCSV(p.nome_completo),
             escapeCSV(p.email),
             escapeCSV(p.cpf),
             escapeCSV(p.telefone),
-            escapeCSV(p.nome_empresa),
+            escapeCSV(companyVal(p.nome_empresa)),
             escapeCSV(p.cargo),
-            escapeCSV(p.nicho),
-            escapeCSV(p.num_funcionarios),
-            escapeCSV(p.faturamento_anual),
+            escapeCSV(companyVal(p.nicho)),
+            escapeCSV(companyVal(p.num_funcionarios)),
+            escapeCSV(companyVal(p.faturamento_anual)),
+            escapeCSV(p.ia_uso_diario),
+            escapeCSV(p.ia_profundidade),
+            escapeCSV(p.ia_ferramentas),
+            escapeCSV(p.ia_desafio),
             escapeCSV(row.status),
-            escapeCSV(areas),
-            escapeCSV(p.expectativa_aprendizado),
-            escapeCSV(p.expectativa_experiencia),
           ]
         }),
       ]
@@ -412,67 +421,99 @@ export default function AdminParticipants() {
 
                 <hr />
 
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-md border bg-slate-100 text-slate-700">
+                    Perfil:{' '}
+                    {selectedParticipant.tem_empresa === true
+                      ? 'Empresa'
+                      : 'Profissional (sem empresa)'}
+                  </span>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <h4 className="text-sm font-semibold text-muted-foreground mb-1">
                       Nome da Empresa
                     </h4>
-                    <p className="font-medium">{selectedParticipant.nome_empresa}</p>
+                    <p className="font-medium">
+                      {selectedParticipant.tem_empresa === true
+                        ? selectedParticipant.nome_empresa || '—'
+                        : 'N/A'}
+                    </p>
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-muted-foreground mb-1">Cargo</h4>
-                    <p className="font-medium">{selectedParticipant.cargo}</p>
+                    <p className="font-medium">{selectedParticipant.cargo || '—'}</p>
                   </div>
                   <div>
-                    <h4 className="text-sm font-semibold text-muted-foreground mb-1">Nicho</h4>
-                    <p className="font-medium">{selectedParticipant.nicho}</p>
+                    <h4 className="text-sm font-semibold text-muted-foreground mb-1">Segmento</h4>
+                    <p className="font-medium">
+                      {selectedParticipant.tem_empresa === true
+                        ? selectedParticipant.nicho || '—'
+                        : 'N/A'}
+                    </p>
                   </div>
                   <div>
                     <h4 className="text-sm font-semibold text-muted-foreground mb-1">
                       Nº de Funcionários
                     </h4>
-                    <p className="font-medium">{selectedParticipant.num_funcionarios}</p>
+                    <p className="font-medium">
+                      {selectedParticipant.tem_empresa === true
+                        ? selectedParticipant.num_funcionarios || '—'
+                        : 'N/A'}
+                    </p>
                   </div>
                   <div className="md:col-span-2">
                     <h4 className="text-sm font-semibold text-muted-foreground mb-1">
                       Faturamento Anual
                     </h4>
-                    <p className="font-medium">{selectedParticipant.faturamento_anual}</p>
+                    <p className="font-medium">
+                      {selectedParticipant.tem_empresa === true
+                        ? selectedParticipant.faturamento_anual || '—'
+                        : 'N/A'}
+                    </p>
                   </div>
                 </div>
 
                 <hr />
 
-                <div>
-                  <h4 className="text-sm font-semibold text-muted-foreground mb-2">
-                    Áreas de Ajuda
-                  </h4>
-                  <div className="flex flex-wrap gap-2">
-                    {(selectedParticipant.areas_ajuda || []).map((area: string, i: number) => (
-                      <span
-                        key={i}
-                        className="bg-slate-100 text-slate-800 text-xs px-2.5 py-1 rounded-md border"
-                      >
-                        {area}
-                      </span>
-                    ))}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="text-sm font-semibold text-muted-foreground mb-1">
+                      Uso diário de IA
+                    </h4>
+                    <p className="font-medium">
+                      {selectedParticipant.ia_uso_diario
+                        ? `${selectedParticipant.ia_uso_diario}/5`
+                        : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-semibold text-muted-foreground mb-1">
+                      Profundidade de IA
+                    </h4>
+                    <p className="font-medium">
+                      {selectedParticipant.ia_profundidade
+                        ? `${selectedParticipant.ia_profundidade}/5`
+                        : '—'}
+                    </p>
                   </div>
                 </div>
 
                 <div>
                   <h4 className="text-sm font-semibold text-muted-foreground mb-1">
-                    Expectativa (Aprendizado)
+                    Ferramentas de IA
                   </h4>
                   <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-md border">
-                    {selectedParticipant.expectativa_aprendizado}
+                    {selectedParticipant.ia_ferramentas || '—'}
                   </p>
                 </div>
                 <div>
                   <h4 className="text-sm font-semibold text-muted-foreground mb-1">
-                    Expectativa (Experiência)
+                    Maior desafio com IA
                   </h4>
                   <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-md border">
-                    {selectedParticipant.expectativa_experiencia}
+                    {selectedParticipant.ia_desafio || '—'}
                   </p>
                 </div>
               </div>
