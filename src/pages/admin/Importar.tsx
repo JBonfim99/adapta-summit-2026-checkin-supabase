@@ -183,28 +183,43 @@ export default function AdminImport() {
 
   const handleConfirmImport = async () => {
     setStep('importing')
-    setProgress(20)
+    setProgress(0)
+
+    // Importa em LOTES (cada lote = sua própria transação no servidor). Isso
+    // evita timeout/rollback de uma única requisição gigante e dá progresso real.
+    // E-mail repetido entre lotes é tratado no backend (reusa o comprador).
+    const rows = summary.payloadRows
+    const CHUNK = 200
+    const totalChunks = Math.max(1, Math.ceil(rows.length / CHUNK))
+    let importedTotal = 0
 
     try {
-      setProgress(50)
-      const res = await pb.send('/backend/v1/admin/import-buyers', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rows: summary.payloadRows }),
-      })
+      for (let c = 0; c < totalChunks; c++) {
+        const chunk = rows.slice(c * CHUNK, (c + 1) * CHUNK)
+        const res = await pb.send('/backend/v1/admin/import-buyers', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: chunk }),
+        })
+        importedTotal += res.imported || 0
+        setProgress(Math.round(((c + 1) / totalChunks) * 100))
+      }
 
-      setProgress(100)
       setTimeout(() => {
         setStep('upload')
         setProgress(0)
         toast({
           title: 'Importação concluída',
-          description: `Sucesso! ${res.imported} ingressos gerados.`,
+          description: `Sucesso! ${importedTotal} ingressos gerados.`,
         })
       }, 500)
     } catch (err: any) {
       setStep('summary')
-      toast({ title: 'Erro na Importação', description: err.message, variant: 'destructive' })
+      toast({
+        title: 'Erro na Importação',
+        description: `${err.message}. ${importedTotal} ingressos foram importados antes da falha — confira o total e, se precisar recomeçar do zero, limpe os dados e reimporte.`,
+        variant: 'destructive',
+      })
     }
   }
 
