@@ -9,6 +9,7 @@ import {
   ShoppingBag,
   Mail,
   BarChart3,
+  MessageCircle,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -26,6 +27,7 @@ export function AdminLayout() {
     { name: 'Participantes', path: '/admin/participantes', icon: Users },
     { name: 'Insights', path: '/admin/insights', icon: BarChart3 },
     { name: 'Disparo', path: '/admin/disparo', icon: Mail },
+    { name: 'Disparo WhatsApp', path: '/admin/disparo-whatsapp', icon: MessageCircle },
     { name: 'Logs', path: '/admin/logs', icon: Send },
   ]
 

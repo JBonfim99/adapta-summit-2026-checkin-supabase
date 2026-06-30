@@ -25,6 +25,7 @@ import AdminCompradores from '@/pages/admin/Compradores'
 import AdminParticipants from '@/pages/admin/Participantes'
 import AdminLogs from '@/pages/admin/Logs'
 import AdminDispatch from '@/pages/admin/Disparo'
+import AdminDispatchWhatsApp from '@/pages/admin/DisparoWhatsApp'
 import AdminInsights from '@/pages/admin/Insights'
 
 function PreCredenciamentoRedirect() {
@@ -111,6 +112,7 @@ const App = () => (
               <Route path="participantes" element={<AdminParticipants />} />
               <Route path="insights" element={<AdminInsights />} />
               <Route path="disparo" element={<AdminDispatch />} />
+              <Route path="disparo-whatsapp" element={<AdminDispatchWhatsApp />} />
               <Route path="logs" element={<AdminLogs />} />
               <Route path="envios" element={<Navigate to="/admin/logs" replace />} />
             </Route>
