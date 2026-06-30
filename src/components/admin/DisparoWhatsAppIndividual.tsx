@@ -2,9 +2,24 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { Loader2, Send, User, Search, X } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
+import {
+  PRE,
+  useFlowsAndFields,
+  FlowSelect,
+  MappingEditor,
+  type MapRow,
+} from '@/components/admin/whatsapp-flow'
 
 interface Recipient {
   id: string
@@ -20,6 +35,15 @@ export default function DisparoWhatsAppIndividual({ onSent }: { onSent?: () => v
   const [selected, setSelected] = useState<Recipient | null>(null)
   const [nome, setNome] = useState('')
   const [sending, setSending] = useState(false)
+
+  const { flows, flowsErr, fields } = useFlowsAndFields()
+  const [flow, setFlow] = useState<string>(PRE)
+  const [mapping, setMapping] = useState<MapRow[]>([])
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  const isPre = flow === PRE
+  const selectedFlowNome = isPre ? '' : flows.find((f) => String(f.id) === flow)?.name || ''
+  const validMapping = mapping.filter((m) => m.field_id && m.source)
 
   // Busca com debounce (não busca enquanto já há um selecionado).
   useEffect(() => {
@@ -57,10 +81,17 @@ export default function DisparoWhatsAppIndividual({ onSent }: { onSent?: () => v
     try {
       const res: any = await pb.send('/backend/v1/admin/whatsapp/send-individual', {
         method: 'POST',
-        body: JSON.stringify({ recipient_id: selected.id, nome }),
+        body: JSON.stringify({
+          recipient_id: selected.id,
+          nome,
+          flow,
+          flow_nome: selectedFlowNome,
+          mapping: isPre ? [] : validMapping,
+        }),
       })
       if (res && res.success === false) {
         // Mantém a seleção pra permitir tentar de novo.
+        setConfirmOpen(false)
         toast({
           title: 'Falha no envio',
           description: res.error || `HTTP ${res.status || '-'}`,
@@ -71,10 +102,13 @@ export default function DisparoWhatsAppIndividual({ onSent }: { onSent?: () => v
           title: 'WhatsApp enviado!',
           description: `${selected.nome || selected.email}`,
         })
+        setConfirmOpen(false)
         setSelected(null)
         setQuery('')
         setResults([])
         setNome('')
+        setFlow(PRE)
+        setMapping([])
         onSent?.()
       }
     } catch (e: any) {
@@ -90,9 +124,7 @@ export default function DisparoWhatsAppIndividual({ onSent }: { onSent?: () => v
         <CardTitle className="flex items-center gap-2 text-lg">
           <User className="w-5 h-5" /> Disparo individual
         </CardTitle>
-        <CardDescription>
-          Envio imediato do WhatsApp de acesso para um comprador específico.
-        </CardDescription>
+        <CardDescription>Envio imediato do WhatsApp para um comprador específico.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="space-y-2">
@@ -157,15 +189,97 @@ export default function DisparoWhatsAppIndividual({ onSent }: { onSent?: () => v
           />
         </div>
 
+        <FlowSelect
+          flow={flow}
+          onChange={(v) => {
+            setFlow(v)
+            if (v === PRE) setMapping([])
+          }}
+          flows={flows}
+          flowsErr={flowsErr}
+        />
+
+        {!isPre && <MappingEditor mapping={mapping} setMapping={setMapping} fields={fields} />}
+
         <Button
           className="bg-[#25D366] hover:bg-[#1ebe5a] text-white gap-2"
-          onClick={handleSend}
+          onClick={() => setConfirmOpen(true)}
           disabled={!selected || sending}
         >
-          {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+          <Send className="w-4 h-4" />
           Enviar
         </Button>
       </CardContent>
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmar disparo individual</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 pt-2 text-sm">
+                <p>Você vai disparar o WhatsApp para 1 comprador.</p>
+                <div className="rounded-lg bg-slate-50 border p-3 space-y-1">
+                  <div>
+                    <span className="text-muted-foreground">Destinatário: </span>
+                    <span className="font-medium text-foreground">
+                      {selected?.nome || selected?.email || '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Canal: </span>
+                    <span className="font-medium text-foreground">BotConversa (WhatsApp)</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Fluxo: </span>
+                    <span className="font-medium text-foreground">
+                      {isPre ? 'Pré-credenciamento (padrão)' : selectedFlowNome || flow}
+                    </span>
+                  </div>
+                  {!isPre && validMapping.length > 0 && (
+                    <div>
+                      <span className="text-muted-foreground">Variáveis mapeadas: </span>
+                      <span className="font-medium text-foreground">{validMapping.length}</span>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-muted-foreground">Custo por mensagem: </span>
+                    <span className="font-medium text-foreground">R$ 0,50 (marketing)</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <span className="text-sm font-medium text-emerald-800">Custo total estimado</span>
+                  <span className="text-xl font-bold text-emerald-700">
+                    {(0.5).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+                <p className="text-muted-foreground">
+                  {isPre
+                    ? 'O comprador recebe um link de acesso válido por 60 dias. '
+                    : 'O contato é criado/atualizado no BotConversa e recebe o fluxo selecionado. '}
+                  O envio é imediato e o resultado aparece no histórico.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={sending}>
+              Cancelar
+            </Button>
+            <Button
+              className="bg-[#25D366] hover:bg-[#1ebe5a] text-white gap-2"
+              onClick={handleSend}
+              disabled={sending}
+            >
+              {sending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Send className="w-4 h-4" />
+              )}
+              Confirmar envio
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

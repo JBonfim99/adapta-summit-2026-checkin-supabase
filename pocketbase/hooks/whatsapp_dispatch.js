@@ -251,17 +251,78 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// --- Envio INDIVIDUAL IMEDIATO (sem fila): pré-credenciamento (catch) --------
+// --- Envio INDIVIDUAL IMEDIATO (sem fila): catch padrão OU fluxo via API -----
 routerAdd(
   'POST',
   '/backend/v1/admin/whatsapp/send-individual',
   (e) => {
     const BC_URL_COMPRADOR =
       'https://new-backend.botconversa.com.br/api/v1/webhooks-automation/catch/192716/WquemD9Wrf0h/'
+    const BC_API = 'https://backend.botconversa.com.br/api/v1/webhook'
+    const BC_KEY = $os.getenv('BOTCONVERSA_API_KEY') || ''
+    const ACESSO_BASE = 'https://summit2026.goskip.app/acesso?token='
+
+    const decodeBody = (b) => {
+      if (b == null) return ''
+      if (typeof b === 'string') return b
+      try {
+        return new TextDecoder().decode(b)
+      } catch (_) {}
+      try {
+        let s = ''
+        for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+        return s
+      } catch (_) {}
+      return ''
+    }
+    const bcGet = (url) => {
+      try {
+        const r = $http.send({
+          url: url,
+          method: 'GET',
+          headers: { 'API-KEY': BC_KEY, 'Content-Type': 'application/json' },
+          timeout: 12,
+        })
+        return { status: r.statusCode, body: decodeBody(r.body) }
+      } catch (err) {
+        return { status: 0, body: '', err: err && err.message ? err.message : 'erro' }
+      }
+    }
+    const bcPost = (url, obj) => {
+      try {
+        const r = $http.send({
+          url: url,
+          method: 'POST',
+          headers: { 'API-KEY': BC_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify(obj),
+          timeout: 12,
+        })
+        return { status: r.statusCode, body: decodeBody(r.body) }
+      } catch (err) {
+        return { status: 0, body: '', err: err && err.message ? err.message : 'erro' }
+      }
+    }
+
     try {
       const body = e.requestInfo().body || {}
       const rid = (body.recipient_id || '').toString().replace(/[^a-zA-Z0-9]/g, '')
       const nomeCampanha = (body.nome || '').toString().trim()
+
+      let flow = (body.flow == null ? '' : body.flow).toString().trim()
+      if (flow === 'PRE') flow = ''
+      const flowNome = (body.flow_nome || '').toString().trim()
+      let mapping = []
+      if (flow && Array.isArray(body.mapping)) {
+        for (let i = 0; i < body.mapping.length; i++) {
+          const m = body.mapping[i] || {}
+          const fid = (m.field_id == null ? '' : m.field_id).toString().trim()
+          const src = (m.source || '').toString().trim()
+          if (!fid || !src) continue
+          mapping.push({ field_id: fid, source: src, value: (m.value || '').toString() })
+        }
+      }
+      const flowMode = !!flow
+
       if (!rid) return e.badRequestError('recipient_id é obrigatório')
 
       let c
@@ -273,40 +334,140 @@ routerAdd(
 
       const email = c.getString('email')
       const nome = c.getString('nome') || ''
-      if (!email) return e.json(200, { success: false, error: 'Comprador sem e-mail' })
-
       let fone = (c.getString('telefone') || '').replace(/\D/g, '')
       if (fone && fone.length <= 11) fone = '55' + fone
 
-      // Token de acesso (60 dias).
-      let token = ''
-      try {
-        token = $security.randomString(40)
-        const tr = new Record($app.findCollectionByNameOrId('tokens_acesso'))
-        tr.set('comprador_id', c.id)
-        tr.set('token', token)
-        tr.set('usado', false)
-        const exp = new Date()
-        exp.setDate(exp.getDate() + 60)
-        tr.set('expira_em', exp.toISOString())
-        $app.save(tr)
-      } catch (_) {
-        token = ''
-      }
-
       let status = 0
       let erroMsg = ''
-      try {
-        const res = $http.send({
-          url: BC_URL_COMPRADOR,
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ full_name: nome, email: email, phone: fone, token: token }),
-          timeout: 12,
-        })
-        status = res.statusCode
-      } catch (err) {
-        erroMsg = err.message
+
+      if (!flowMode) {
+        // ---- MODO A: pré-credenciamento (catch webhook) ----
+        if (!email) return e.json(200, { success: false, error: 'Comprador sem e-mail' })
+        let token = ''
+        try {
+          token = $security.randomString(40)
+          const tr = new Record($app.findCollectionByNameOrId('tokens_acesso'))
+          tr.set('comprador_id', c.id)
+          tr.set('token', token)
+          tr.set('usado', false)
+          const exp = new Date()
+          exp.setDate(exp.getDate() + 60)
+          tr.set('expira_em', exp.toISOString())
+          $app.save(tr)
+        } catch (_) {
+          token = ''
+        }
+        try {
+          const res = $http.send({
+            url: BC_URL_COMPRADOR,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ full_name: nome, email: email, phone: fone, token: token }),
+            timeout: 12,
+          })
+          status = res.statusCode
+        } catch (err) {
+          erroMsg = err.message
+        }
+      } else {
+        // ---- MODO B: fluxo via API (cria/atualiza contato + variáveis + send_flow) ----
+        if (!BC_KEY)
+          return e.json(200, { success: false, error: 'BOTCONVERSA_API_KEY não configurada' })
+        if (!fone) return e.json(200, { success: false, error: 'Comprador sem telefone' })
+
+        let needToken = false
+        for (let mi = 0; mi < mapping.length; mi++) {
+          const s = mapping[mi] && mapping[mi].source
+          if (s === 'token' || s === 'link_acesso') needToken = true
+        }
+        let token = ''
+        if (needToken) {
+          try {
+            token = $security.randomString(40)
+            const tr = new Record($app.findCollectionByNameOrId('tokens_acesso'))
+            tr.set('comprador_id', c.id)
+            tr.set('token', token)
+            tr.set('usado', false)
+            const exp = new Date()
+            exp.setDate(exp.getDate() + 60)
+            tr.set('expira_em', exp.toISOString())
+            $app.save(tr)
+          } catch (_) {
+            token = ''
+          }
+        }
+
+        const resolveSource = (source, staticVal) => {
+          if (source === 'static') return staticVal || ''
+          if (source === 'nome') return nome
+          if (source === 'primeiro_nome') {
+            const n = nome.trim()
+            return n ? n.split(/\s+/)[0] : ''
+          }
+          if (source === 'email') return email
+          if (source === 'telefone') return fone
+          if (source === 'documento') return c.getString('documento') || ''
+          if (source === 'pedido_id') {
+            try {
+              const ing = $app.findFirstRecordByFilter('ingressos', 'comprador_id = {:cid}', {
+                cid: c.id,
+              })
+              return ing ? ing.getString('pedido_id') || '' : ''
+            } catch (_) {
+              return ''
+            }
+          }
+          if (source === 'token') return token || ''
+          if (source === 'link_acesso') return token ? ACESSO_BASE + token : ''
+          return ''
+        }
+
+        let subId = 0
+        const gp = bcGet(BC_API + '/subscriber/get_by_phone/' + fone + '/')
+        if (gp.status === 200) {
+          try {
+            subId = parseInt(JSON.parse(gp.body).id, 10) || 0
+          } catch (_) {}
+        }
+        let crStatus = 0
+        if (!subId) {
+          const parts = nome ? nome.split(/\s+/) : []
+          const fn = parts.length ? parts[0] : 'Contato'
+          const ln = parts.length > 1 ? parts.slice(1).join(' ') : ''
+          const cr = bcPost(BC_API + '/subscriber/', {
+            phone: fone,
+            first_name: fn,
+            last_name: ln,
+            has_opt_in_whatsapp: true,
+          })
+          crStatus = cr.status
+          const gp2 = bcGet(BC_API + '/subscriber/get_by_phone/' + fone + '/')
+          if (gp2.status === 200) {
+            try {
+              subId = parseInt(JSON.parse(gp2.body).id, 10) || 0
+            } catch (_) {}
+          }
+        }
+
+        if (!subId) {
+          status = crStatus || gp.status || 0
+          erroMsg = 'Sem subscriber (get=' + gp.status + ' create=' + crStatus + ')'
+        } else {
+          for (let mi = 0; mi < mapping.length; mi++) {
+            const m = mapping[mi]
+            if (!m || !m.field_id) continue
+            const val = resolveSource(m.source, m.value)
+            if (val === '' || val == null) continue
+            bcPost(BC_API + '/subscriber/' + subId + '/custom_fields/' + m.field_id + '/', {
+              value: String(val),
+            })
+          }
+          const sf = bcPost(BC_API + '/subscriber/' + subId + '/send_flow/', {
+            flow: parseInt(flow, 10),
+          })
+          status = sf.status
+          if (sf.err) erroMsg = sf.err
+        }
       }
 
       const ok = status >= 200 && status < 300
@@ -315,12 +476,15 @@ routerAdd(
       let disparoId = ''
       try {
         const d = new Record($app.findCollectionByNameOrId('disparos_wa'))
-        d.set('nome', nomeCampanha || 'Individual — ' + (nome || email))
+        d.set('nome', nomeCampanha || 'Individual — ' + (nome || email || rid))
         d.set('cluster', 'individual')
         d.set('total', 1)
         d.set('enviados', ok ? 1 : 0)
         d.set('erros', ok ? 0 : 1)
         d.set('status', 'concluido')
+        d.set('flow', flow)
+        d.set('flow_nome', flowNome)
+        d.set('mapping', mapping.length ? JSON.stringify(mapping) : '')
         $app.save(d)
         disparoId = d.id
       } catch (_) {}
