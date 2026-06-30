@@ -47,8 +47,15 @@ routerAdd(
         timeout: 15,
       })
       if (res.statusCode === 200) {
-        const arr = JSON.parse(decodeBody(res.body))
-        return e.json(200, { ok: true, flows: arr })
+        const arr = JSON.parse(decodeBody(res.body)) || []
+        // Remove o fluxo de pré-credenciamento (já é a opção padrão do dropdown).
+        const filtered = []
+        for (let i = 0; i < arr.length; i++) {
+          const nm = (arr[i] && arr[i].name ? String(arr[i].name) : '').toLowerCase().trim()
+          if (nm === 'summit_precred') continue
+          filtered.push(arr[i])
+        }
+        return e.json(200, { ok: true, flows: filtered })
       }
       return e.json(200, { ok: false, error: 'HTTP ' + res.statusCode, flows: [] })
     } catch (err) {
@@ -560,6 +567,11 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
     }
   }
 
+  // Rate limit BotConversa (650 req/min). Teto estimado de requests por execução
+  // (o cron roda 1x/min); ao atingir, devolve o restante pra fila e sai.
+  const BC_BUDGET = 600
+  let bcCount = 0
+
   const atualizaDisparo = (did) => {
     if (!did) return
     try {
@@ -691,6 +703,20 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
         atualizaDisparo(disparoId)
         return 'timeout'
       }
+      // Respeita o rate limit do BotConversa: para ao atingir o teto da execução.
+      if (bcCount >= BC_BUDGET) {
+        for (let j = i; j < batch.length; j++) {
+          const cc = batch[j]
+          cc.set('wa_status', 'na_fila')
+          cc.set('wa_claim', '')
+          try {
+            $app.save(cc)
+          } catch (_) {}
+        }
+        atualizaDisparo(disparoId)
+        return 'budget'
+      }
+      bcCount += flowMode ? 4 + mapping.length : 1
 
       const c = batch[i]
       const nome = c.getString('nome') || ''
@@ -875,5 +901,6 @@ cronAdd('whatsapp_dispatch', '* * * * *', () => {
     if (r === 'empty') break
     if (r === 'retry') break
     if (r === 'timeout') break
+    if (r === 'budget') break
   }
 })

@@ -126,6 +126,10 @@ export function MappingEditor({
   const updateRow = (i: number, patch: Partial<MapRow>) =>
     setMapping((m) => m.map((row, idx) => (idx === i ? { ...row, ...patch } : row)))
 
+  // Variáveis já escolhidas em outras linhas (pra não permitir repetir).
+  const usedIds = mapping.map((r) => r.field_id).filter(Boolean)
+  const allUsed = fields.length > 0 && mapping.length >= fields.length
+
   return (
     <div className="space-y-3 rounded-lg border bg-slate-50/60 p-4">
       <div className="flex items-center justify-between gap-3">
@@ -142,6 +146,7 @@ export function MappingEditor({
           size="sm"
           className="gap-1 shrink-0"
           onClick={addRow}
+          disabled={allUsed}
         >
           <Plus className="w-3 h-3" /> Variável
         </Button>
@@ -161,11 +166,15 @@ export function MappingEditor({
                       Nenhum custom field
                     </SelectItem>
                   ) : (
-                    fields.map((f) => (
-                      <SelectItem key={String(f.id)} value={String(f.id)}>
-                        {f.key}
-                      </SelectItem>
-                    ))
+                    fields
+                      .filter(
+                        (f) => String(f.id) === row.field_id || !usedIds.includes(String(f.id)),
+                      )
+                      .map((f) => (
+                        <SelectItem key={String(f.id)} value={String(f.id)}>
+                          {f.key}
+                        </SelectItem>
+                      ))
                   )}
                 </SelectContent>
               </Select>
