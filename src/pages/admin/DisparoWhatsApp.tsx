@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog'
 import { Send, Loader2, RotateCw, Inbox, Users } from 'lucide-react'
 import { WhatsAppIcon } from '@/components/WhatsAppIcon'
+import DisparoWhatsAppIndividual from '@/components/admin/DisparoWhatsAppIndividual'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -39,6 +40,7 @@ interface DisparoWa {
 const CLUSTERS: Record<string, string> = {
   todos: 'Todos os compradores',
   pendentes: 'Compradores com ingresso pendente',
+  individual: 'Individual',
 }
 
 const WA_STATUS: Record<string, { label: string; cls: string }> = {
@@ -285,6 +287,8 @@ export default function AdminDisparoWhatsApp() {
           </Button>
         </CardContent>
       </Card>
+
+      <DisparoWhatsAppIndividual onSent={loadDisparos} />
 
       <div>
         <h3 className="text-lg font-semibold mb-3">Histórico de disparos</h3>

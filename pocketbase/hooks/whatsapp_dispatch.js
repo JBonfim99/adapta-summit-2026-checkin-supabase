@@ -50,6 +50,10 @@ routerAdd(
       if (cluster === 'pendentes') {
         where =
           "email != '' AND id IN (SELECT comprador_id FROM ingressos WHERE status = 'Pendente')"
+      } else if (cluster === 'individual') {
+        const rid = (body.recipient_id || '').toString().replace(/[^a-zA-Z0-9]/g, '')
+        if (!rid) return e.badRequestError('recipient_id é obrigatório')
+        where = "id = '" + rid + "' AND email != ''"
       }
       where += " AND (wa_status IS NULL OR wa_status != 'enviando')"
 
