@@ -404,10 +404,9 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// Remove um ingresso e faz cascade: o participante vinculado, o link de
-// participante e os logs de webhook desse ingresso são apagados junto.
-// Remove mesmo que o ingresso esteja Pré-Credenciado.
-// OBS: não remove o attendee no INAC (só limpa o nosso lado).
+// Remove um ingresso e faz cascade: participante + link + logs + ingresso.
+// A INAC é OBRIGATÓRIA quando o ingresso está credenciado (tem inac_id):
+// chamamos a INAC ANTES e, se falhar, ABORTA — nada é removido localmente.
 routerAdd(
   'POST',
   '/backend/v1/admin/tickets/{id}/delete',
@@ -423,15 +422,14 @@ routerAdd(
         return e.notFoundError('Ingresso não encontrado')
       }
 
-      // Se estiver pré-credenciado (tem inac_id), remove o attendee na INAC.
-      // Best-effort: NÃO bloqueia a remoção local se a INAC falhar.
+      // Se credenciado (tem inac_id), remove o attendee na INAC ANTES de tocar
+      // no banco. Obrigatório: se não confirmar, aborta e nada é removido.
       const inacId = ingresso.getString('inac_id')
       let inacDeleted = false
       let inacMsg = ''
       if (inacId) {
         const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL') || ''
         const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN') || ''
-        // Deriva a URL de delete da de add; fallback pro endpoint conhecido.
         let delUrl = 'https://painel.credenciamento.digital/apiservicev1/attendees/delete'
         if (/\/attendees\/add\/?$/.test(INAC_WEBHOOK_URL)) {
           delUrl = INAC_WEBHOOK_URL.replace(/\/add\/?$/, '/delete')
@@ -445,13 +443,32 @@ routerAdd(
               method: 'DELETE',
               headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
               body: JSON.stringify({ id: parseInt(inacId, 10) || inacId, event_id: 375 }),
-              timeout: 12,
+              timeout: 15,
             })
-            inacDeleted = res.statusCode >= 200 && res.statusCode < 300
-            inacMsg = 'HTTP ' + res.statusCode
+            let ok2 = res.statusCode >= 200 && res.statusCode < 300
+            let respTxt = ''
+            try {
+              respTxt = typeof res.body === 'string' ? res.body : new TextDecoder().decode(res.body)
+            } catch (_) {}
+            try {
+              const d = JSON.parse(respTxt)
+              if (d && d.status === false) ok2 = false
+            } catch (_) {}
+            inacDeleted = ok2
+            inacMsg = 'HTTP ' + res.statusCode + (ok2 ? '' : ' ' + respTxt.substring(0, 200))
           } catch (err) {
             inacMsg = err && err.message ? err.message : 'erro'
           }
+        }
+
+        // Obrigatório: sem confirmação da INAC, aborta (nada removido).
+        if (!inacDeleted) {
+          return e.json(200, {
+            success: false,
+            inac_error: true,
+            error:
+              'Falha ao remover o credenciamento na INAC (' + inacMsg + '). Nada foi removido.',
+          })
         }
       }
 
@@ -532,6 +549,156 @@ routerAdd(
         inac_deleted: inacDeleted,
         inac_msg: inacMsg,
       })
+    } catch (err) {
+      return e.badRequestError(err.message)
+    }
+  },
+  $apis.requireAuth(),
+)
+
+// Edita um ingresso JÁ CREDENCIADO (tem inac_id): atualiza os dados do
+// participante e reflete na INAC via /edit. A INAC é OBRIGATÓRIA — chamamos
+// ANTES de tocar no banco; se falhar, nada é alterado localmente.
+routerAdd(
+  'POST',
+  '/backend/v1/admin/tickets/{id}/edit',
+  (e) => {
+    try {
+      const ticketId = e.request.pathValue('id')
+      if (!ticketId) return e.badRequestError('id é obrigatório')
+      const body = e.requestInfo().body || {}
+
+      let ingresso
+      try {
+        ingresso = $app.findRecordById('ingressos', ticketId)
+      } catch (_) {
+        return e.notFoundError('Ingresso não encontrado')
+      }
+
+      const inacId = ingresso.getString('inac_id')
+      if (!inacId) {
+        return e.badRequestError('Este ingresso não está credenciado na INAC.')
+      }
+
+      const partId = ingresso.getString('participante_id')
+      let part
+      try {
+        part = $app.findRecordById('participantes', partId)
+      } catch (_) {
+        return e.badRequestError('Participante não encontrado para este ingresso.')
+      }
+
+      const onlyDigits = (s) => (s || '').replace(/\D/g, '')
+      const nomeCompleto = (body.nome_completo || '').toString().trim()
+      const emailNorm = (body.email || '').toString().trim().toLowerCase()
+      const cpf = (body.cpf || '').toString().trim()
+      const telefone = (body.telefone || '').toString().trim()
+      const temEmpresa = body.tem_empresa === true || body.tem_empresa === 'true'
+      const nomeEmpresa = temEmpresa ? (body.nome_empresa || '').toString().trim() : ''
+      const cargo = temEmpresa ? (body.cargo || '').toString().trim() : ''
+      const profissao = temEmpresa ? '' : (body.profissao || '').toString().trim()
+
+      if (nomeCompleto.length < 3) return e.badRequestError('Nome é obrigatório')
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailNorm)) return e.badRequestError('E-mail inválido')
+      if (onlyDigits(cpf).length !== 11) return e.badRequestError('CPF inválido')
+      if (onlyDigits(telefone).length < 10) return e.badRequestError('Telefone inválido')
+      if (temEmpresa && nomeEmpresa.length < 2) return e.badRequestError('Empresa é obrigatória')
+      if (!temEmpresa && profissao.length < 2) return e.badRequestError('Profissão é obrigatória')
+
+      // e-mail único entre participantes (ignora o próprio)
+      let emailDup = false
+      try {
+        const other = $app.findFirstRecordByFilter('participantes', 'email = {:em}', {
+          em: emailNorm,
+        })
+        if (other && other.id !== part.id) emailDup = true
+      } catch (_) {}
+      if (emailDup) {
+        return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro.')
+      }
+
+      // ---- INAC /edit ANTES de tocar no banco (obrigatório) ----
+      const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL') || ''
+      const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN') || ''
+      if (!INAC_AUTH_TOKEN) return e.badRequestError('INAC_AUTH_TOKEN não configurado')
+      let editUrl = 'https://painel.credenciamento.digital/apiservicev1/attendees/edit'
+      if (/\/attendees\/add\/?$/.test(INAC_WEBHOOK_URL)) {
+        editUrl = INAC_WEBHOOK_URL.replace(/\/add\/?$/, '/edit')
+      }
+      let tel = onlyDigits(telefone)
+      if (tel && tel.length <= 11) tel = '55' + tel
+      const categoria = ingresso.getString('tipo_ingresso')
+      const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
+      const payload = {
+        id: parseInt(inacId, 10) || inacId,
+        event_id: 375,
+        category_id: categoryId,
+        status: 'active',
+        fields: [
+          { id: 10133653, value: nomeCompleto },
+          { id: 10133654, value: emailNorm },
+          { id: 10133655, value: onlyDigits(cpf) },
+          { id: 10133656, value: tel },
+          { id: 10133657, value: nomeEmpresa || profissao },
+          { id: 10133665, value: ingresso.getString('pedido_id') },
+        ],
+      }
+
+      let inacOk = false
+      let inacMsg = ''
+      try {
+        const res = $http.send({
+          url: editUrl,
+          method: 'PUT',
+          headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          timeout: 15,
+        })
+        let ok2 = res.statusCode >= 200 && res.statusCode < 300
+        let respTxt = ''
+        try {
+          respTxt = typeof res.body === 'string' ? res.body : new TextDecoder().decode(res.body)
+        } catch (_) {}
+        try {
+          const d = JSON.parse(respTxt)
+          if (d && d.status === false) ok2 = false
+        } catch (_) {}
+        inacOk = ok2
+        inacMsg = 'HTTP ' + res.statusCode + (ok2 ? '' : ' ' + respTxt.substring(0, 200))
+      } catch (err) {
+        inacMsg = err && err.message ? err.message : 'erro'
+      }
+
+      if (!inacOk) {
+        return e.json(200, {
+          success: false,
+          inac_error: true,
+          error: 'Falha ao editar o credenciamento na INAC (' + inacMsg + '). Nada foi alterado.',
+        })
+      }
+
+      // ---- INAC OK: atualiza o participante localmente ----
+      try {
+        part.set('nome_completo', nomeCompleto)
+        part.set('email', emailNorm)
+        part.set('cpf', cpf)
+        part.set('telefone', telefone)
+        part.set('tem_empresa', temEmpresa)
+        part.set('nome_empresa', nomeEmpresa)
+        part.set('cargo', cargo)
+        part.set('profissao', profissao)
+        $app.save(part)
+      } catch (err) {
+        return e.json(200, {
+          success: false,
+          error:
+            'A INAC foi atualizada, mas falhou ao salvar localmente: ' +
+            (err && err.message ? err.message : 'erro') +
+            '. Tente novamente.',
+        })
+      }
+
+      return e.json(200, { success: true })
     } catch (err) {
       return e.badRequestError(err.message)
     }

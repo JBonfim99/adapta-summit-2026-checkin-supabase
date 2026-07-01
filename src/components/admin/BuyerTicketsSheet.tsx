@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, UserPlus, Trash2 } from 'lucide-react'
+import { Plus, UserPlus, Trash2, Pencil } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { AddParticipantDialog } from '@/components/admin/AddParticipantDialog'
+import { EditParticipantDialog } from '@/components/admin/EditParticipantDialog'
 
 export function BuyerTicketsSheet({
   buyer,
@@ -58,6 +59,7 @@ export function BuyerTicketsSheet({
   const [participantTicket, setParticipantTicket] = useState<any | null>(null)
   const [deleteTicket, setDeleteTicket] = useState<any | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [editTicket, setEditTicket] = useState<any | null>(null)
   const { toast } = useToast()
 
   const loadTickets = async () => {
@@ -95,20 +97,21 @@ export function BuyerTicketsSheet({
       const res: any = await pb.send(`/backend/v1/admin/tickets/${deleteTicket.id}/delete`, {
         method: 'POST',
       })
-      if (res?.inac_id_present && !res?.inac_deleted) {
+      if (res?.success === false) {
+        // INAC obrigatória falhou: nada foi removido. Mantém o popup aberto.
         toast({
-          title: 'Removido — atenção na INAC',
-          description: `Ingresso e participante removidos, mas não consegui excluir a credencial na INAC (${res.inac_msg || 'falha'}). Remova manualmente no painel se necessário.`,
+          title: 'Não foi removido',
+          description: res.error || 'Falha ao remover.',
           variant: 'destructive',
         })
-      } else {
-        toast({
-          title: 'Ingresso removido',
-          description: res?.inac_deleted
-            ? 'Ingresso, participante e credencial na INAC removidos.'
-            : 'O ingresso e o participante vinculado foram removidos.',
-        })
+        return
       }
+      toast({
+        title: 'Ingresso removido',
+        description: res?.inac_deleted
+          ? 'Ingresso, participante e credencial na INAC removidos.'
+          : 'O ingresso e o participante vinculado foram removidos.',
+      })
       setDeleteTicket(null)
       loadTickets()
     } catch (err: any) {
@@ -276,6 +279,17 @@ export function BuyerTicketsSheet({
                                 <UserPlus className="w-3.5 h-3.5" /> Adicionar Participante
                               </Button>
                             )}
+                            {t.inac_id && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-slate-500 hover:text-slate-700"
+                                title="Editar credenciamento"
+                                onClick={() => setEditTicket(t)}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </Button>
+                            )}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -300,6 +314,13 @@ export function BuyerTicketsSheet({
         ticket={participantTicket}
         open={!!participantTicket}
         onOpenChange={(val: boolean) => !val && setParticipantTicket(null)}
+        onSuccess={loadTickets}
+      />
+
+      <EditParticipantDialog
+        ticket={editTicket}
+        open={!!editTicket}
+        onOpenChange={(val: boolean) => !val && setEditTicket(null)}
         onSuccess={loadTickets}
       />
 
