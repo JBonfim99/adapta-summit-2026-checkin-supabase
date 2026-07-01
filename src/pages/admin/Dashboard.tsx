@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -30,7 +30,8 @@ const fmtDur = (ms: number) => {
 }
 
 function HourlyChart({ serie }: { serie: { hora: string; total: number }[] }) {
-  const [hover, setHover] = useState<number | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [tip, setTip] = useState<{ x: number; y: number; i: number } | null>(null)
   const max = Math.max(1, ...serie.map((x) => x.total))
   const hasData = serie.some((x) => x.total > 0)
   if (!hasData) {
@@ -43,38 +44,41 @@ function HourlyChart({ serie }: { serie: { hora: string; total: number }[] }) {
     const fim = `${two((dt.getHours() + 1) % 24)}:00`
     return `${two(dt.getDate())}/${two(dt.getMonth() + 1)} · ${ini}–${fim}`
   }
-  const active = hover != null ? serie[hover] : null
+  const move = (e: React.MouseEvent, i: number) => {
+    const r = wrapRef.current?.getBoundingClientRect()
+    if (!r) return
+    setTip({ x: e.clientX - r.left, y: e.clientY - r.top, i })
+  }
+  const active = tip ? serie[tip.i] : null
   return (
-    <div>
-      <div className="h-6 mb-2 flex items-center text-sm">
-        {active ? (
-          <span className="text-slate-700">
-            <span className="font-bold text-emerald-600">{active.total}</span> credenciamento(s){' '}
-            <span className="text-muted-foreground">· {periodo(active.hora)}</span>
-          </span>
-        ) : (
-          <span className="text-muted-foreground text-xs">
-            Passe o mouse nas barras para ver o total daquela hora.
-          </span>
-        )}
-      </div>
+    <div ref={wrapRef} className="relative" onMouseLeave={() => setTip(null)}>
+      {tip && active && (
+        <div
+          className="pointer-events-none absolute z-20 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs text-white shadow-lg whitespace-nowrap"
+          style={{ left: tip.x, top: tip.y, transform: 'translate(-50%, calc(-100% - 10px))' }}
+        >
+          <div className="font-semibold">
+            {active.total} credenciamento{active.total === 1 ? '' : 's'}
+          </div>
+          <div className="text-slate-300">{periodo(active.hora)}</div>
+        </div>
+      )}
       <div className="flex items-end gap-1 h-52 overflow-x-auto pb-2">
         {serie.map((x, i) => {
           const dt = new Date(x.hora)
           const hh = dt.getHours()
           const showLabel = hh % 6 === 0
           const label = hh === 0 ? `${two(dt.getDate())}/${two(dt.getMonth() + 1)}` : `${two(hh)}h`
-          const isActive = hover === i
+          const isActive = tip?.i === i
           return (
             <div
               key={x.hora}
               className="flex-1 min-w-[10px] flex flex-col items-center gap-1 cursor-pointer"
-              onMouseEnter={() => setHover(i)}
-              onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+              onMouseMove={(e) => move(e, i)}
             >
               <div className="w-full flex items-end" style={{ height: '150px' }}>
                 <div
-                  className={`w-full rounded-t transition-all duration-200 ${
+                  className={`w-full rounded-t transition-colors duration-150 ${
                     isActive ? 'bg-emerald-600' : 'bg-emerald-500/80'
                   }`}
                   style={{
