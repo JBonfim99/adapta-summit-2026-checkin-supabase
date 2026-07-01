@@ -157,8 +157,8 @@ export function EditParticipantDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 overflow-hidden gap-0">
-        <DialogHeader className="p-6 border-b pb-4 bg-slate-50/50 space-y-1">
+      <DialogContent className="max-w-2xl p-0 overflow-hidden gap-0 flex flex-col max-h-[90vh]">
+        <DialogHeader className="p-6 border-b pb-4 bg-slate-50/50 space-y-1 shrink-0">
           <DialogTitle>Editar credenciamento</DialogTitle>
           <DialogDescription>
             Ingresso{' '}
@@ -168,8 +168,8 @@ export function EditParticipantDialog({
         </DialogHeader>
 
         <FormProvider {...methods}>
-          <form onSubmit={methods.handleSubmit(onSubmit)}>
-            <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
+          <form onSubmit={methods.handleSubmit(onSubmit)} className="flex flex-col min-h-0 flex-1">
+            <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4">
               <div className="space-y-5">
                 <FormInput name="nome_completo" label="Nome Completo" placeholder="João da Silva" />
                 <FormInput
@@ -227,7 +227,7 @@ export function EditParticipantDialog({
               </div>
             </div>
 
-            <DialogFooter className="p-4 border-t bg-slate-50/50">
+            <DialogFooter className="p-4 border-t bg-slate-50/50 shrink-0">
               <Button
                 type="button"
                 variant="outline"
