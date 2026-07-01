@@ -29,6 +29,71 @@ const fmtDur = (ms: number) => {
   return `${s}s`
 }
 
+function HourlyChart({ serie }: { serie: { hora: string; total: number }[] }) {
+  const [hover, setHover] = useState<number | null>(null)
+  const max = Math.max(1, ...serie.map((x) => x.total))
+  const hasData = serie.some((x) => x.total > 0)
+  if (!hasData) {
+    return <p className="text-sm text-muted-foreground py-8 text-center">Sem dados ainda.</p>
+  }
+  const two = (n: number) => String(n).padStart(2, '0')
+  const periodo = (iso: string) => {
+    const dt = new Date(iso)
+    const ini = `${two(dt.getHours())}:00`
+    const fim = `${two((dt.getHours() + 1) % 24)}:00`
+    return `${two(dt.getDate())}/${two(dt.getMonth() + 1)} · ${ini}–${fim}`
+  }
+  const active = hover != null ? serie[hover] : null
+  return (
+    <div>
+      <div className="h-6 mb-2 flex items-center text-sm">
+        {active ? (
+          <span className="text-slate-700">
+            <span className="font-bold text-emerald-600">{active.total}</span> credenciamento(s){' '}
+            <span className="text-muted-foreground">· {periodo(active.hora)}</span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-xs">
+            Passe o mouse nas barras para ver o total daquela hora.
+          </span>
+        )}
+      </div>
+      <div className="flex items-end gap-1 h-52 overflow-x-auto pb-2">
+        {serie.map((x, i) => {
+          const dt = new Date(x.hora)
+          const hh = dt.getHours()
+          const showLabel = hh % 6 === 0
+          const label = hh === 0 ? `${two(dt.getDate())}/${two(dt.getMonth() + 1)}` : `${two(hh)}h`
+          const isActive = hover === i
+          return (
+            <div
+              key={x.hora}
+              className="flex-1 min-w-[10px] flex flex-col items-center gap-1 cursor-pointer"
+              onMouseEnter={() => setHover(i)}
+              onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+            >
+              <div className="w-full flex items-end" style={{ height: '150px' }}>
+                <div
+                  className={`w-full rounded-t transition-all duration-200 ${
+                    isActive ? 'bg-emerald-600' : 'bg-emerald-500/80'
+                  }`}
+                  style={{
+                    height: `${(x.total / max) * 100}%`,
+                    minHeight: x.total > 0 ? '2px' : '0',
+                  }}
+                />
+              </div>
+              <div className="text-[9px] text-muted-foreground h-3 leading-3">
+                {showLabel ? label : ''}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function AdminDashboard() {
   const [stats, setStats] = useState({
     compradores_total: 0,
@@ -207,32 +272,19 @@ export default function AdminDashboard() {
       </div>
 
       {/* Tempo até o credenciamento */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tempo médio até o credenciamento</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{fmtDur(stats.tempo_medio_ms)}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              mediana {fmtDur(stats.tempo_mediana_ms)} · da criação do ingresso até o preenchimento
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Base do cálculo</CardTitle>
-            <CheckCircle className="h-4 w-4 text-emerald-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats.credenciados_com_tempo}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              credenciamentos com data de criação e preenchimento
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Tempo médio até o credenciamento</CardTitle>
+          <Clock className="h-4 w-4 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">{fmtDur(stats.tempo_medio_ms)}</div>
+          <p className="text-xs text-muted-foreground mt-1">
+            mediana {fmtDur(stats.tempo_mediana_ms)} · da criação do ingresso até o preenchimento
+            (base de {stats.credenciados_com_tempo})
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Credenciamentos por hora */}
       <Card>
@@ -241,45 +293,7 @@ export default function AdminDashboard() {
           <p className="text-xs text-muted-foreground">Últimas 48 horas com atividade.</p>
         </CardHeader>
         <CardContent>
-          {(() => {
-            const serie = stats.por_hora || []
-            const max = Math.max(1, ...serie.map((x) => x.total))
-            const hasData = serie.some((x) => x.total > 0)
-            if (!hasData) {
-              return (
-                <p className="text-sm text-muted-foreground py-8 text-center">Sem dados ainda.</p>
-              )
-            }
-            const two = (n: number) => String(n).padStart(2, '0')
-            return (
-              <div className="flex items-end gap-1 h-52 overflow-x-auto pb-2">
-                {serie.map((x) => {
-                  const dt = new Date(x.hora)
-                  const hh = dt.getHours()
-                  const showLabel = hh % 6 === 0
-                  const label =
-                    hh === 0 ? `${two(dt.getDate())}/${two(dt.getMonth() + 1)}` : `${two(hh)}h`
-                  return (
-                    <div
-                      key={x.hora}
-                      className="flex-1 min-w-[10px] flex flex-col items-center gap-1"
-                      title={`${dt.toLocaleString()} — ${x.total} credenciamento(s)`}
-                    >
-                      <div className="w-full flex items-end" style={{ height: '150px' }}>
-                        <div
-                          className="w-full bg-emerald-500/80 rounded-t transition-all duration-500"
-                          style={{ height: `${(x.total / max) * 100}%` }}
-                        />
-                      </div>
-                      <div className="text-[9px] text-muted-foreground h-3 leading-3">
-                        {showLabel ? label : ''}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )
-          })()}
+          <HourlyChart serie={stats.por_hora || []} />
         </CardContent>
       </Card>
     </div>
