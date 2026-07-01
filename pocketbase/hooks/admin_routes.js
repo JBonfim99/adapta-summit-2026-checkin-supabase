@@ -712,3 +712,127 @@ routerAdd(
   },
   $apis.requireAuth(),
 )
+
+// Muda o tipo do ingresso (GOLD <-> PLATINUM). Se credenciado (tem inac_id),
+// atualiza a categoria na INAC via /edit ANTES de salvar local (obrigatório,
+// rollback se falhar). GOLD = categoria 6123, PLATINUM = 6125.
+routerAdd(
+  'POST',
+  '/backend/v1/admin/tickets/{id}/change-type',
+  (e) => {
+    try {
+      const ticketId = e.request.pathValue('id')
+      if (!ticketId) return e.badRequestError('id é obrigatório')
+      const body = e.requestInfo().body || {}
+      const tipo = (body.tipo || '').toString().trim().toUpperCase()
+      if (tipo !== 'GOLD' && tipo !== 'PLATINUM') {
+        return e.badRequestError('tipo deve ser GOLD ou PLATINUM')
+      }
+
+      let ingresso
+      try {
+        ingresso = $app.findRecordById('ingressos', ticketId)
+      } catch (_) {
+        return e.notFoundError('Ingresso não encontrado')
+      }
+
+      if (ingresso.getString('tipo_ingresso') === tipo) {
+        return e.json(200, { success: true, unchanged: true })
+      }
+
+      const inacId = ingresso.getString('inac_id')
+
+      // Credenciado: reflete a nova categoria na INAC antes de tocar no banco.
+      if (inacId) {
+        const partId = ingresso.getString('participante_id')
+        let part
+        try {
+          part = $app.findRecordById('participantes', partId)
+        } catch (_) {
+          return e.badRequestError('Participante não encontrado para este ingresso credenciado.')
+        }
+
+        const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL') || ''
+        const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN') || ''
+        if (!INAC_AUTH_TOKEN) return e.badRequestError('INAC_AUTH_TOKEN não configurado')
+        let editUrl = 'https://painel.credenciamento.digital/apiservicev1/attendees/edit'
+        if (/\/attendees\/add\/?$/.test(INAC_WEBHOOK_URL)) {
+          editUrl = INAC_WEBHOOK_URL.replace(/\/add\/?$/, '/edit')
+        }
+        const onlyDigits = (s) => (s || '').replace(/\D/g, '')
+        let tel = onlyDigits(part.getString('telefone'))
+        if (tel && tel.length <= 11) tel = '55' + tel
+        const categoryId = tipo === 'PLATINUM' ? 6125 : 6123
+        const payload = {
+          id: parseInt(inacId, 10) || inacId,
+          event_id: 375,
+          category_id: categoryId,
+          status: 'active',
+          fields: [
+            { id: 10133653, value: part.getString('nome_completo') || '' },
+            { id: 10133654, value: part.getString('email') || '' },
+            { id: 10133655, value: onlyDigits(part.getString('cpf')) },
+            { id: 10133656, value: tel },
+            {
+              id: 10133657,
+              value: part.getString('nome_empresa') || part.getString('profissao') || '',
+            },
+            { id: 10133665, value: ingresso.getString('pedido_id') },
+          ],
+        }
+
+        let inacOk = false
+        let inacMsg = ''
+        try {
+          const res = $http.send({
+            url: editUrl,
+            method: 'PUT',
+            headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            timeout: 15,
+          })
+          let ok2 = res.statusCode >= 200 && res.statusCode < 300
+          let respTxt = ''
+          try {
+            respTxt = typeof res.body === 'string' ? res.body : new TextDecoder().decode(res.body)
+          } catch (_) {}
+          try {
+            const d = JSON.parse(respTxt)
+            if (d && d.status === false) ok2 = false
+          } catch (_) {}
+          inacOk = ok2
+          inacMsg = 'HTTP ' + res.statusCode + (ok2 ? '' : ' ' + respTxt.substring(0, 200))
+        } catch (err) {
+          inacMsg = err && err.message ? err.message : 'erro'
+        }
+
+        if (!inacOk) {
+          return e.json(200, {
+            success: false,
+            inac_error: true,
+            error: 'Falha ao atualizar a categoria na INAC (' + inacMsg + '). Nada foi alterado.',
+          })
+        }
+      }
+
+      // Atualiza o tipo localmente.
+      try {
+        ingresso.set('tipo_ingresso', tipo)
+        $app.save(ingresso)
+      } catch (err) {
+        return e.json(200, {
+          success: false,
+          error:
+            (inacId ? 'A INAC foi atualizada, mas ' : '') +
+            'falhou ao salvar localmente: ' +
+            (err && err.message ? err.message : 'erro'),
+        })
+      }
+
+      return e.json(200, { success: true, tipo: tipo })
+    } catch (err) {
+      return e.badRequestError(err.message)
+    }
+  },
+  $apis.requireAuth(),
+)

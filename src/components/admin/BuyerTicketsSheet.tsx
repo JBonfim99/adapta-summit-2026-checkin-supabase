@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, UserPlus, Trash2, Pencil } from 'lucide-react'
+import { Plus, UserPlus, Trash2, Pencil, ArrowLeftRight } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -60,6 +60,8 @@ export function BuyerTicketsSheet({
   const [deleteTicket, setDeleteTicket] = useState<any | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [editTicket, setEditTicket] = useState<any | null>(null)
+  const [changeTypeTicket, setChangeTypeTicket] = useState<any | null>(null)
+  const [changingType, setChangingType] = useState(false)
   const { toast } = useToast()
 
   const loadTickets = async () => {
@@ -118,6 +120,33 @@ export function BuyerTicketsSheet({
       toast({ title: 'Erro ao remover', description: err.message, variant: 'destructive' })
     } finally {
       setDeleting(false)
+    }
+  }
+
+  const handleChangeType = async () => {
+    if (!changeTypeTicket) return
+    const target = changeTypeTicket.tipo_ingresso === 'GOLD' ? 'PLATINUM' : 'GOLD'
+    setChangingType(true)
+    try {
+      const res: any = await pb.send(
+        `/backend/v1/admin/tickets/${changeTypeTicket.id}/change-type`,
+        { method: 'POST', body: JSON.stringify({ tipo: target }) },
+      )
+      if (res?.success === false) {
+        toast({
+          title: 'Não foi alterado',
+          description: res.error || 'Falha ao alterar o tipo.',
+          variant: 'destructive',
+        })
+        return
+      }
+      toast({ title: 'Tipo alterado', description: `Ingresso agora é ${target}.` })
+      setChangeTypeTicket(null)
+      loadTickets()
+    } catch (err: any) {
+      toast({ title: 'Erro ao alterar', description: err.message, variant: 'destructive' })
+    } finally {
+      setChangingType(false)
     }
   }
 
@@ -279,6 +308,15 @@ export function BuyerTicketsSheet({
                                 <UserPlus className="w-3.5 h-3.5" /> Adicionar Participante
                               </Button>
                             )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-slate-500 hover:text-slate-700"
+                              title="Alterar tipo (GOLD/PLATINUM)"
+                              onClick={() => setChangeTypeTicket(t)}
+                            >
+                              <ArrowLeftRight className="w-4 h-4" />
+                            </Button>
                             {t.inac_id && (
                               <Button
                                 variant="ghost"
@@ -370,6 +408,47 @@ export function BuyerTicketsSheet({
               className="bg-rose-500 hover:bg-rose-600 text-white"
             >
               {deleting ? 'Removendo...' : 'Remover'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!changeTypeTicket}
+        onOpenChange={(o) => !o && !changingType && setChangeTypeTicket(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Alterar tipo do ingresso?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 pt-1 text-sm">
+                <p>
+                  Ingresso <strong>{changeTypeTicket?.pedido_id}</strong>:{' '}
+                  <strong>{changeTypeTicket?.tipo_ingresso}</strong> →{' '}
+                  <strong>
+                    {changeTypeTicket?.tipo_ingresso === 'GOLD' ? 'PLATINUM' : 'GOLD'}
+                  </strong>
+                  .
+                </p>
+                {changeTypeTicket?.inac_id && (
+                  <p>
+                    A categoria na <strong>INAC</strong> também será atualizada.
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={changingType}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(ev) => {
+                ev.preventDefault()
+                handleChangeType()
+              }}
+              disabled={changingType}
+              className="bg-primary text-white"
+            >
+              {changingType ? 'Alterando...' : 'Alterar'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
