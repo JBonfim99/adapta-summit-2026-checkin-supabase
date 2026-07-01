@@ -76,6 +76,51 @@ routerAdd('POST', '/backend/v1/participant/email-check', (e) => {
   return e.json(200, { available: !dup })
 })
 
+// Checa se o CPF já foi usado em OUTRO ingresso PRÉ-CREDENCIADO. Normaliza os
+// dígitos e compara com o valor formatado e o cru. Exclui o ingresso atual
+// (via token). Público (formulário não autenticado). Retorna só um booleano.
+routerAdd('POST', '/backend/v1/participant/cpf-check', (e) => {
+  const body = e.requestInfo().body || {}
+  const digits = (body.cpf || '').toString().replace(/\D/g, '')
+  if (digits.length !== 11) return e.json(200, { available: true })
+
+  let currentIngressoId = ''
+  try {
+    const link = $app.findFirstRecordByData(
+      'links_participante',
+      'token',
+      (body.token || '').toString(),
+    )
+    currentIngressoId = link.getString('ingresso_id')
+  } catch (_) {}
+
+  const fmt = digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
+  let taken = false
+  try {
+    const recs = $app.findRecordsByFilter(
+      'participantes',
+      'cpf = {:fmt} || cpf = {:raw}',
+      '',
+      50,
+      0,
+      { fmt: fmt, raw: digits },
+    )
+    for (let i = 0; i < recs.length; i++) {
+      const iid = recs[i].getString('ingresso_id')
+      if (iid && iid === currentIngressoId) continue
+      try {
+        const ing = $app.findRecordById('ingressos', iid)
+        if (ing.getString('status') === 'Pré-Credenciado') {
+          taken = true
+          break
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  return e.json(200, { available: !taken })
+})
+
 routerAdd('POST', '/backend/v1/participant/submit', (e) => {
   const body = e.requestInfo().body
   const token = body.token
@@ -89,6 +134,36 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
   } catch (_) {}
   if (emailDup) {
     return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro e-mail.')
+  }
+
+  // Regra: um CPF só pode estar em UM credenciamento (ingresso pré-credenciado).
+  const cpfDigits = (body.cpf || '').toString().replace(/\D/g, '')
+  if (cpfDigits.length === 11) {
+    const fmt = cpfDigits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
+    let cpfTaken = false
+    try {
+      const recs = $app.findRecordsByFilter(
+        'participantes',
+        'cpf = {:fmt} || cpf = {:raw}',
+        '',
+        50,
+        0,
+        { fmt: fmt, raw: cpfDigits },
+      )
+      for (let i = 0; i < recs.length; i++) {
+        const iid = recs[i].getString('ingresso_id')
+        try {
+          const ing = $app.findRecordById('ingressos', iid)
+          if (ing.getString('status') === 'Pré-Credenciado') {
+            cpfTaken = true
+            break
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    if (cpfTaken) {
+      return e.badRequestError('Este CPF já foi usado em outro credenciamento.')
+    }
   }
 
   let ingressoId = ''

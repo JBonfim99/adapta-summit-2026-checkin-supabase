@@ -189,6 +189,20 @@ export default function ParticipantForm() {
         })
         return
       }
+
+      // Regra: CPF não pode já estar usado em outro credenciamento.
+      const cpf = methods.getValues('cpf')
+      const resCpf: any = await pb.send('/backend/v1/participant/cpf-check', {
+        method: 'POST',
+        body: JSON.stringify({ cpf, token }),
+      })
+      if (resCpf && resCpf.available === false) {
+        methods.setError('cpf', {
+          type: 'manual',
+          message: 'Este CPF já foi usado em outro credenciamento.',
+        })
+        return
+      }
     } catch (_) {
       // Se a checagem falhar, segue — o backend ainda valida no envio final.
     } finally {
