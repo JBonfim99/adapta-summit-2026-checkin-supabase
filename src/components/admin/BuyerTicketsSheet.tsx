@@ -92,11 +92,23 @@ export function BuyerTicketsSheet({
     if (!deleteTicket) return
     setDeleting(true)
     try {
-      await pb.send(`/backend/v1/admin/tickets/${deleteTicket.id}/delete`, { method: 'POST' })
-      toast({
-        title: 'Ingresso removido',
-        description: 'O ingresso e o participante vinculado foram removidos.',
+      const res: any = await pb.send(`/backend/v1/admin/tickets/${deleteTicket.id}/delete`, {
+        method: 'POST',
       })
+      if (res?.inac_id_present && !res?.inac_deleted) {
+        toast({
+          title: 'Removido — atenção na INAC',
+          description: `Ingresso e participante removidos, mas não consegui excluir a credencial na INAC (${res.inac_msg || 'falha'}). Remova manualmente no painel se necessário.`,
+          variant: 'destructive',
+        })
+      } else {
+        toast({
+          title: 'Ingresso removido',
+          description: res?.inac_deleted
+            ? 'Ingresso, participante e credencial na INAC removidos.'
+            : 'O ingresso e o participante vinculado foram removidos.',
+        })
+      }
       setDeleteTicket(null)
       loadTickets()
     } catch (err: any) {
@@ -316,6 +328,11 @@ export function BuyerTicketsSheet({
                   </p>
                 ) : (
                   <p>Este ingresso não tem participante vinculado.</p>
+                )}
+                {(deleteTicket?.inac_id || deleteTicket?.status === 'Pré-Credenciado') && (
+                  <p>
+                    A credencial deste participante na <strong>INAC</strong> também será removida.
+                  </p>
                 )}
                 <p className="font-medium text-rose-600">Esta ação não pode ser desfeita.</p>
               </div>

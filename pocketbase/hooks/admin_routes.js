@@ -416,10 +416,43 @@ routerAdd(
       const ticketId = e.request.pathValue('id')
       if (!ticketId) return e.badRequestError('id é obrigatório')
 
+      let ingresso
       try {
-        $app.findRecordById('ingressos', ticketId)
+        ingresso = $app.findRecordById('ingressos', ticketId)
       } catch (_) {
         return e.notFoundError('Ingresso não encontrado')
+      }
+
+      // Se estiver pré-credenciado (tem inac_id), remove o attendee na INAC.
+      // Best-effort: NÃO bloqueia a remoção local se a INAC falhar.
+      const inacId = ingresso.getString('inac_id')
+      let inacDeleted = false
+      let inacMsg = ''
+      if (inacId) {
+        const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL') || ''
+        const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN') || ''
+        // Deriva a URL de delete da de add; fallback pro endpoint conhecido.
+        let delUrl = 'https://painel.credenciamento.digital/apiservicev1/attendees/delete'
+        if (/\/attendees\/add\/?$/.test(INAC_WEBHOOK_URL)) {
+          delUrl = INAC_WEBHOOK_URL.replace(/\/add\/?$/, '/delete')
+        }
+        if (!INAC_AUTH_TOKEN) {
+          inacMsg = 'INAC_AUTH_TOKEN não configurado'
+        } else {
+          try {
+            const res = $http.send({
+              url: delUrl,
+              method: 'DELETE',
+              headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: parseInt(inacId, 10) || inacId, event_id: 375 }),
+              timeout: 12,
+            })
+            inacDeleted = res.statusCode >= 200 && res.statusCode < 300
+            inacMsg = 'HTTP ' + res.statusCode
+          } catch (err) {
+            inacMsg = err && err.message ? err.message : 'erro'
+          }
+        }
       }
 
       let removedParticipante = false
@@ -492,7 +525,13 @@ routerAdd(
         txApp.delete(ing)
       })
 
-      return e.json(200, { success: true, removed_participante: removedParticipante })
+      return e.json(200, {
+        success: true,
+        removed_participante: removedParticipante,
+        inac_id_present: !!inacId,
+        inac_deleted: inacDeleted,
+        inac_msg: inacMsg,
+      })
     } catch (err) {
       return e.badRequestError(err.message)
     }
