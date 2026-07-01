@@ -155,6 +155,36 @@ routerAdd(
       return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro e-mail.')
     }
 
+    // Regra: um CPF só pode estar em UM credenciamento (ingresso pré-credenciado).
+    const cpfDigitsChk = (body.cpf || '').toString().replace(/\D/g, '')
+    if (cpfDigitsChk.length === 11) {
+      const fmtChk = cpfDigitsChk.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
+      let cpfTaken = false
+      try {
+        const recs = $app.findRecordsByFilter(
+          'participantes',
+          'cpf = {:fmt} || cpf = {:raw}',
+          '',
+          50,
+          0,
+          { fmt: fmtChk, raw: cpfDigitsChk },
+        )
+        for (let i = 0; i < recs.length; i++) {
+          const iid = recs[i].getString('ingresso_id')
+          try {
+            const ing = $app.findRecordById('ingressos', iid)
+            if (ing.getString('status') === 'Pré-Credenciado') {
+              cpfTaken = true
+              break
+            }
+          } catch (_) {}
+        }
+      } catch (_) {}
+      if (cpfTaken) {
+        return e.badRequestError('Este CPF já foi usado em outro credenciamento.')
+      }
+    }
+
     try {
       $app.runInTransaction((txApp) => {
         const ingresso = txApp.findRecordById('ingressos', ingressoId)
@@ -615,6 +645,37 @@ routerAdd(
       } catch (_) {}
       if (emailDup) {
         return e.badRequestError('Este e-mail já foi usado por outro participante. Use outro.')
+      }
+
+      // Regra: CPF não pode estar em outro credenciamento (ignora o próprio ingresso).
+      const cpfDigitsE = onlyDigits(cpf)
+      if (cpfDigitsE.length === 11) {
+        const fmtE = cpfDigitsE.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
+        let cpfTakenE = false
+        try {
+          const recs = $app.findRecordsByFilter(
+            'participantes',
+            'cpf = {:fmt} || cpf = {:raw}',
+            '',
+            50,
+            0,
+            { fmt: fmtE, raw: cpfDigitsE },
+          )
+          for (let i = 0; i < recs.length; i++) {
+            const iid = recs[i].getString('ingresso_id')
+            if (iid && iid === ticketId) continue
+            try {
+              const ing = $app.findRecordById('ingressos', iid)
+              if (ing.getString('status') === 'Pré-Credenciado') {
+                cpfTakenE = true
+                break
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
+        if (cpfTakenE) {
+          return e.badRequestError('Este CPF já foi usado em outro credenciamento.')
+        }
       }
 
       // ---- INAC /edit ANTES de tocar no banco (obrigatório) ----
