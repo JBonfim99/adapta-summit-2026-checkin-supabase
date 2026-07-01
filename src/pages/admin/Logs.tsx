@@ -30,6 +30,10 @@ const MANUAL_EVENTOS: Record<string, { label: string; cls: string }> = {
   excluido_manual: { label: 'Excluído', cls: 'border-rose-200 bg-rose-50 text-rose-700' },
   editado_manual: { label: 'Editado', cls: 'border-sky-200 bg-sky-50 text-sky-700' },
   tipo_alterado: { label: 'Tipo alterado', cls: 'border-violet-200 bg-violet-50 text-violet-700' },
+  comprador_excluido: {
+    label: 'Comprador excluído',
+    cls: 'border-rose-200 bg-rose-50 text-rose-700',
+  },
 }
 
 // Pedido do log: usa o ingresso expandido; se ele foi excluído, cai no payload.

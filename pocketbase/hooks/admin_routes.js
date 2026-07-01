@@ -383,12 +383,40 @@ routerAdd(
       const platinum = { total: 0, preenchidos: 0, pendentes: 0 }
       const gold = { total: 0, preenchidos: 0, pendentes: 0 }
 
+      const parseTs = (s) => {
+        if (!s) return NaN
+        let v = Date.parse(s)
+        if (isNaN(v)) v = Date.parse(String(s).replace(' ', 'T'))
+        return v
+      }
+      const hourly = {}
+      let lastMs = 0
+      let sumDelta = 0
+      let nDelta = 0
+      const deltas = []
+
       for (const ing of ingressos) {
         const isPreenchido = ing.getString('status') === 'Pré-Credenciado'
         const type = ing.getString('tipo_ingresso')
 
         if (isPreenchido) preenchidos++
         else pendentes++
+
+        if (isPreenchido) {
+          const peMs = parseTs(ing.getString('preenchido_em'))
+          if (!isNaN(peMs)) {
+            const hb = Math.floor(peMs / 3600000) * 3600000
+            hourly[hb] = (hourly[hb] || 0) + 1
+            if (peMs > lastMs) lastMs = peMs
+            const crMs = parseTs(ing.getString('created'))
+            if (!isNaN(crMs) && peMs >= crMs) {
+              const d = peMs - crMs
+              sumDelta += d
+              nDelta++
+              deltas.push(d)
+            }
+          }
+        }
 
         if (ing.getString('status_webhook') === 'erro') erros++
 
@@ -417,6 +445,25 @@ routerAdd(
         compradores_total = r.c
       } catch (_) {}
 
+      // Série de credenciamentos por hora (48 buckets terminando na última hora
+      // com atividade) + tempo médio/mediana de created -> preenchido_em.
+      const endMs = lastMs
+        ? Math.floor(lastMs / 3600000) * 3600000
+        : Math.floor(Date.now() / 3600000) * 3600000
+      const por_hora = []
+      for (let i = 47; i >= 0; i--) {
+        const b = endMs - i * 3600000
+        por_hora.push({ hora: new Date(b).toISOString(), total: hourly[b] || 0 })
+      }
+      let tempo_medio_ms = nDelta ? Math.round(sumDelta / nDelta) : 0
+      let tempo_mediana_ms = 0
+      if (deltas.length) {
+        deltas.sort((a, b) => a - b)
+        const mid = Math.floor(deltas.length / 2)
+        tempo_mediana_ms =
+          deltas.length % 2 ? deltas[mid] : Math.round((deltas[mid - 1] + deltas[mid]) / 2)
+      }
+
       return e.json(200, {
         compradores_total,
         total,
@@ -426,6 +473,10 @@ routerAdd(
         platinum,
         gold,
         activity,
+        por_hora,
+        tempo_medio_ms,
+        tempo_mediana_ms,
+        credenciados_com_tempo: nDelta,
       })
     } catch (err) {
       return e.badRequestError(err.message)
@@ -1006,6 +1057,171 @@ routerAdd(
       } catch (_) {}
 
       return e.json(200, { success: true, tipo: tipo })
+    } catch (err) {
+      return e.badRequestError(err.message)
+    }
+  },
+  $apis.requireAuth(),
+)
+
+// Remove um comprador com cascade: ingressos (pendentes) + participantes +
+// links + logs + tokens_acesso (magic link) + o comprador. Bloqueia se houver
+// qualquer ingresso credenciado (tem inac_id ou status Pré-Credenciado) — esses
+// devem ser tratados pelos fluxos de ingresso (que falam com a INAC).
+routerAdd(
+  'POST',
+  '/backend/v1/admin/buyers/{id}/delete',
+  (e) => {
+    try {
+      const buyerId = e.request.pathValue('id')
+      if (!buyerId) return e.badRequestError('id é obrigatório')
+
+      let comprador
+      try {
+        comprador = $app.findRecordById('compradores', buyerId)
+      } catch (_) {
+        return e.notFoundError('Comprador não encontrado')
+      }
+
+      const nomeC = comprador.getString('nome')
+      const emailC = comprador.getString('email')
+
+      let ingressos = []
+      try {
+        ingressos = $app.findRecordsByFilter('ingressos', 'comprador_id = {:cid}', '', 5000, 0, {
+          cid: buyerId,
+        })
+      } catch (_) {}
+
+      // Bloqueia se houver ingresso credenciado.
+      for (let i = 0; i < ingressos.length; i++) {
+        const ing = ingressos[i]
+        if (ing.getString('inac_id') || ing.getString('status') === 'Pré-Credenciado') {
+          return e.json(200, {
+            success: false,
+            error:
+              'Este comprador tem ingressos credenciados. Remova ou gerencie os ingressos credenciados antes de excluir o comprador.',
+          })
+        }
+      }
+
+      let removedIngressos = 0
+      $app.runInTransaction((txApp) => {
+        for (let i = 0; i < ingressos.length; i++) {
+          let ing
+          try {
+            ing = txApp.findRecordById('ingressos', ingressos[i].id)
+          } catch (_) {
+            continue
+          }
+          const iid = ing.id
+          try {
+            const ps = txApp.findRecordsByFilter(
+              'participantes',
+              'ingresso_id = {:iid}',
+              '',
+              200,
+              0,
+              {
+                iid: iid,
+              },
+            )
+            for (let j = 0; j < ps.length; j++) {
+              try {
+                txApp.delete(ps[j])
+              } catch (_) {}
+            }
+          } catch (_) {}
+          try {
+            const ls = txApp.findRecordsByFilter(
+              'links_participante',
+              'ingresso_id = {:iid}',
+              '',
+              200,
+              0,
+              { iid: iid },
+            )
+            for (let j = 0; j < ls.length; j++) {
+              try {
+                txApp.delete(ls[j])
+              } catch (_) {}
+            }
+          } catch (_) {}
+          try {
+            const lg = txApp.findRecordsByFilter(
+              'webhooks_log',
+              'ingresso_id = {:iid}',
+              '',
+              1000,
+              0,
+              {
+                iid: iid,
+              },
+            )
+            for (let j = 0; j < lg.length; j++) {
+              try {
+                txApp.delete(lg[j])
+              } catch (_) {}
+            }
+          } catch (_) {}
+          try {
+            txApp.delete(ing)
+            removedIngressos++
+          } catch (_) {}
+        }
+
+        // tokens_acesso (magic link) — relação obrigatória que bloqueava o delete.
+        try {
+          const ts = txApp.findRecordsByFilter(
+            'tokens_acesso',
+            'comprador_id = {:cid}',
+            '',
+            500,
+            0,
+            {
+              cid: buyerId,
+            },
+          )
+          for (let j = 0; j < ts.length; j++) {
+            try {
+              txApp.delete(ts[j])
+            } catch (_) {}
+          }
+        } catch (_) {}
+
+        // Registra a exclusão do comprador nos Logs (evento sem ingresso).
+        try {
+          const logColl = txApp.findCollectionByNameOrId('webhooks_log')
+          const log = new Record(logColl)
+          log.set('evento', 'comprador_excluido')
+          log.set('method', 'MANUAL')
+          log.set('status', 200)
+          log.set(
+            'detalhe',
+            'Comprador ' +
+              nomeC +
+              ' (' +
+              emailC +
+              ') excluído manualmente pelo admin' +
+              (removedIngressos ? ' — ' + removedIngressos + ' ingresso(s) removido(s).' : '.'),
+          )
+          log.set(
+            'payload',
+            JSON.stringify({
+              acao: 'exclusao_comprador',
+              nome: nomeC,
+              email: emailC,
+              ingressos_removidos: removedIngressos,
+            }),
+          )
+          log.set('response', 'Sem INAC.')
+          txApp.save(log)
+        } catch (_) {}
+
+        txApp.delete(txApp.findRecordById('compradores', buyerId))
+      })
+
+      return e.json(200, { success: true, removed_ingressos: removedIngressos })
     } catch (err) {
       return e.badRequestError(err.message)
     }

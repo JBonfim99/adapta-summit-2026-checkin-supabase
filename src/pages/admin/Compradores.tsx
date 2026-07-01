@@ -233,20 +233,24 @@ export default function AdminCompradores() {
   const handleDelete = async () => {
     if (!deleteId) return
     try {
-      const tickets = await pb
-        .collection('ingressos')
-        .getFullList({ filter: `comprador_id="${deleteId}" && status="Pré-Credenciado"` })
-      if (tickets.length > 0) {
+      const res: any = await pb.send(`/backend/v1/admin/buyers/${deleteId}/delete`, {
+        method: 'POST',
+      })
+      if (res?.success === false) {
         toast({
-          title: 'Ação Bloqueada',
-          description: 'Não é possível remover compradores com ingressos Pré-Credenciados.',
+          title: 'Não foi removido',
+          description: res.error || 'Falha ao remover o comprador.',
           variant: 'destructive',
         })
         setDeleteId(null)
         return
       }
-      await pb.collection('compradores').delete(deleteId)
-      toast({ title: 'Comprador removido com sucesso!' })
+      toast({
+        title: 'Comprador removido',
+        description: res?.removed_ingressos
+          ? `Comprador e ${res.removed_ingressos} ingresso(s) pendente(s) removido(s).`
+          : 'Comprador removido com sucesso.',
+      })
       if (data.length === 1 && page > 1) setPage(page - 1)
       else loadData()
     } catch (err: any) {
@@ -581,7 +585,9 @@ export default function AdminCompradores() {
           <AlertDialogHeader>
             <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação não pode ser desfeita. Isso excluirá permanentemente o comprador.
+              Esta ação não pode ser desfeita. O comprador e seus ingressos pendentes (com os links
+              de acesso) serão removidos. Compradores com ingressos credenciados não podem ser
+              removidos por aqui.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
