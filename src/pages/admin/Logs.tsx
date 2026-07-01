@@ -25,12 +25,30 @@ const pretty = (s: any) => {
   }
 }
 
+// Eventos de ação manual do admin (aparecem como badge próprio nos Logs).
+const MANUAL_EVENTOS: Record<string, { label: string; cls: string }> = {
+  excluido_manual: { label: 'Excluído', cls: 'border-rose-200 bg-rose-50 text-rose-700' },
+  editado_manual: { label: 'Editado', cls: 'border-sky-200 bg-sky-50 text-sky-700' },
+  tipo_alterado: { label: 'Tipo alterado', cls: 'border-violet-200 bg-violet-50 text-violet-700' },
+}
+
+// Pedido do log: usa o ingresso expandido; se ele foi excluído, cai no payload.
+const pedidoDoLog = (log: any) => {
+  if (log?.expand?.ingresso_id?.pedido_id) return log.expand.ingresso_id.pedido_id
+  try {
+    const p = JSON.parse(log?.payload || '{}')
+    return p?.pedido_id || '-'
+  } catch {
+    return '-'
+  }
+}
+
 export default function AdminLogs() {
   const [logs, setLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [retryingAll, setRetryingAll] = useState(false)
   const [retryingId, setRetryingId] = useState('')
-  const [filter, setFilter] = useState<'erros' | 'todos' | 'ok'>('erros')
+  const [filter, setFilter] = useState<'erros' | 'todos' | 'ok' | 'manuais'>('erros')
   const [detail, setDetail] = useState<any>(null)
   const { toast } = useToast()
 
@@ -51,21 +69,31 @@ export default function AdminLogs() {
   // Agrega: 1 linha por ingresso (pedido), mantendo o evento MAIS RECENTE.
   const aggregated = useMemo(() => {
     const byIng: Record<string, any> = {}
+    const manualRows: any[] = []
     for (const log of logs) {
       const iid = log.ingresso_id
-      if (!iid) continue
+      const live = !!log.expand?.ingresso_id
+      const isManual = !!MANUAL_EVENTOS[log.evento]
+      // Evento manual cujo ingresso não existe mais (ex.: exclusão): linha própria.
+      if (isManual && !live) {
+        manualRows.push(log)
+        continue
+      }
+      // Ignora órfãos de ingressos já excluídos (logs de webhook antigos).
+      if (!iid || !live) continue
       const prev = byIng[iid]
       if (!prev || new Date(log.created).getTime() > new Date(prev.created).getTime()) {
         byIng[iid] = log
       }
     }
-    return Object.values(byIng).sort(
+    return [...Object.values(byIng), ...manualRows].sort(
       (a: any, b: any) => new Date(b.created).getTime() - new Date(a.created).getTime(),
     )
   }, [logs])
 
   // Estado de erro real do ingresso (não só do log): credenciado => nunca é erro.
   const rowIsError = (log: any) => {
+    if (MANUAL_EVENTOS[log.evento]) return false
     const ing = log.expand?.ingresso_id
     if (ing?.inac_id) return false
     const sw = ing?.status_webhook
@@ -73,9 +101,12 @@ export default function AdminLogs() {
   }
 
   const errorCount = aggregated.filter(rowIsError).length
-  const visible = aggregated.filter((log: any) =>
-    filter === 'todos' ? true : filter === 'erros' ? rowIsError(log) : !rowIsError(log),
-  )
+  const visible = aggregated.filter((log: any) => {
+    if (filter === 'todos') return true
+    if (filter === 'manuais') return !!MANUAL_EVENTOS[log.evento]
+    if (filter === 'erros') return rowIsError(log)
+    return !rowIsError(log)
+  })
 
   const handleRetry = async (ingressoId: string) => {
     setRetryingId(ingressoId)
@@ -117,10 +148,11 @@ export default function AdminLogs() {
     }
   }
 
-  const FILTERS: Array<['erros' | 'todos' | 'ok', string]> = [
+  const FILTERS: Array<['erros' | 'todos' | 'ok' | 'manuais', string]> = [
     ['erros', `Somente erros${errorCount > 0 ? ` (${errorCount})` : ''}`],
     ['todos', 'Todos'],
     ['ok', 'Somente OK'],
+    ['manuais', 'Ações manuais'],
   ]
 
   return (
@@ -179,40 +211,48 @@ export default function AdminLogs() {
               return (
                 <TableRow key={log.id}>
                   <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={
-                        err
-                          ? 'border-rose-200 bg-rose-50 text-rose-700'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                      }
-                    >
-                      {err ? 'Erro' : 'OK'}
-                    </Badge>
+                    {MANUAL_EVENTOS[log.evento] ? (
+                      <Badge variant="outline" className={MANUAL_EVENTOS[log.evento].cls}>
+                        {MANUAL_EVENTOS[log.evento].label}
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className={
+                          err
+                            ? 'border-rose-200 bg-rose-50 text-rose-700'
+                            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        }
+                      >
+                        {err ? 'Erro' : 'OK'}
+                      </Badge>
+                    )}
                   </TableCell>
                   <TableCell>
-                    <div className="font-medium font-mono text-sm">
-                      {log.expand?.ingresso_id?.pedido_id || '-'}
-                    </div>
+                    <div className="font-medium font-mono text-sm">{pedidoDoLog(log)}</div>
                   </TableCell>
                   <TableCell className="text-sm text-slate-600 whitespace-nowrap">
                     {new Date(log.created).toLocaleString()}
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center gap-2">
-                      {err ? (
-                        <XCircle className="w-4 h-4 text-rose-500" />
-                      ) : (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                      )}
-                      <span
-                        className={
-                          err ? 'text-rose-700 font-medium' : 'text-emerald-700 font-medium'
-                        }
-                      >
-                        {log.status}
-                      </span>
-                    </div>
+                    {MANUAL_EVENTOS[log.evento] ? (
+                      <span className="text-slate-400">—</span>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        {err ? (
+                          <XCircle className="w-4 h-4 text-rose-500" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                        )}
+                        <span
+                          className={
+                            err ? 'text-rose-700 font-medium' : 'text-emerald-700 font-medium'
+                          }
+                        >
+                          {log.status}
+                        </span>
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="max-w-[260px] text-sm text-slate-700">{log.detalhe || '-'}</div>
@@ -277,9 +317,7 @@ export default function AdminLogs() {
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>
-              Detalhe do envio — pedido {detail?.expand?.ingresso_id?.pedido_id || ''}
-            </DialogTitle>
+            <DialogTitle>Detalhe — pedido {detail ? pedidoDoLog(detail) : ''}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 max-h-[70vh] overflow-y-auto text-sm">
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-slate-600">
@@ -292,13 +330,19 @@ export default function AdminLogs() {
             </div>
             {detail?.detalhe && <div className="text-slate-700">{detail.detalhe}</div>}
             <div>
-              <h4 className="font-semibold mb-1 text-slate-800">O que enviamos à INAC (payload)</h4>
+              <h4 className="font-semibold mb-1 text-slate-800">
+                {MANUAL_EVENTOS[detail?.evento]
+                  ? 'Dados da ação'
+                  : 'O que enviamos à INAC (payload)'}
+              </h4>
               <pre className="text-xs bg-slate-50 border rounded p-3 overflow-x-auto whitespace-pre-wrap break-all text-slate-700">
                 {pretty(detail?.payload) || 'Não registrado'}
               </pre>
             </div>
             <div>
-              <h4 className="font-semibold mb-1 text-slate-800">Resposta da INAC</h4>
+              <h4 className="font-semibold mb-1 text-slate-800">
+                {MANUAL_EVENTOS[detail?.evento] ? 'Observação' : 'Resposta da INAC'}
+              </h4>
               <pre className="text-xs bg-slate-50 border rounded p-3 overflow-x-auto whitespace-pre-wrap break-all text-slate-700">
                 {pretty(detail?.response) || 'Sem corpo de resposta'}
               </pre>

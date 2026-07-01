@@ -502,6 +502,17 @@ routerAdd(
         }
       }
 
+      // Snapshot pro log de auditoria (antes de apagar).
+      const pedidoSnap = ingresso.getString('pedido_id')
+      const tipoSnap = ingresso.getString('tipo_ingresso')
+      let nomeSnap = ''
+      try {
+        const pidSnap = ingresso.getString('participante_id')
+        if (pidSnap) {
+          nomeSnap = $app.findRecordById('participantes', pidSnap).getString('nome_completo')
+        }
+      } catch (_) {}
+
       let removedParticipante = false
 
       $app.runInTransaction((txApp) => {
@@ -551,21 +562,41 @@ routerAdd(
           }
         } catch (_) {}
 
-        // 4) logs de webhook desse ingresso
+        // 4) registra a EXCLUSÃO nos Logs (antes de apagar o ingresso).
+        //    Não apagamos mais os logs históricos. Ao deletar o ingresso, o
+        //    PocketBase zera a relação (cascadeDelete off), então guardamos o
+        //    pedido no payload/detalhe pra continuar visível na tela de Logs.
         try {
-          const logs = txApp.findRecordsByFilter(
-            'webhooks_log',
-            'ingresso_id = {:iid}',
-            '',
-            1000,
-            0,
-            { iid: ing.id },
+          const logColl = txApp.findCollectionByNameOrId('webhooks_log')
+          const log = new Record(logColl)
+          log.set('ingresso_id', ing.id)
+          log.set('evento', 'excluido_manual')
+          log.set('method', 'MANUAL')
+          log.set('status', 200)
+          log.set(
+            'detalhe',
+            'Ingresso ' +
+              pedidoSnap +
+              ' (' +
+              tipoSnap +
+              ')' +
+              (nomeSnap ? ' — ' + nomeSnap : '') +
+              ' — excluído manualmente pelo admin.' +
+              (inacId && inacDeleted ? ' Credencial removida na INAC.' : ''),
           )
-          for (let i = 0; i < logs.length; i++) {
-            try {
-              txApp.delete(logs[i])
-            } catch (_) {}
-          }
+          log.set(
+            'payload',
+            JSON.stringify({
+              acao: 'exclusao',
+              pedido_id: pedidoSnap,
+              tipo: tipoSnap,
+              participante: nomeSnap,
+              inac_id: inacId || '',
+              inac_deleted: inacDeleted,
+            }),
+          )
+          log.set('response', inacId ? 'INAC: ' + inacMsg : 'Sem credencial na INAC.')
+          txApp.save(log)
         } catch (_) {}
 
         // 5) o ingresso
@@ -616,6 +647,18 @@ routerAdd(
         part = $app.findRecordById('participantes', partId)
       } catch (_) {
         return e.badRequestError('Participante não encontrado para este ingresso.')
+      }
+
+      // Snapshot dos valores atuais (pro log de auditoria).
+      const antes = {
+        nome_completo: part.getString('nome_completo'),
+        email: part.getString('email'),
+        cpf: part.getString('cpf'),
+        telefone: part.getString('telefone'),
+        tem_empresa: part.getBool('tem_empresa'),
+        nome_empresa: part.getString('nome_empresa'),
+        cargo: part.getString('cargo'),
+        profissao: part.getString('profissao'),
       }
 
       const onlyDigits = (s) => (s || '').replace(/\D/g, '')
@@ -766,6 +809,45 @@ routerAdd(
         })
       }
 
+      // audit: registra a EDIÇÃO manual nos Logs.
+      try {
+        const logColl = $app.findCollectionByNameOrId('webhooks_log')
+        const log = new Record(logColl)
+        log.set('ingresso_id', ingresso.id)
+        log.set('evento', 'editado_manual')
+        log.set('method', 'MANUAL')
+        log.set('status', 200)
+        log.set(
+          'detalhe',
+          'Ingresso ' +
+            ingresso.getString('pedido_id') +
+            ' — ' +
+            nomeCompleto +
+            ' — dados editados manualmente pelo admin.',
+        )
+        log.set(
+          'payload',
+          JSON.stringify({
+            acao: 'edicao',
+            pedido_id: ingresso.getString('pedido_id'),
+            participante: nomeCompleto,
+            antes: antes,
+            depois: {
+              nome_completo: nomeCompleto,
+              email: emailNorm,
+              cpf: cpf,
+              telefone: telefone,
+              tem_empresa: temEmpresa,
+              nome_empresa: nomeEmpresa,
+              cargo: cargo,
+              profissao: profissao,
+            },
+          }),
+        )
+        log.set('response', 'INAC /edit OK (' + inacMsg + ')')
+        $app.save(log)
+      } catch (_) {}
+
       return e.json(200, { success: true })
     } catch (err) {
       return e.badRequestError(err.message)
@@ -797,6 +879,7 @@ routerAdd(
         return e.notFoundError('Ingresso não encontrado')
       }
 
+      const tipoAntes = ingresso.getString('tipo_ingresso')
       if (ingresso.getString('tipo_ingresso') === tipo) {
         return e.json(200, { success: true, unchanged: true })
       }
@@ -889,6 +972,38 @@ routerAdd(
             (err && err.message ? err.message : 'erro'),
         })
       }
+
+      // audit: registra a TROCA DE TIPO nos Logs.
+      try {
+        const logColl = $app.findCollectionByNameOrId('webhooks_log')
+        const log = new Record(logColl)
+        log.set('ingresso_id', ingresso.id)
+        log.set('evento', 'tipo_alterado')
+        log.set('method', 'MANUAL')
+        log.set('status', 200)
+        log.set(
+          'detalhe',
+          'Ingresso ' +
+            ingresso.getString('pedido_id') +
+            ' — tipo alterado de ' +
+            tipoAntes +
+            ' para ' +
+            tipo +
+            (inacId ? ' (INAC atualizada).' : '.'),
+        )
+        log.set(
+          'payload',
+          JSON.stringify({
+            acao: 'tipo',
+            pedido_id: ingresso.getString('pedido_id'),
+            de: tipoAntes,
+            para: tipo,
+            inac_id: inacId || '',
+          }),
+        )
+        log.set('response', inacId ? 'INAC /edit OK' : 'Sem credencial na INAC.')
+        $app.save(log)
+      } catch (_) {}
 
       return e.json(200, { success: true, tipo: tipo })
     } catch (err) {
