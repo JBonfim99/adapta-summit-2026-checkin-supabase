@@ -687,6 +687,13 @@ routerAdd(
         part.set('nome_empresa', nomeEmpresa)
         part.set('cargo', cargo)
         part.set('profissao', profissao)
+        part.set('nicho', (body.nicho || '').toString())
+        part.set('num_funcionarios', temEmpresa ? (body.num_funcionarios || '').toString() : '')
+        part.set('faturamento_anual', temEmpresa ? (body.faturamento_anual || '').toString() : '')
+        part.set('ia_uso_diario', parseInt(body.ia_uso_diario, 10) || 0)
+        part.set('ia_profundidade', parseInt(body.ia_profundidade, 10) || 0)
+        part.set('ia_ferramentas', (body.ia_ferramentas || '').toString())
+        part.set('ia_desafio', (body.ia_desafio || '').toString())
         $app.save(part)
       } catch (err) {
         return e.json(200, {

@@ -12,12 +12,14 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { FormInput } from '@/components/FormInput'
+import { LinearScale } from '@/components/LinearScale'
 import { CheckCircle2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { getErrorMessage } from '@/lib/pocketbase/errors'
-import { ROLES } from '@/lib/form-options'
+import { ROLES, REVENUE, EMPLOYEES, NICHES } from '@/lib/form-options'
 import { isValidCPF } from '@/lib/cpf'
 
 const formSchema = z
@@ -33,6 +35,13 @@ const formSchema = z
     nome_empresa: z.string().optional().default(''),
     cargo: z.string().optional().default(''),
     profissao: z.string().optional().default(''),
+    faturamento_anual: z.string().optional().default(''),
+    num_funcionarios: z.string().optional().default(''),
+    nicho: z.string().min(1, 'Selecione o segmento'),
+    ia_uso_diario: z.number().min(1, 'Selecione uma opção').max(5),
+    ia_profundidade: z.number().min(1, 'Selecione uma opção').max(5),
+    ia_ferramentas: z.string().min(2, 'Preenchimento obrigatório'),
+    ia_desafio: z.string().min(2, 'Preenchimento obrigatório'),
   })
   .superRefine((data, ctx) => {
     if (data.tem_empresa) {
@@ -41,6 +50,24 @@ const formSchema = z
           code: z.ZodIssueCode.custom,
           path: ['nome_empresa'],
           message: 'Empresa é obrigatória',
+        })
+      if (!data.faturamento_anual)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['faturamento_anual'],
+          message: 'Selecione o faturamento',
+        })
+      if (!data.num_funcionarios)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['num_funcionarios'],
+          message: 'Selecione o tamanho',
+        })
+      if (!data.cargo)
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['cargo'],
+          message: 'Selecione um cargo',
         })
     } else {
       if (!data.profissao || data.profissao.trim().length < 2)
@@ -79,6 +106,13 @@ export function EditParticipantDialog({
       nome_empresa: '',
       cargo: '',
       profissao: '',
+      faturamento_anual: '',
+      num_funcionarios: '',
+      nicho: '',
+      ia_uso_diario: 0,
+      ia_profundidade: 0,
+      ia_ferramentas: '',
+      ia_desafio: '',
     },
     mode: 'onTouched',
   })
@@ -98,6 +132,13 @@ export function EditParticipantDialog({
         nome_empresa: p.nome_empresa || '',
         cargo: p.cargo || '',
         profissao: p.profissao || '',
+        faturamento_anual: p.faturamento_anual || '',
+        num_funcionarios: p.num_funcionarios || '',
+        nicho: p.nicho || '',
+        ia_uso_diario: p.ia_uso_diario || 0,
+        ia_profundidade: p.ia_profundidade || 0,
+        ia_ferramentas: p.ia_ferramentas || '',
+        ia_desafio: p.ia_desafio || '',
       })
     }
   }, [open, ticket])
@@ -108,7 +149,9 @@ export function EditParticipantDialog({
     if (semEmpresa) {
       methods.setValue('nome_empresa', '')
       methods.setValue('cargo', '')
-      methods.clearErrors(['nome_empresa', 'cargo'])
+      methods.setValue('faturamento_anual', '')
+      methods.setValue('num_funcionarios', '')
+      methods.clearErrors(['nome_empresa', 'cargo', 'faturamento_anual', 'num_funcionarios'])
     } else {
       methods.setValue('profissao', '')
       methods.clearErrors(['profissao'])
@@ -123,14 +166,14 @@ export function EditParticipantDialog({
       const res: any = await pb.send(`/backend/v1/admin/tickets/${ticket.id}/edit`, {
         method: 'POST',
         body: JSON.stringify({
-          nome_completo: data.nome_completo,
-          email: data.email,
-          cpf: data.cpf,
-          telefone: data.telefone,
+          ...data,
           tem_empresa: isEmpresa,
           nome_empresa: isEmpresa ? data.nome_empresa || '' : '',
           cargo: isEmpresa ? data.cargo || '' : '',
           profissao: isEmpresa ? '' : data.profissao || '',
+          nicho: data.nicho || '',
+          num_funcionarios: isEmpresa ? data.num_funcionarios || '' : '',
+          faturamento_anual: isEmpresa ? data.faturamento_anual || '' : '',
         }),
       })
       if (res && res.success === false) {
@@ -203,27 +246,120 @@ export function EditParticipantDialog({
                 </div>
 
                 {temEmpresa ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <>
                     <FormInput
                       name="nome_empresa"
                       label="Nome da Empresa"
                       placeholder="Sua Empresa Ltda"
                     />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormInput
+                        name="cargo"
+                        label="Cargo"
+                        type="select"
+                        options={ROLES}
+                        placeholder="Selecione..."
+                      />
+                      <FormInput
+                        name="faturamento_anual"
+                        label="Faturamento anual"
+                        type="select"
+                        options={REVENUE}
+                        placeholder="Selecione..."
+                      />
+                      <FormInput
+                        name="num_funcionarios"
+                        label="Número de funcionários"
+                        type="select"
+                        options={EMPLOYEES}
+                        placeholder="Selecione..."
+                      />
+                      <FormInput
+                        name="nicho"
+                        label="Qual o segmento da sua empresa?"
+                        type="select"
+                        options={NICHES}
+                        placeholder="Selecione..."
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
                     <FormInput
-                      name="cargo"
-                      label="Cargo"
+                      name="profissao"
+                      label="Sua Profissão"
+                      placeholder="Ex: Designer, Advogado, Médico..."
+                    />
+                    <FormInput
+                      name="nicho"
+                      label="Segmento da empresa que você trabalha"
                       type="select"
-                      options={ROLES}
+                      options={NICHES}
                       placeholder="Selecione..."
                     />
-                  </div>
-                ) : (
-                  <FormInput
-                    name="profissao"
-                    label="Profissão"
-                    placeholder="Ex: Designer, Advogado, Médico..."
-                  />
+                  </>
                 )}
+
+                <FormField
+                  control={methods.control}
+                  name="ia_uso_diario"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-base">
+                        {temEmpresa
+                          ? 'De 1 a 5, quantas pessoas usam IA na sua empresa diariamente?'
+                          : 'De 1 a 5, quanto você usa IA diariamente?'}
+                      </FormLabel>
+                      <LinearScale
+                        value={field.value}
+                        onChange={field.onChange}
+                        leftLabel={temEmpresa ? 'Ninguém' : 'Nunca'}
+                        rightLabel={temEmpresa ? 'Todos' : 'O tempo todo'}
+                        error={!!methods.formState.errors.ia_uso_diario}
+                      />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={methods.control}
+                  name="ia_profundidade"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-base">
+                        {temEmpresa
+                          ? 'Qual a profundidade do uso de IA dessas pessoas?'
+                          : 'Qual a sua profundidade de uso de IA?'}
+                      </FormLabel>
+                      <LinearScale
+                        value={field.value}
+                        onChange={field.onChange}
+                        leftLabel={temEmpresa ? 'Usamos como Google' : 'Uso como Google'}
+                        rightLabel="Nativo de IA"
+                        error={!!methods.formState.errors.ia_profundidade}
+                      />
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormInput
+                  name="ia_ferramentas"
+                  type="textarea"
+                  label="Quais ferramentas de IA você utiliza atualmente?"
+                  placeholder="Ex: ChatGPT, Claude, Gemini, n8n..."
+                />
+                <FormInput
+                  name="ia_desafio"
+                  type="textarea"
+                  label={
+                    temEmpresa
+                      ? 'Na sua visão, qual o maior desafio para tornar sua empresa Nativa de IA?'
+                      : 'Na sua visão, qual o maior desafio que você enfrenta com a IA atualmente?'
+                  }
+                  placeholder="Sua resposta..."
+                />
               </div>
             </div>
 
