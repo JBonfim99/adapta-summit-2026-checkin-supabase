@@ -403,3 +403,99 @@ routerAdd(
   },
   $apis.requireAuth(),
 )
+
+// Remove um ingresso e faz cascade: o participante vinculado, o link de
+// participante e os logs de webhook desse ingresso são apagados junto.
+// Remove mesmo que o ingresso esteja Pré-Credenciado.
+// OBS: não remove o attendee no INAC (só limpa o nosso lado).
+routerAdd(
+  'POST',
+  '/backend/v1/admin/tickets/{id}/delete',
+  (e) => {
+    try {
+      const ticketId = e.request.pathValue('id')
+      if (!ticketId) return e.badRequestError('id é obrigatório')
+
+      try {
+        $app.findRecordById('ingressos', ticketId)
+      } catch (_) {
+        return e.notFoundError('Ingresso não encontrado')
+      }
+
+      let removedParticipante = false
+
+      $app.runInTransaction((txApp) => {
+        const ing = txApp.findRecordById('ingressos', ticketId)
+        const pid = ing.getString('participante_id')
+
+        // 1) participante vinculado direto pelo ingresso
+        if (pid) {
+          try {
+            txApp.delete(txApp.findRecordById('participantes', pid))
+            removedParticipante = true
+          } catch (_) {}
+        }
+
+        // 2) participantes que apontam pra esse ingresso (defensivo)
+        try {
+          const orphans = txApp.findRecordsByFilter(
+            'participantes',
+            'ingresso_id = {:iid}',
+            '',
+            200,
+            0,
+            { iid: ing.id },
+          )
+          for (let i = 0; i < orphans.length; i++) {
+            try {
+              txApp.delete(orphans[i])
+              removedParticipante = true
+            } catch (_) {}
+          }
+        } catch (_) {}
+
+        // 3) links de participante desse ingresso
+        try {
+          const links = txApp.findRecordsByFilter(
+            'links_participante',
+            'ingresso_id = {:iid}',
+            '',
+            200,
+            0,
+            { iid: ing.id },
+          )
+          for (let i = 0; i < links.length; i++) {
+            try {
+              txApp.delete(links[i])
+            } catch (_) {}
+          }
+        } catch (_) {}
+
+        // 4) logs de webhook desse ingresso
+        try {
+          const logs = txApp.findRecordsByFilter(
+            'webhooks_log',
+            'ingresso_id = {:iid}',
+            '',
+            1000,
+            0,
+            { iid: ing.id },
+          )
+          for (let i = 0; i < logs.length; i++) {
+            try {
+              txApp.delete(logs[i])
+            } catch (_) {}
+          }
+        } catch (_) {}
+
+        // 5) o ingresso
+        txApp.delete(ing)
+      })
+
+      return e.json(200, { success: true, removed_participante: removedParticipante })
+    } catch (err) {
+      return e.badRequestError(err.message)
+    }
+  },
+  $apis.requireAuth(),
+)

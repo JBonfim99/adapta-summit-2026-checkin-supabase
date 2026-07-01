@@ -17,11 +17,21 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Plus, UserPlus } from 'lucide-react'
+import { Plus, UserPlus, Trash2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Select,
   SelectContent,
@@ -46,6 +56,8 @@ export function BuyerTicketsSheet({
   const [newTicket, setNewTicket] = useState({ tipo_ingresso: '', pedido_id: '' })
   const [saving, setSaving] = useState(false)
   const [participantTicket, setParticipantTicket] = useState<any | null>(null)
+  const [deleteTicket, setDeleteTicket] = useState<any | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const { toast } = useToast()
 
   const loadTickets = async () => {
@@ -75,6 +87,24 @@ export function BuyerTicketsSheet({
   useRealtime('ingressos', () => {
     if (open && buyer) loadTickets()
   })
+
+  const handleDelete = async () => {
+    if (!deleteTicket) return
+    setDeleting(true)
+    try {
+      await pb.send(`/backend/v1/admin/tickets/${deleteTicket.id}/delete`, { method: 'POST' })
+      toast({
+        title: 'Ingresso removido',
+        description: 'O ingresso e o participante vinculado foram removidos.',
+      })
+      setDeleteTicket(null)
+      loadTickets()
+    } catch (err: any) {
+      toast({ title: 'Erro ao remover', description: err.message, variant: 'destructive' })
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const handleAdd = async () => {
     if (!newTicket.tipo_ingresso) {
@@ -223,16 +253,27 @@ export function BuyerTicketsSheet({
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          {t.status === 'Pendente' && (
+                          <div className="flex items-center justify-end gap-1">
+                            {t.status === 'Pendente' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-1"
+                                onClick={() => setParticipantTicket(t)}
+                              >
+                                <UserPlus className="w-3.5 h-3.5" /> Adicionar Participante
+                              </Button>
+                            )}
                             <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-8 gap-1"
-                              onClick={() => setParticipantTicket(t)}
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-rose-500 hover:text-rose-600"
+                              title="Remover ingresso"
+                              onClick={() => setDeleteTicket(t)}
                             >
-                              <UserPlus className="w-3.5 h-3.5" /> Adicionar Participante
+                              <Trash2 className="w-4 h-4" />
                             </Button>
-                          )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -249,6 +290,52 @@ export function BuyerTicketsSheet({
         onOpenChange={(val: boolean) => !val && setParticipantTicket(null)}
         onSuccess={loadTickets}
       />
+
+      <AlertDialog
+        open={!!deleteTicket}
+        onOpenChange={(o) => !o && !deleting && setDeleteTicket(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remover ingresso?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 pt-1 text-sm">
+                <p>
+                  Você vai remover o ingresso <strong>{deleteTicket?.pedido_id}</strong> (
+                  {deleteTicket?.tipo_ingresso}).
+                </p>
+                {deleteTicket?.expand?.participante_id?.nome_completo ? (
+                  <p>
+                    O participante{' '}
+                    <strong>{deleteTicket.expand.participante_id.nome_completo}</strong> vinculado a
+                    este ingresso <strong>também será removido</strong>
+                    {deleteTicket?.status === 'Pré-Credenciado'
+                      ? ', mesmo estando Pré-Credenciado'
+                      : ''}
+                    .
+                  </p>
+                ) : (
+                  <p>Este ingresso não tem participante vinculado.</p>
+                )}
+                <p className="font-medium text-rose-600">Esta ação não pode ser desfeita.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(ev) => {
+                ev.preventDefault()
+                handleDelete()
+              }}
+              disabled={deleting}
+              className="bg-rose-500 hover:bg-rose-600 text-white"
+            >
+              {deleting ? 'Removendo...' : 'Remover'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
