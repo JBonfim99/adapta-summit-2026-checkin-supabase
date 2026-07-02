@@ -17,6 +17,7 @@ const LOGO = 'https://drive.google.com/thumbnail?id=1r4vxmkHX_HWaDV6MaZshIJXLpr7
 const schema = z.object({
   nome_completo: z.string().min(3, 'Nome é obrigatório'),
   email: z.string().email('E-mail inválido'),
+  telefone: z.string().min(14, 'Telefone inválido — inclua o DDD'),
   cpf: z
     .string()
     .min(14, 'CPF inválido')
@@ -50,7 +51,7 @@ export default function Cortesia() {
 
   const methods = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { nome_completo: '', email: '', cpf: '' },
+    defaultValues: { nome_completo: '', email: '', telefone: '', cpf: '' },
     mode: 'onTouched',
   })
 
@@ -103,6 +104,7 @@ export default function Cortesia() {
           token,
           nome_completo: data.nome_completo,
           email: data.email,
+          telefone: data.telefone,
           cpf: data.cpf,
         }),
       })
@@ -235,6 +237,12 @@ export default function Cortesia() {
                   label="E-mail"
                   type="email"
                   placeholder="voce@exemplo.com"
+                />
+                <FormInput
+                  name="telefone"
+                  label="Telefone (com DDD)"
+                  placeholder="(00) 90000-0000"
+                  mask="phone"
                 />
                 <FormInput name="cpf" label="CPF" placeholder="000.000.000-00" mask="cpf" />
                 <Button

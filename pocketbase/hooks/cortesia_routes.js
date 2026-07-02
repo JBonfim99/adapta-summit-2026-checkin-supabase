@@ -29,9 +29,12 @@ routerAdd('POST', '/backend/v1/cortesia/registrar', (e) => {
   const nome = (body.nome_completo || '').toString().trim()
   const emailNorm = (body.email || '').toString().trim().toLowerCase()
   const cpfDigits = (body.cpf || '').toString().replace(/\D/g, '')
+  const telefone = (body.telefone || '').toString().trim()
+  const telDigits = telefone.replace(/\D/g, '')
 
   if (nome.length < 3) return e.badRequestError('Informe o nome completo.')
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailNorm)) return e.badRequestError('E-mail inválido.')
+  if (telDigits.length < 10) return e.badRequestError('Informe um telefone válido com DDD.')
 
   const isValidCPF = (s) => {
     const c = (s || '').replace(/\D/g, '')
@@ -153,7 +156,7 @@ routerAdd('POST', '/backend/v1/cortesia/registrar', (e) => {
       part.set('nome_completo', nome)
       part.set('email', emailNorm)
       part.set('cpf', cpfFmt)
-      part.set('telefone', '')
+      part.set('telefone', telefone)
       part.set('tem_empresa', false)
       part.set('nicho', '')
       part.set('ia_uso_diario', 0)
@@ -200,6 +203,8 @@ routerAdd('POST', '/backend/v1/cortesia/registrar', (e) => {
       }
       const categoria = ingresso.getString('tipo_ingresso')
       const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
+      let tel = telDigits
+      if (tel && tel.length <= 11) tel = '55' + tel
       const payload = {
         event_id: 375,
         category_id: categoryId,
@@ -208,7 +213,7 @@ routerAdd('POST', '/backend/v1/cortesia/registrar', (e) => {
           { id: 10133653, value: nome },
           { id: 10133654, value: emailNorm },
           { id: 10133655, value: cpfDigits },
-          { id: 10133656, value: '' },
+          { id: 10133656, value: tel },
           { id: 10133657, value: '' },
           { id: 10133665, value: ingresso.getString('pedido_id') },
         ],
