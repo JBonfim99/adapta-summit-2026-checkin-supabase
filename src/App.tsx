@@ -18,6 +18,7 @@ import ParticipantForm from '@/pages/participant/Form'
 import ParticipantSuccess from '@/pages/participant/Success'
 import ParticipantExpired from '@/pages/participant/Expired'
 import ParticipantTicket from '@/pages/participant/Ticket'
+import Cortesia from '@/pages/participant/Cortesia'
 
 import AdminLogin from '@/pages/admin/Login'
 import AdminDashboard from '@/pages/admin/Dashboard'
@@ -28,6 +29,7 @@ import AdminLogs from '@/pages/admin/Logs'
 import AdminDispatch from '@/pages/admin/Disparo'
 import AdminDispatchWhatsApp from '@/pages/admin/DisparoWhatsApp'
 import AdminInsights from '@/pages/admin/Insights'
+import AdminCortesias from '@/pages/admin/Cortesias'
 
 function PreCredenciamentoRedirect() {
   const { token } = useParams()
@@ -101,6 +103,7 @@ const App = () => (
               <Route path="/participante/expirado" element={<ParticipantExpired />} />
               <Route path="/ingresso" element={<ParticipantTicket />} />
               <Route path="/politica-de-privacidade" element={<PrivacyPolicy />} />
+              <Route path="/cortesia" element={<Cortesia />} />
               <Route path="/participante" element={<ParticipantForm />} />
               <Route path="/pre-credenciamento/:token" element={<PreCredenciamentoRedirect />} />
               <Route path="/credenciamento" element={<CredenciamentoRedirect />} />
@@ -112,6 +115,7 @@ const App = () => (
               <Route path="importar" element={<AdminImport />} />
               <Route path="compradores" element={<AdminCompradores />} />
               <Route path="participantes" element={<AdminParticipants />} />
+              <Route path="cortesias" element={<AdminCortesias />} />
               <Route path="insights" element={<AdminInsights />} />
               <Route path="disparo" element={<AdminDispatch />} />
               <Route path="disparo-whatsapp" element={<AdminDispatchWhatsApp />} />
