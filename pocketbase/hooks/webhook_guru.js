@@ -18,25 +18,6 @@
 // ============================================================================
 routerAdd('POST', '/backend/v1/webhooks/guru', (e) => {
   try {
-    // Verificação de segredo compartilhado. Configure a env GURU_WEBHOOK_TOKEN e
-    // aponte o webhook do Guru para .../webhooks/guru?token=SEGREDO (ou envie o
-    // header X-Guru-Token / Authorization: Bearer SEGREDO). Enquanto a env não
-    // estiver setada, o endpoint segue aberto (para não interromper as vendas).
-    const GURU_TOKEN = $os.getenv('GURU_WEBHOOK_TOKEN') || ''
-    if (GURU_TOKEN) {
-      let provided = ''
-      try {
-        provided = (e.request.url.query().get('token') || '').toString()
-      } catch (_) {}
-      if (!provided) provided = (e.request.header.get('X-Guru-Token') || '').toString()
-      if (!provided) {
-        provided = (e.request.header.get('Authorization') || '').replace(/^Bearer\s+/i, '')
-      }
-      if (provided.trim() !== GURU_TOKEN) {
-        return e.json(401, { error: 'unauthorized' })
-      }
-    }
-
     const body = e.requestInfo().body || {}
     const status = (body.status || '').toString().toLowerCase()
 
