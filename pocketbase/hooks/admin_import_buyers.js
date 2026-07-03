@@ -4,7 +4,102 @@ routerAdd(
   (e) => {
     const body = e.requestInfo().body || {}
     const rows = body.rows || []
+    const enviarEmail = body.enviar_email === true || body.enviar_email === 'true'
+    const providedDisparoId = (body.disparo_id || '').toString()
     let imported = 0
+
+    // --- Preparação do e-mail (resolve template pelo NOME e cria/reaproveita o
+    //     disparo). Só o 1º lote resolve/cria; os demais reusam o disparo_id. ---
+    const templateNome = 'Skip-Summit26-Send-Comprador'
+    let templateId = ''
+    let disparoId = ''
+    let emailSkipped = false
+    let emailReason = ''
+    let queued = 0
+
+    if (enviarEmail) {
+      if (providedDisparoId) {
+        try {
+          const d = $app.findRecordById('disparos', providedDisparoId)
+          disparoId = d.id
+          templateId = d.getString('template_id')
+        } catch (_) {
+          emailSkipped = true
+          emailReason = 'Disparo não encontrado'
+        }
+      } else {
+        const apiKey = $os.getenv('SENDGRID_API_KEY')
+        if (!apiKey) {
+          emailSkipped = true
+          emailReason = 'SENDGRID_API_KEY não configurada'
+        } else {
+          const decodeBody = (b) => {
+            if (b == null) return ''
+            if (typeof b === 'string') return b
+            try {
+              return new TextDecoder().decode(b)
+            } catch (_) {}
+            try {
+              let s = ''
+              for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i])
+              return s
+            } catch (_) {}
+            return ''
+          }
+          try {
+            const res = $http.send({
+              url: 'https://api.sendgrid.com/v3/templates?generations=dynamic&page_size=200',
+              method: 'GET',
+              headers: { Authorization: 'Bearer ' + apiKey },
+              timeout: 20,
+            })
+            let parsed = {}
+            try {
+              parsed = JSON.parse(decodeBody(res.body))
+            } catch (_) {}
+            const list = parsed.result || parsed.templates || []
+            for (let i = 0; i < list.length; i++) {
+              if (list[i] && list[i].name === templateNome && list[i].id) {
+                templateId = list[i].id
+                break
+              }
+            }
+            if (!templateId) {
+              emailSkipped = true
+              emailReason = 'Template "' + templateNome + '" não encontrado no SendGrid'
+            }
+          } catch (err) {
+            emailSkipped = true
+            emailReason =
+              'Falha ao consultar o SendGrid: ' + (err && err.message ? err.message : 'erro')
+          }
+        }
+        if (templateId) {
+          try {
+            const disparosColl = $app.findCollectionByNameOrId('disparos')
+            const disparo = new Record(disparosColl)
+            disparo.set(
+              'nome',
+              'Importação de compradores — ' + new Date().toISOString().substring(0, 10),
+            )
+            disparo.set('template_id', templateId)
+            disparo.set('template_nome', templateNome)
+            disparo.set('cluster', 'importacao')
+            disparo.set('audience', 'compradores')
+            disparo.set('total', 0)
+            disparo.set('enviados', 0)
+            disparo.set('erros', 0)
+            disparo.set('status', 'em_andamento')
+            $app.save(disparo)
+            disparoId = disparo.id
+          } catch (err) {
+            emailSkipped = true
+            emailReason = 'Falha ao criar o disparo'
+          }
+        }
+      }
+    }
+    const doEmail = enviarEmail && !emailSkipped && !!templateId && !!disparoId
 
     $app.runInTransaction((txApp) => {
       const compradoresCollection = txApp.findCollectionByNameOrId('compradores')
@@ -78,6 +173,18 @@ routerAdd(
           txApp.save(comprador)
         }
 
+        // Marca o comprador na fila de e-mail (só desta rodada).
+        if (doEmail && comprador.getString('acesso_status') !== 'enviando') {
+          comprador.set('acesso_status', 'na_fila')
+          comprador.set('acesso_template_id', templateId)
+          comprador.set('acesso_disparo_id', disparoId)
+          comprador.set('acesso_tentativas', 0)
+          comprador.set('acesso_erro', '')
+          comprador.set('acesso_claim', '')
+          txApp.save(comprador)
+          queued++
+        }
+
         for (let i = 0; i < data.qtd_gold; i++) {
           const ingresso = new Record(ingressosCollection)
           ingresso.set('comprador_id', comprador.id)
@@ -120,7 +227,27 @@ routerAdd(
       }
     })
 
-    return e.json(200, { imported })
+    // Atualiza o total do disparo (soma incremental entre os lotes).
+    if (doEmail && queued > 0) {
+      try {
+        const d = $app.findRecordById('disparos', disparoId)
+        d.set('total', (Number(d.get('total')) || 0) + queued)
+        $app.save(d)
+      } catch (_) {}
+    }
+
+    return e.json(200, {
+      imported: imported,
+      email: {
+        enabled: enviarEmail,
+        disparo_id: disparoId,
+        template_id: templateId,
+        template_nome: templateNome,
+        queued: queued,
+        skipped: emailSkipped,
+        reason: emailReason,
+      },
+    })
   },
   $apis.requireAuth(),
 )

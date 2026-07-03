@@ -20,6 +20,7 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 
 type Step = 'upload' | 'mapping' | 'summary' | 'importing'
 
@@ -29,6 +30,7 @@ export default function AdminImport() {
   const [progress, setProgress] = useState(0)
   const [headers, setHeaders] = useState<string[]>([])
   const [lines, setLines] = useState<string[]>([])
+  const [sendEmail, setSendEmail] = useState(false)
   const { toast } = useToast()
 
   const [mapping, setMapping] = useState({
@@ -201,26 +203,47 @@ export default function AdminImport() {
     const CHUNK = 200
     const totalChunks = Math.max(1, Math.ceil(rows.length / CHUNK))
     let importedTotal = 0
+    let emailAtivo = sendEmail
+    let emailDisparoId = ''
+    let emailQueuedTotal = 0
+    let emailSkipReason = ''
 
     try {
       for (let c = 0; c < totalChunks; c++) {
         const chunk = rows.slice(c * CHUNK, (c + 1) * CHUNK)
-        const res = await pb.send('/backend/v1/admin/import-buyers', {
+        const res: any = await pb.send('/backend/v1/admin/import-buyers', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rows: chunk }),
+          body: JSON.stringify({
+            rows: chunk,
+            enviar_email: emailAtivo,
+            disparo_id: emailDisparoId,
+          }),
         })
         importedTotal += res.imported || 0
+        if (emailAtivo && res.email) {
+          if (res.email.skipped) {
+            emailAtivo = false
+            emailSkipReason = res.email.reason || 'e-mail não enviado'
+          } else {
+            if (res.email.disparo_id) emailDisparoId = res.email.disparo_id
+            emailQueuedTotal += res.email.queued || 0
+          }
+        }
         setProgress(Math.round(((c + 1) / totalChunks) * 100))
       }
 
       setTimeout(() => {
         setStep('upload')
         setProgress(0)
-        toast({
-          title: 'Importação concluída',
-          description: `Sucesso! ${importedTotal} ingressos gerados.`,
-        })
+        setSendEmail(false)
+        let desc = `Sucesso! ${importedTotal} ingressos gerados.`
+        if (sendEmail) {
+          desc += emailSkipReason
+            ? ` E-mails NÃO enviados: ${emailSkipReason}.`
+            : ` ${emailQueuedTotal} comprador(es) entraram na fila de e-mail.`
+        }
+        toast({ title: 'Importação concluída', description: desc })
       }, 500)
     } catch (err: any) {
       setStep('summary')
@@ -378,6 +401,22 @@ export default function AdminImport() {
               A deduplicação é por <strong>e-mail</strong> (mesma regra da importação). Se o mesmo
               e-mail aparecer em mais de uma linha, os ingressos são somados no mesmo comprador.
             </p>
+
+            <div className="flex items-start gap-3 rounded-lg border p-3 bg-slate-50/50">
+              <Checkbox
+                id="send-email"
+                checked={sendEmail}
+                onCheckedChange={(c) => setSendEmail(c === true)}
+                className="mt-0.5"
+              />
+              <label htmlFor="send-email" className="text-sm cursor-pointer select-none">
+                <span className="font-medium">Enviar e-mail ao final da importação?</span>
+                <span className="block text-muted-foreground text-xs mt-0.5">
+                  Somente os compradores importados nesta rodada recebem o e-mail de acesso
+                  (template <span className="font-mono">Skip-Summit26-Send-Comprador</span>).
+                </span>
+              </label>
+            </div>
           </CardContent>
           <CardFooter className="flex justify-end gap-2 border-t pt-4">
             <Button variant="outline" onClick={() => setStep('mapping')}>
