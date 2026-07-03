@@ -97,8 +97,11 @@ export default function AdminLogs() {
 
   // Estado de erro real do ingresso (não só do log): credenciado => nunca é erro.
   const rowIsError = (log: any) => {
-    if (MANUAL_EVENTOS[log.evento]) return false
     const ing = log.expand?.ingresso_id
+    // Ingresso vivo, sem credencial na INAC e com webhook em erro CONTINUA erro —
+    // mesmo que o evento mais recente tenha sido uma edição/troca manual.
+    if (ing && !ing.inac_id && ing.status_webhook === 'erro') return true
+    if (MANUAL_EVENTOS[log.evento]) return false
     if (ing?.inac_id) return false
     const sw = ing?.status_webhook
     return sw ? sw === 'erro' : !isOk(log.status)
@@ -215,20 +218,20 @@ export default function AdminLogs() {
               return (
                 <TableRow key={log.id}>
                   <TableCell>
-                    {MANUAL_EVENTOS[log.evento] ? (
+                    {err ? (
+                      <Badge variant="outline" className="border-rose-200 bg-rose-50 text-rose-700">
+                        Erro
+                      </Badge>
+                    ) : MANUAL_EVENTOS[log.evento] ? (
                       <Badge variant="outline" className={MANUAL_EVENTOS[log.evento].cls}>
                         {MANUAL_EVENTOS[log.evento].label}
                       </Badge>
                     ) : (
                       <Badge
                         variant="outline"
-                        className={
-                          err
-                            ? 'border-rose-200 bg-rose-50 text-rose-700'
-                            : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        }
+                        className="border-emerald-200 bg-emerald-50 text-emerald-700"
                       >
-                        {err ? 'Erro' : 'OK'}
+                        OK
                       </Badge>
                     )}
                   </TableCell>
