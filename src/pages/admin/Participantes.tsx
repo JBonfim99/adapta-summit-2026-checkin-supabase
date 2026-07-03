@@ -28,6 +28,7 @@ import { AddParticipantDialog } from '@/components/admin/AddParticipantDialog'
 export default function AdminParticipants() {
   const [data, setData] = useState<any[]>([])
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [typeFilter, setTypeFilter] = useState('all')
   const [loading, setLoading] = useState(true)
@@ -41,55 +42,53 @@ export default function AdminParticipants() {
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
   const [participantTicket, setParticipantTicket] = useState<any | null>(null)
 
+  const buildParams = (pg: number, pp: number) => {
+    const params = new URLSearchParams({ page: String(pg), perPage: String(pp) })
+    if (debouncedSearch) params.set('q', debouncedSearch)
+    if (statusFilter !== 'all') params.set('status', statusFilter)
+    if (typeFilter !== 'all') params.set('tipo', typeFilter)
+    return params.toString()
+  }
+
   const loadData = () => {
     setLoading(true)
-    const filters = []
-    if (search) {
-      const s = search.replace(/"/g, '')
-      filters.push(
-        `(comprador_id.email ~ "${s}" || pedido_id ~ "${s}" || participante_id.nome_completo ~ "${s}" || participante_id.email ~ "${s}")`,
-      )
-    }
-    if (statusFilter !== 'all') {
-      filters.push(`status = "${statusFilter}"`)
-    }
-    if (typeFilter !== 'all') {
-      filters.push(`tipo_ingresso = "${typeFilter}"`)
-    }
-    const filterStr = filters.join(' && ')
-
-    pb.collection('ingressos')
-      .getList(page, limit, {
-        expand: 'comprador_id,participante_id',
-        sort: '-created',
-        filter: filterStr,
-      })
-      .then((res) => {
-        setData(res.items)
+    pb.send(`/backend/v1/admin/participants/search?${buildParams(page, limit)}`)
+      .then((res: any) => {
+        setData(res.items || [])
         setTotalPages(res.totalPages || 1)
         setLoading(false)
       })
       .catch(() => setLoading(false))
   }
 
+  // Debounce da busca: só dispara ~350ms após a última tecla (evita 1 request por caractere).
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search)
+      setPage(1)
+    }, 350)
+    return () => clearTimeout(t)
+  }, [search])
+
   useEffect(() => {
     loadData()
-  }, [page, search, statusFilter, typeFilter])
+  }, [page, debouncedSearch, statusFilter, typeFilter])
 
   const handleExportCSV = async () => {
     setExporting(true)
     try {
-      let filterStr = ''
-      if (search) {
-        const s = search.replace(/"/g, '')
-        filterStr = `comprador_id.email ~ "${s}" || pedido_id ~ "${s}" || participante_id.nome_completo ~ "${s}" || participante_id.email ~ "${s}"`
+      const perPageExp = 500
+      let pageExp = 1
+      let allTickets: any[] = []
+      // Puxa todas as páginas do endpoint de busca (respeitando os filtros atuais).
+      for (let guard = 0; guard < 500; guard++) {
+        const res: any = await pb.send(
+          `/backend/v1/admin/participants/search?${buildParams(pageExp, perPageExp)}`,
+        )
+        allTickets = allTickets.concat(res.items || [])
+        if (pageExp >= (res.totalPages || 1)) break
+        pageExp++
       }
-
-      const allTickets = await pb.collection('ingressos').getFullList({
-        expand: 'comprador_id,participante_id',
-        sort: '-created',
-        filter: filterStr,
-      })
 
       const escapeCSV = (str: any) => {
         if (!str) return '""'
@@ -199,10 +198,7 @@ export default function AdminParticipants() {
             placeholder="Buscar por nome, email ou ID do ingresso..."
             className="pl-9 bg-white"
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value)
-              setPage(1)
-            }}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <select
