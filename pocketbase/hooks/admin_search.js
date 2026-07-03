@@ -66,6 +66,7 @@ routerAdd(
           pedido_id: '',
           tipo_ingresso: '',
           status: '',
+          inac_id: '',
           comprador_email: '',
           part_id: '',
           nome_completo: '',
@@ -88,6 +89,7 @@ routerAdd(
 
       const sql =
         'SELECT i.id as id, i.pedido_id as pedido_id, i.tipo_ingresso as tipo_ingresso, i.status as status, ' +
+        "COALESCE(i.inac_id,'') as inac_id, " +
         "COALESCE(c.email,'') as comprador_email, " +
         "COALESCE(p.id,'') as part_id, COALESCE(p.nome_completo,'') as nome_completo, COALESCE(p.email,'') as email, COALESCE(p.cpf,'') as cpf, COALESCE(p.telefone,'') as telefone, " +
         "COALESCE(p.tem_empresa,0) as tem_empresa, COALESCE(p.nome_empresa,'') as nome_empresa, COALESCE(p.cargo,'') as cargo, COALESCE(p.profissao,'') as profissao, COALESCE(p.nicho,'') as nicho, " +
@@ -109,6 +111,7 @@ routerAdd(
           pedido_id: r.pedido_id,
           tipo_ingresso: r.tipo_ingresso,
           status: r.status,
+          inac_id: r.inac_id,
           expand: {
             comprador_id: r.comprador_email ? { email: r.comprador_email } : undefined,
             participante_id: hasPart

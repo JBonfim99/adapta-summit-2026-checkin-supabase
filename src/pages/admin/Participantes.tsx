@@ -9,7 +9,15 @@ import {
 } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Download, RefreshCcw, Loader2, Link as LinkIcon, UserPlus } from 'lucide-react'
+import {
+  Search,
+  Download,
+  RefreshCcw,
+  Loader2,
+  Link as LinkIcon,
+  UserPlus,
+  Pencil,
+} from 'lucide-react'
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import pb from '@/lib/pocketbase/client'
@@ -24,6 +32,7 @@ import { useToast } from '@/hooks/use-toast'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { AddParticipantDialog } from '@/components/admin/AddParticipantDialog'
+import { EditParticipantDialog } from '@/components/admin/EditParticipantDialog'
 
 export default function AdminParticipants() {
   const [data, setData] = useState<any[]>([])
@@ -41,6 +50,7 @@ export default function AdminParticipants() {
   const [exporting, setExporting] = useState(false)
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
   const [participantTicket, setParticipantTicket] = useState<any | null>(null)
+  const [editTicket, setEditTicket] = useState<any | null>(null)
 
   const buildParams = (pg: number, pp: number) => {
     const params = new URLSearchParams({ page: String(pg), perPage: String(pp) })
@@ -342,6 +352,16 @@ export default function AdminParticipants() {
                             </Button>
                           </>
                         )}
+                        {row.inac_id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1"
+                            onClick={() => setEditTicket(row)}
+                          >
+                            <Pencil className="w-3.5 h-3.5" /> Editar
+                          </Button>
+                        )}
                         {row.expand?.participante_id && (
                           <Button
                             variant="ghost"
@@ -530,6 +550,13 @@ export default function AdminParticipants() {
         ticket={participantTicket}
         open={!!participantTicket}
         onOpenChange={(val: boolean) => !val && setParticipantTicket(null)}
+        onSuccess={loadData}
+      />
+
+      <EditParticipantDialog
+        ticket={editTicket}
+        open={!!editTicket}
+        onOpenChange={(val: boolean) => !val && setEditTicket(null)}
         onSuccess={loadData}
       />
     </div>
