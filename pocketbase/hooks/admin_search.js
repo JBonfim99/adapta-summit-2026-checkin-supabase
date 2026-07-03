@@ -1,8 +1,14 @@
 // Busca de participantes/ingressos para a tela de Gestão de Participantes.
-// Feita em SQL (JOIN) porque filtrar pela API do PocketBase usando campos de
-// relação aninhados (comprador_id.email, participante_id.nome_completo) retorna
-// 400. Aqui resolvemos por join direto — rápido e sem essa limitação.
-// Retorna no MESMO formato do getList (com expand) pra tela não precisar mudar.
+// Feita em SQL porque filtrar pela API do PocketBase por campos de relação
+// aninhados retorna 400. Retorna no MESMO formato do getList (com expand).
+//
+// Performance:
+//  - SEM busca textual: conta direto na ingressos (sem joins) e lista com
+//    ORDER BY created DESC LIMIT usando o índice idx_ingressos_created -> lê só
+//    as 10 linhas da página.
+//  - COM busca textual: o scan roda SEM ORDER BY (varredura sequencial, rápida),
+//    ordena/pagina em memória e só então busca os dados completos das ~10 linhas
+//    da página. Evita o acesso aleatório que o índice de created causaria.
 routerAdd(
   'GET',
   '/backend/v1/admin/participants/search',
@@ -26,52 +32,22 @@ routerAdd(
       if (perPage > 500) perPage = 500
       const offset = (page - 1) * perPage
 
-      const conds = []
-      const params = {}
-      if (q) {
-        params.like = '%' + q + '%'
-        conds.push(
-          '(lower(c.email) LIKE {:like} OR lower(i.pedido_id) LIKE {:like} OR lower(p.nome_completo) LIKE {:like} OR lower(p.email) LIKE {:like})',
-        )
-      }
-      if (status === 'Pendente' || status === 'Pré-Credenciado') {
-        params.status = status
-        conds.push('i.status = {:status}')
-      }
-      if (tipo === 'GOLD' || tipo === 'PLATINUM') {
-        params.tipo = tipo
-        conds.push('i.tipo_ingresso = {:tipo}')
-      }
-      const where = conds.length ? 'WHERE ' + conds.join(' AND ') : ''
-      const base =
+      const FROMJOIN =
         'FROM ingressos i ' +
         'LEFT JOIN compradores c ON c.id = i.comprador_id ' +
-        'LEFT JOIN participantes p ON p.id = i.participante_id ' +
-        where
+        'LEFT JOIN participantes p ON p.id = i.participante_id'
 
-      let totalItems = 0
-      try {
-        const cnt = new DynamicModel({ c: 0 })
-        if (q) {
-          // Com busca textual precisa dos joins (procura em comprador/participante).
-          $app
-            .db()
-            .newQuery('SELECT COUNT(*) as c ' + base)
-            .bind(params)
-            .one(cnt)
-        } else {
-          // Sem busca: conta direto na ingressos (sem joins) — muito mais rápido.
-          const wc = []
-          if (status === 'Pendente' || status === 'Pré-Credenciado') wc.push('status = {:status}')
-          if (tipo === 'GOLD' || tipo === 'PLATINUM') wc.push('tipo_ingresso = {:tipo}')
-          const cntSql =
-            'SELECT COUNT(*) as c FROM ingressos' + (wc.length ? ' WHERE ' + wc.join(' AND ') : '')
-          $app.db().newQuery(cntSql).bind(params).one(cnt)
-        }
-        totalItems = cnt.c
-      } catch (_) {}
+      const SELCOLS =
+        'i.id as id, i.pedido_id as pedido_id, i.tipo_ingresso as tipo_ingresso, i.status as status, ' +
+        "COALESCE(i.inac_id,'') as inac_id, " +
+        "COALESCE(c.email,'') as comprador_email, " +
+        "COALESCE(p.id,'') as part_id, COALESCE(p.nome_completo,'') as nome_completo, COALESCE(p.email,'') as email, COALESCE(p.cpf,'') as cpf, COALESCE(p.telefone,'') as telefone, " +
+        "COALESCE(p.tem_empresa,0) as tem_empresa, COALESCE(p.nome_empresa,'') as nome_empresa, COALESCE(p.cargo,'') as cargo, COALESCE(p.profissao,'') as profissao, COALESCE(p.nicho,'') as nicho, " +
+        "COALESCE(p.num_funcionarios,'') as num_funcionarios, COALESCE(p.faturamento_anual,'') as faturamento_anual, " +
+        'COALESCE(p.ia_uso_diario,0) as ia_uso_diario, COALESCE(p.ia_profundidade,0) as ia_profundidade, ' +
+        "COALESCE(p.ia_ferramentas,'') as ia_ferramentas, COALESCE(p.ia_desafio,'') as ia_desafio"
 
-      const rows = arrayOf(
+      const newRowModel = () =>
         new DynamicModel({
           id: '',
           pedido_id: '',
@@ -95,29 +71,11 @@ routerAdd(
           ia_profundidade: 0,
           ia_ferramentas: '',
           ia_desafio: '',
-        }),
-      )
+        })
 
-      const sql =
-        'SELECT i.id as id, i.pedido_id as pedido_id, i.tipo_ingresso as tipo_ingresso, i.status as status, ' +
-        "COALESCE(i.inac_id,'') as inac_id, " +
-        "COALESCE(c.email,'') as comprador_email, " +
-        "COALESCE(p.id,'') as part_id, COALESCE(p.nome_completo,'') as nome_completo, COALESCE(p.email,'') as email, COALESCE(p.cpf,'') as cpf, COALESCE(p.telefone,'') as telefone, " +
-        "COALESCE(p.tem_empresa,0) as tem_empresa, COALESCE(p.nome_empresa,'') as nome_empresa, COALESCE(p.cargo,'') as cargo, COALESCE(p.profissao,'') as profissao, COALESCE(p.nicho,'') as nicho, " +
-        "COALESCE(p.num_funcionarios,'') as num_funcionarios, COALESCE(p.faturamento_anual,'') as faturamento_anual, " +
-        'COALESCE(p.ia_uso_diario,0) as ia_uso_diario, COALESCE(p.ia_profundidade,0) as ia_profundidade, ' +
-        "COALESCE(p.ia_ferramentas,'') as ia_ferramentas, COALESCE(p.ia_desafio,'') as ia_desafio " +
-        base +
-        ' ORDER BY i.created DESC LIMIT {:limit} OFFSET {:offset}'
-      params.limit = perPage
-      params.offset = offset
-      $app.db().newQuery(sql).bind(params).all(rows)
-
-      const items = []
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i]
+      const mapRow = (r) => {
         const hasPart = !!r.part_id
-        items.push({
+        return {
           id: r.id,
           pedido_id: r.pedido_id,
           tipo_ingresso: r.tipo_ingresso,
@@ -145,7 +103,104 @@ routerAdd(
                 }
               : undefined,
           },
-        })
+        }
+      }
+
+      let items = []
+      let totalItems = 0
+
+      if (q) {
+        // ---- COM busca textual: scan SEM order by -> ordena/pagina em memória ----
+        const p2 = { like: '%' + q + '%' }
+        const andC = []
+        if (status === 'Pendente' || status === 'Pré-Credenciado') {
+          andC.push('i.status = {:status}')
+          p2.status = status
+        }
+        if (tipo === 'GOLD' || tipo === 'PLATINUM') {
+          andC.push('i.tipo_ingresso = {:tipo}')
+          p2.tipo = tipo
+        }
+        let matchSql =
+          'SELECT i.id as id, i.created as created ' +
+          FROMJOIN +
+          ' WHERE (lower(c.email) LIKE {:like} OR lower(i.pedido_id) LIKE {:like} OR lower(p.nome_completo) LIKE {:like} OR lower(p.email) LIKE {:like})'
+        if (andC.length) matchSql += ' AND ' + andC.join(' AND ')
+
+        const matched = arrayOf(new DynamicModel({ id: '', created: '' }))
+        $app.db().newQuery(matchSql).bind(p2).all(matched)
+
+        const arr = []
+        for (let i = 0; i < matched.length; i++) {
+          arr.push({ id: matched[i].id, created: matched[i].created })
+        }
+        arr.sort((a, b) => (a.created < b.created ? 1 : a.created > b.created ? -1 : 0))
+        totalItems = arr.length
+
+        const pageSlice = arr.slice(offset, offset + perPage)
+        const pageIds = []
+        for (let i = 0; i < pageSlice.length; i++) {
+          const safe = String(pageSlice[i].id).replace(/[^a-zA-Z0-9]/g, '')
+          if (safe) pageIds.push(safe)
+        }
+
+        if (pageIds.length > 0) {
+          const quoted = "'" + pageIds.join("','") + "'"
+          const rows = arrayOf(newRowModel())
+          $app
+            .db()
+            .newQuery('SELECT ' + SELCOLS + ' ' + FROMJOIN + ' WHERE i.id IN (' + quoted + ')')
+            .all(rows)
+          const byId = {}
+          for (let i = 0; i < rows.length; i++) byId[rows[i].id] = rows[i]
+          for (let i = 0; i < pageIds.length; i++) {
+            const r = byId[pageIds[i]]
+            if (r) items.push(mapRow(r))
+          }
+        }
+      } else {
+        // ---- SEM busca textual: count sem joins + lista pelo índice de created ----
+        const wc = []
+        const params = {}
+        if (status === 'Pendente' || status === 'Pré-Credenciado') {
+          wc.push('status = {:status}')
+          params.status = status
+        }
+        if (tipo === 'GOLD' || tipo === 'PLATINUM') {
+          wc.push('tipo_ingresso = {:tipo}')
+          params.tipo = tipo
+        }
+        const whereCount = wc.length ? ' WHERE ' + wc.join(' AND ') : ''
+        try {
+          const cnt = new DynamicModel({ c: 0 })
+          $app
+            .db()
+            .newQuery('SELECT COUNT(*) as c FROM ingressos' + whereCount)
+            .bind(params)
+            .one(cnt)
+          totalItems = cnt.c
+        } catch (_) {}
+
+        const wi = []
+        if (status === 'Pendente' || status === 'Pré-Credenciado') wi.push('i.status = {:status}')
+        if (tipo === 'GOLD' || tipo === 'PLATINUM') wi.push('i.tipo_ingresso = {:tipo}')
+        const whereMain = wi.length ? ' WHERE ' + wi.join(' AND ') : ''
+        params.limit = perPage
+        params.offset = offset
+        const rows = arrayOf(newRowModel())
+        $app
+          .db()
+          .newQuery(
+            'SELECT ' +
+              SELCOLS +
+              ' ' +
+              FROMJOIN +
+              whereMain +
+              ' ORDER BY i.created DESC LIMIT {:limit} OFFSET {:offset}',
+          )
+          .bind(params)
+          .all(rows)
+        for (let i = 0; i < rows.length; i++) items.push(mapRow(rows[i]))
       }
 
       const totalPages = Math.max(1, Math.ceil(totalItems / perPage))
