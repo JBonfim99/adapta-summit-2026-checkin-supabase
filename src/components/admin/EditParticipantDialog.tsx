@@ -187,7 +187,9 @@ export function EditParticipantDialog({
       }
       toast({
         title: 'Credenciamento atualizado!',
-        description: 'Dados atualizados aqui e na INAC.',
+        description: ticket?.inac_id
+          ? 'Dados atualizados aqui e na INAC.'
+          : 'Dados atualizados. Reenvie pela tela de Logs para credenciar na INAC.',
       })
       onOpenChange(false)
       onSuccess?.()
@@ -206,7 +208,10 @@ export function EditParticipantDialog({
           <DialogDescription>
             Ingresso{' '}
             <span className="font-mono font-semibold text-foreground">{ticket?.pedido_id}</span> (
-            {ticket?.tipo_ingresso}). As alterações são refletidas na INAC.
+            {ticket?.tipo_ingresso}).
+            {ticket?.inac_id
+              ? ' As alterações são refletidas na INAC.'
+              : ' Ainda não está na INAC — as alterações ficam salvas e vão no reenvio.'}
           </DialogDescription>
         </DialogHeader>
 

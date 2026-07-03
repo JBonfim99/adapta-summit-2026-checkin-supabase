@@ -352,7 +352,7 @@ export default function AdminParticipants() {
                             </Button>
                           </>
                         )}
-                        {row.inac_id && (
+                        {row.expand?.participante_id && (
                           <Button
                             variant="ghost"
                             size="sm"

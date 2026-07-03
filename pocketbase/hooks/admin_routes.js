@@ -699,9 +699,6 @@ routerAdd(
       }
 
       const inacId = ingresso.getString('inac_id')
-      if (!inacId) {
-        return e.badRequestError('Este ingresso não está credenciado na INAC.')
-      }
 
       const partId = ingresso.getString('participante_id')
       let part
@@ -794,67 +791,72 @@ routerAdd(
         }
       }
 
-      // ---- INAC /edit ANTES de tocar no banco (obrigatório) ----
-      const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL') || ''
-      const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN') || ''
-      if (!INAC_AUTH_TOKEN) return e.badRequestError('INAC_AUTH_TOKEN não configurado')
-      let editUrl = 'https://painel.credenciamento.digital/apiservicev1/attendees/edit'
-      if (/\/attendees\/add\/?$/.test(INAC_WEBHOOK_URL)) {
-        editUrl = INAC_WEBHOOK_URL.replace(/\/add\/?$/, '/edit')
-      }
-      let tel = onlyDigits(telefone)
-      if (tel && tel.length <= 11) tel = '55' + tel
-      const categoria = ingresso.getString('tipo_ingresso')
-      const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
-      const payload = {
-        id: parseInt(inacId, 10) || inacId,
-        event_id: 375,
-        category_id: categoryId,
-        status: 'active',
-        fields: [
-          { id: 10133653, value: sanitize(nomeCompleto) },
-          { id: 10133654, value: emailNorm },
-          { id: 10133655, value: onlyDigits(cpf) },
-          { id: 10133656, value: tel },
-          { id: 10133657, value: sanitize(nomeEmpresa || profissao) },
-          { id: 10133665, value: ingresso.getString('pedido_id') },
-        ],
-      }
+      // ---- Se credenciado (tem inac_id), reflete na INAC via /edit ANTES de
+      //      tocar no banco (obrigatório, rollback). Se ainda NÃO está na INAC
+      //      (ex.: /add falhou), apenas atualiza local — o reenvio fará o /add. ----
+      let inacMsg = 'sem credencial na INAC (atualização local)'
+      if (inacId) {
+        const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL') || ''
+        const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN') || ''
+        if (!INAC_AUTH_TOKEN) return e.badRequestError('INAC_AUTH_TOKEN não configurado')
+        let editUrl = 'https://painel.credenciamento.digital/apiservicev1/attendees/edit'
+        if (/\/attendees\/add\/?$/.test(INAC_WEBHOOK_URL)) {
+          editUrl = INAC_WEBHOOK_URL.replace(/\/add\/?$/, '/edit')
+        }
+        let tel = onlyDigits(telefone)
+        if (tel && tel.length <= 11) tel = '55' + tel
+        const categoria = ingresso.getString('tipo_ingresso')
+        const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
+        const payload = {
+          id: parseInt(inacId, 10) || inacId,
+          event_id: 375,
+          category_id: categoryId,
+          status: 'active',
+          fields: [
+            { id: 10133653, value: sanitize(nomeCompleto) },
+            { id: 10133654, value: emailNorm },
+            { id: 10133655, value: onlyDigits(cpf) },
+            { id: 10133656, value: tel },
+            { id: 10133657, value: sanitize(nomeEmpresa || profissao) },
+            { id: 10133665, value: ingresso.getString('pedido_id') },
+          ],
+        }
 
-      let inacOk = false
-      let inacMsg = ''
-      try {
-        const res = $http.send({
-          url: editUrl,
-          method: 'PUT',
-          headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          timeout: 15,
-        })
-        let ok2 = res.statusCode >= 200 && res.statusCode < 300
-        let respTxt = ''
+        let inacOk = false
+        inacMsg = ''
         try {
-          respTxt = typeof res.body === 'string' ? res.body : new TextDecoder().decode(res.body)
-        } catch (_) {}
-        try {
-          const d = JSON.parse(respTxt)
-          if (d && d.status === false) ok2 = false
-        } catch (_) {}
-        inacOk = ok2
-        inacMsg = 'HTTP ' + res.statusCode + (ok2 ? '' : ' ' + respTxt.substring(0, 200))
-      } catch (err) {
-        inacMsg = err && err.message ? err.message : 'erro'
+          const res = $http.send({
+            url: editUrl,
+            method: 'PUT',
+            headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            timeout: 15,
+          })
+          let ok2 = res.statusCode >= 200 && res.statusCode < 300
+          let respTxt = ''
+          try {
+            respTxt = typeof res.body === 'string' ? res.body : new TextDecoder().decode(res.body)
+          } catch (_) {}
+          try {
+            const d = JSON.parse(respTxt)
+            if (d && d.status === false) ok2 = false
+          } catch (_) {}
+          inacOk = ok2
+          inacMsg = 'HTTP ' + res.statusCode + (ok2 ? '' : ' ' + respTxt.substring(0, 200))
+        } catch (err) {
+          inacMsg = err && err.message ? err.message : 'erro'
+        }
+
+        if (!inacOk) {
+          return e.json(200, {
+            success: false,
+            inac_error: true,
+            error: 'Falha ao editar o credenciamento na INAC (' + inacMsg + '). Nada foi alterado.',
+          })
+        }
       }
 
-      if (!inacOk) {
-        return e.json(200, {
-          success: false,
-          inac_error: true,
-          error: 'Falha ao editar o credenciamento na INAC (' + inacMsg + '). Nada foi alterado.',
-        })
-      }
-
-      // ---- INAC OK: atualiza o participante localmente ----
+      // ---- Atualiza o participante localmente ----
       try {
         part.set('nome_completo', nomeCompleto)
         part.set('email', emailNorm)
@@ -917,7 +919,10 @@ routerAdd(
             },
           }),
         )
-        log.set('response', 'INAC /edit OK (' + inacMsg + ')')
+        log.set(
+          'response',
+          inacId ? 'INAC /edit OK (' + inacMsg + ')' : 'Atualização local — ' + inacMsg,
+        )
         $app.save(log)
       } catch (_) {}
 
