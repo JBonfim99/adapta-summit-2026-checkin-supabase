@@ -240,6 +240,17 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
         return ''
       }
       const onlyDigits = (s) => (s || '').replace(/\D/g, '')
+      const sanitize = (s) => {
+        if (s == null) return ''
+        let t = String(s)
+        t = t.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+        t = t.replace(
+          /[\u200D\u20E3\u2190-\u21FF\u2300-\u27BF\u2600-\u26FF\u2B00-\u2BFF\uFE00-\uFE0F]/g,
+          '',
+        )
+        t = t.replace(/[\u0000-\u001F\u007F]/g, '')
+        return t.replace(/\s+/g, ' ').trim()
+      }
       let tel = onlyDigits(body.telefone)
       if (tel && tel.length <= 11) tel = '55' + tel
       const categoria = ingresso.getString('tipo_ingresso')
@@ -249,11 +260,11 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
         category_id: categoryId,
         status: 'active',
         fields: [
-          { id: 10133653, value: body.nome_completo || '' },
+          { id: 10133653, value: sanitize(body.nome_completo) },
           { id: 10133654, value: emailNorm },
           { id: 10133655, value: onlyDigits(body.cpf) },
           { id: 10133656, value: tel },
-          { id: 10133657, value: body.nome_empresa || body.profissao || '' },
+          { id: 10133657, value: sanitize(body.nome_empresa || body.profissao || '') },
           { id: 10133665, value: ingresso.getString('pedido_id') },
         ],
       }

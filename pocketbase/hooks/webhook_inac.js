@@ -54,6 +54,17 @@ routerAdd(
 
       const part = $app.findRecordById('participantes', partId)
       const onlyDigits = (s) => (s || '').replace(/\D/g, '')
+      const sanitize = (s) => {
+        if (s == null) return ''
+        let t = String(s)
+        t = t.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+        t = t.replace(
+          /[\u200D\u20E3\u2190-\u21FF\u2300-\u27BF\u2600-\u26FF\u2B00-\u2BFF\uFE00-\uFE0F]/g,
+          '',
+        )
+        t = t.replace(/[\u0000-\u001F\u007F]/g, '')
+        return t.replace(/\s+/g, ' ').trim()
+      }
       let tel = onlyDigits(part.getString('telefone'))
       if (tel && tel.length <= 11) tel = '55' + tel
       const categoryId = ingresso.getString('tipo_ingresso') === 'PLATINUM' ? 6125 : 6123
@@ -63,11 +74,14 @@ routerAdd(
         category_id: categoryId,
         status: 'active',
         fields: [
-          { id: 10133653, value: part.getString('nome_completo') },
+          { id: 10133653, value: sanitize(part.getString('nome_completo')) },
           { id: 10133654, value: part.getString('email') },
           { id: 10133655, value: onlyDigits(part.getString('cpf')) },
           { id: 10133656, value: tel },
-          { id: 10133657, value: part.getString('nome_empresa') || part.getString('profissao') },
+          {
+            id: 10133657,
+            value: sanitize(part.getString('nome_empresa') || part.getString('profissao')),
+          },
           { id: 10133665, value: ingresso.getString('pedido_id') },
         ],
       }
@@ -173,6 +187,17 @@ routerAdd(
       return ''
     }
     const onlyDigits = (s) => (s || '').replace(/\D/g, '')
+    const sanitize = (s) => {
+      if (s == null) return ''
+      let t = String(s)
+      t = t.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+      t = t.replace(
+        /[\u200D\u20E3\u2190-\u21FF\u2300-\u27BF\u2600-\u26FF\u2B00-\u2BFF\uFE00-\uFE0F]/g,
+        '',
+      )
+      t = t.replace(/[\u0000-\u001F\u007F]/g, '')
+      return t.replace(/\s+/g, ' ').trim()
+    }
 
     let list = []
     try {
@@ -213,11 +238,14 @@ routerAdd(
         category_id: categoryId,
         status: 'active',
         fields: [
-          { id: 10133653, value: part.getString('nome_completo') },
+          { id: 10133653, value: sanitize(part.getString('nome_completo')) },
           { id: 10133654, value: part.getString('email') },
           { id: 10133655, value: onlyDigits(part.getString('cpf')) },
           { id: 10133656, value: tel },
-          { id: 10133657, value: part.getString('nome_empresa') || part.getString('profissao') },
+          {
+            id: 10133657,
+            value: sanitize(part.getString('nome_empresa') || part.getString('profissao')),
+          },
           { id: 10133665, value: ingresso.getString('pedido_id') },
         ],
       }
