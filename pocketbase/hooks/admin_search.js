@@ -52,11 +52,22 @@ routerAdd(
       let totalItems = 0
       try {
         const cnt = new DynamicModel({ c: 0 })
-        $app
-          .db()
-          .newQuery('SELECT COUNT(*) as c ' + base)
-          .bind(params)
-          .one(cnt)
+        if (q) {
+          // Com busca textual precisa dos joins (procura em comprador/participante).
+          $app
+            .db()
+            .newQuery('SELECT COUNT(*) as c ' + base)
+            .bind(params)
+            .one(cnt)
+        } else {
+          // Sem busca: conta direto na ingressos (sem joins) — muito mais rápido.
+          const wc = []
+          if (status === 'Pendente' || status === 'Pré-Credenciado') wc.push('status = {:status}')
+          if (tipo === 'GOLD' || tipo === 'PLATINUM') wc.push('tipo_ingresso = {:tipo}')
+          const cntSql =
+            'SELECT COUNT(*) as c FROM ingressos' + (wc.length ? ' WHERE ' + wc.join(' AND ') : '')
+          $app.db().newQuery(cntSql).bind(params).one(cnt)
+        }
         totalItems = cnt.c
       } catch (_) {}
 
