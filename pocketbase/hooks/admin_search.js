@@ -88,12 +88,12 @@ routerAdd(
 
       const sql =
         'SELECT i.id as id, i.pedido_id as pedido_id, i.tipo_ingresso as tipo_ingresso, i.status as status, ' +
-        'c.email as comprador_email, ' +
-        'p.id as part_id, p.nome_completo as nome_completo, p.email as email, p.cpf as cpf, p.telefone as telefone, ' +
-        'p.tem_empresa as tem_empresa, p.nome_empresa as nome_empresa, p.cargo as cargo, p.profissao as profissao, p.nicho as nicho, ' +
-        'p.num_funcionarios as num_funcionarios, p.faturamento_anual as faturamento_anual, ' +
-        'p.ia_uso_diario as ia_uso_diario, p.ia_profundidade as ia_profundidade, ' +
-        'p.ia_ferramentas as ia_ferramentas, p.ia_desafio as ia_desafio ' +
+        "COALESCE(c.email,'') as comprador_email, " +
+        "COALESCE(p.id,'') as part_id, COALESCE(p.nome_completo,'') as nome_completo, COALESCE(p.email,'') as email, COALESCE(p.cpf,'') as cpf, COALESCE(p.telefone,'') as telefone, " +
+        "COALESCE(p.tem_empresa,0) as tem_empresa, COALESCE(p.nome_empresa,'') as nome_empresa, COALESCE(p.cargo,'') as cargo, COALESCE(p.profissao,'') as profissao, COALESCE(p.nicho,'') as nicho, " +
+        "COALESCE(p.num_funcionarios,'') as num_funcionarios, COALESCE(p.faturamento_anual,'') as faturamento_anual, " +
+        'COALESCE(p.ia_uso_diario,0) as ia_uso_diario, COALESCE(p.ia_profundidade,0) as ia_profundidade, ' +
+        "COALESCE(p.ia_ferramentas,'') as ia_ferramentas, COALESCE(p.ia_desafio,'') as ia_desafio " +
         base +
         ' ORDER BY i.created DESC LIMIT {:limit} OFFSET {:offset}'
       params.limit = perPage
