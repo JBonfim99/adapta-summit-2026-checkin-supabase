@@ -386,7 +386,7 @@ routerAdd(
   '/backend/v1/admin/stats',
   (e) => {
     try {
-      const ingressos = $app.findRecordsByFilter('ingressos', "id != ''", '', 10000, 0)
+      const ingressos = $app.findRecordsByFilter('ingressos', "id != ''", '', 100000, 0)
       const total = ingressos.length
       let preenchidos = 0
       let pendentes = 0
