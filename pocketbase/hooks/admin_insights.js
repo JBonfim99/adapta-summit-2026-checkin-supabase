@@ -6,8 +6,9 @@ routerAdd(
   '/backend/v1/admin/insights',
   (e) => {
     try {
-      const parts = $app.findRecordsByFilter('participantes', "id != ''", '', 100000, 0)
-      const ings = $app.findRecordsByFilter('ingressos', "id != ''", '', 100000, 0)
+      // limite 0 = sem teto: retorna TODOS os registros (métricas exatas).
+      const parts = $app.findRecordsByFilter('participantes', "id != ''", '', 0, 0)
+      const ings = $app.findRecordsByFilter('ingressos', "id != ''", '', 0, 0)
 
       // participante_id -> tipo de ingresso e data de preenchimento
       const tipoByPart = {}

@@ -445,16 +445,10 @@ routerAdd(
   (e) => {
     try {
       const id = e.request.pathValue('id')
-      const ings = $app.findRecordsByFilter(
-        'ingressos',
-        'cortesia_id = {:cid}',
-        '-created',
-        2000,
-        0,
-        {
-          cid: id,
-        },
-      )
+      // limite 0 = sem teto: retorna TODOS os registros da cortesia.
+      const ings = $app.findRecordsByFilter('ingressos', 'cortesia_id = {:cid}', '-created', 0, 0, {
+        cid: id,
+      })
       const out = []
       for (let i = 0; i < ings.length; i++) {
         const ing = ings[i]
