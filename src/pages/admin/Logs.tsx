@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Table,
   TableBody,
@@ -47,6 +47,8 @@ const pedidoDoLog = (log: any) => {
   }
 }
 
+const PER_PAGE = 20
+
 export default function AdminLogs() {
   const [logs, setLogs] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,52 +56,40 @@ export default function AdminLogs() {
   const [retryingId, setRetryingId] = useState('')
   const [filter, setFilter] = useState<'erros' | 'todos' | 'ok' | 'manuais'>('erros')
   const [detail, setDetail] = useState<any>(null)
+  const [page, setPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(1)
+  const [totalItems, setTotalItems] = useState(0)
+  const [errorCount, setErrorCount] = useState(0)
   const { toast } = useToast()
 
   const loadData = () => {
-    pb.collection('webhooks_log')
-      .getFullList({ expand: 'ingresso_id', sort: '-created' })
-      .then((res) => setLogs(res))
+    setLoading(true)
+    const params = new URLSearchParams({
+      filter,
+      page: String(page),
+      perPage: String(PER_PAGE),
+    })
+    pb.send(`/backend/v1/admin/logs?${params.toString()}`)
+      .then((res: any) => {
+        setLogs(res.items || [])
+        setTotalPages(res.totalPages || 1)
+        setTotalItems(res.totalItems || 0)
+        setErrorCount(res.errorCount || 0)
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
     loadData()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, page])
 
   const isOk = (status: number) => status >= 200 && status < 300
-
-  // Agrega: 1 linha por ingresso (pedido), mantendo o evento MAIS RECENTE.
-  const aggregated = useMemo(() => {
-    const byIng: Record<string, any> = {}
-    const manualRows: any[] = []
-    for (const log of logs) {
-      const iid = log.ingresso_id
-      const live = !!log.expand?.ingresso_id
-      const isManual = !!MANUAL_EVENTOS[log.evento]
-      // Evento manual cujo ingresso não existe mais (ex.: exclusão): linha própria.
-      if (isManual && !live) {
-        manualRows.push(log)
-        continue
-      }
-      // Ignora órfãos de ingressos já excluídos (logs de webhook antigos).
-      if (!iid || !live) continue
-      const prev = byIng[iid]
-      if (!prev || new Date(log.created).getTime() > new Date(prev.created).getTime()) {
-        byIng[iid] = log
-      }
-    }
-    return [...Object.values(byIng), ...manualRows].sort(
-      (a: any, b: any) => new Date(b.created).getTime() - new Date(a.created).getTime(),
-    )
-  }, [logs])
 
   // Estado de erro real do ingresso (não só do log): credenciado => nunca é erro.
   const rowIsError = (log: any) => {
     const ing = log.expand?.ingresso_id
-    // Ingresso vivo, sem credencial na INAC e com webhook em erro CONTINUA erro —
-    // mesmo que o evento mais recente tenha sido uma edição/troca manual.
     if (ing && !ing.inac_id && ing.status_webhook === 'erro') return true
     if (MANUAL_EVENTOS[log.evento]) return false
     if (ing?.inac_id) return false
@@ -107,13 +97,10 @@ export default function AdminLogs() {
     return sw ? sw === 'erro' : !isOk(log.status)
   }
 
-  const errorCount = aggregated.filter(rowIsError).length
-  const visible = aggregated.filter((log: any) => {
-    if (filter === 'todos') return true
-    if (filter === 'manuais') return !!MANUAL_EVENTOS[log.evento]
-    if (filter === 'erros') return rowIsError(log)
-    return !rowIsError(log)
-  })
+  const changeFilter = (k: 'erros' | 'todos' | 'ok' | 'manuais') => {
+    setPage(1)
+    setFilter(k)
+  }
 
   const handleRetry = async (ingressoId: string) => {
     setRetryingId(ingressoId)
@@ -192,7 +179,7 @@ export default function AdminLogs() {
             key={k}
             variant={filter === k ? 'default' : 'outline'}
             size="sm"
-            onClick={() => setFilter(k)}
+            onClick={() => changeFilter(k)}
           >
             {label}
           </Button>
@@ -213,7 +200,7 @@ export default function AdminLogs() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {visible.map((log: any) => {
+            {logs.map((log: any) => {
               const err = rowIsError(log)
               return (
                 <TableRow key={log.id}>
@@ -308,7 +295,7 @@ export default function AdminLogs() {
                   <Loader2 className="w-5 h-5 animate-spin mx-auto text-muted-foreground" />
                 </TableCell>
               </TableRow>
-            ) : visible.length === 0 ? (
+            ) : logs.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                   {filter === 'erros'
@@ -319,6 +306,30 @@ export default function AdminLogs() {
             ) : null}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {totalItems} registro(s) · página {page} de {totalPages}
+        </p>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page <= 1 || loading}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+          >
+            Anterior
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Próxima
+          </Button>
+        </div>
       </div>
 
       <Dialog open={!!detail} onOpenChange={(o) => !o && setDetail(null)}>
