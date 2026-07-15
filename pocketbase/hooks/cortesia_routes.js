@@ -35,6 +35,9 @@ routerAdd('POST', '/backend/v1/cortesia/registrar', (e) => {
   if (nome.length < 3) return e.badRequestError('Informe o nome completo.')
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailNorm)) return e.badRequestError('E-mail inválido.')
   if (telDigits.length < 10) return e.badRequestError('Informe um telefone válido com DDD.')
+  if (!body.terms_accepted) {
+    return e.badRequestError('É necessário aceitar a autorização de uso de imagem e dados.')
+  }
 
   const isValidCPF = (s) => {
     const c = (s || '').replace(/\D/g, '')
@@ -161,6 +164,7 @@ routerAdd('POST', '/backend/v1/cortesia/registrar', (e) => {
       part.set('nicho', '')
       part.set('ia_uso_diario', 0)
       part.set('ia_profundidade', 0)
+      part.set('terms_accepted_at', new Date().toISOString())
       txApp.save(part)
 
       ing.set('participante_id', part.id)

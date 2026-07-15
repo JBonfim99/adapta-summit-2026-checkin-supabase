@@ -126,6 +126,10 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
   const token = body.token
   const emailNorm = (body.email || '').toString().trim().toLowerCase()
 
+  if (!body.terms_accepted) {
+    return e.badRequestError('É necessário aceitar a autorização de uso de imagem e dados.')
+  }
+
   // Regra: e-mail único entre participantes (pode coincidir com o de um comprador).
   let emailDup = false
   try {
@@ -196,6 +200,7 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
       part.set('ia_profundidade', parseInt(body.ia_profundidade, 10) || 0)
       part.set('ia_ferramentas', body.ia_ferramentas || '')
       part.set('ia_desafio', body.ia_desafio || '')
+      part.set('terms_accepted_at', new Date().toISOString())
 
       txApp.save(part)
 

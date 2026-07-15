@@ -108,6 +108,7 @@ export default function Cortesia() {
           email: data.email,
           telefone: data.telefone,
           cpf: data.cpf,
+          terms_accepted: true,
         }),
       })
       setResult(res)
@@ -259,7 +260,7 @@ export default function Cortesia() {
                     htmlFor="consent-imagem-cortesia"
                     className="text-xs leading-relaxed text-slate-600 cursor-pointer select-none"
                   >
-                    Ao se inscrever e participar deste evento, autorizo de forma gratuita e por
+                    Ao me inscrever e participar deste evento, autorizo de forma gratuita e por
                     prazo indeterminado, a captação de minha imagem, voz e demais dados de
                     identificação por meio de fotografias, vídeos e gravações realizadas durante o
                     evento, bem como a utilização desse material pela ADAPTA EDUCAÇÃO LTDA. inscrita

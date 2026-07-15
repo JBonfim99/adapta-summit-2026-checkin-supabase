@@ -153,6 +153,7 @@ export default function ParticipantForm() {
         ia_profundidade: data.ia_profundidade || 0,
         ia_ferramentas: data.ia_ferramentas || '',
         ia_desafio: data.ia_desafio || '',
+        terms_accepted: true,
       }
       const resp: any = await pb.send('/backend/v1/participant/submit', {
         method: 'POST',
@@ -453,7 +454,7 @@ export default function ParticipantForm() {
                       htmlFor="consent-imagem"
                       className="text-xs leading-relaxed text-slate-600 cursor-pointer select-none"
                     >
-                      Ao se inscrever e participar deste evento, autorizo de forma gratuita e por
+                      Ao me inscrever e participar deste evento, autorizo de forma gratuita e por
                       prazo indeterminado, a captação de minha imagem, voz e demais dados de
                       identificação por meio de fotografias, vídeos e gravações realizadas durante o
                       evento, bem como a utilização desse material pela ADAPTA EDUCAÇÃO LTDA.
