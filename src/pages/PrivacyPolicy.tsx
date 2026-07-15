@@ -6,7 +6,7 @@ export default function PrivacyPolicy() {
       <div className="mb-8">
         <h1 className="text-3xl font-bold">Política de Privacidade</h1>
         <p className="text-muted-foreground mt-2">
-          Adapta Summit 2026 · Última atualização: 30 de junho de 2026
+          Adapta Summit 2026 · Última atualização: 15 de julho de 2026
         </p>
       </div>
 
@@ -15,6 +15,14 @@ export default function PrivacyPolicy() {
           Esta Política de Privacidade descreve como tratamos os dados pessoais coletados no
           processo de credenciamento e comunicação do evento <strong>Adapta Summit 2026</strong>, em
           conformidade com a Lei nº 13.709/2018 (Lei Geral de Proteção de Dados — LGPD).
+        </p>
+
+        <p>
+          <strong>
+            Ao utilizar esta plataforma e realizar o seu pré-credenciamento para o Adapta Summit
+            2026, você declara ter lido e concordar integralmente com todos os termos desta página
+          </strong>
+          , incluindo a autorização de uso de imagem, voz e dados descrita no item 4.
         </p>
 
         <section className="space-y-2">
@@ -68,7 +76,24 @@ export default function PrivacyPolicy() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-900">4. Base legal</h2>
+          <h2 className="text-xl font-semibold text-slate-900">
+            4. Autorização de uso de imagem, voz e dados
+          </h2>
+          <p>
+            Ao me inscrever e participar deste evento, autorizo de forma gratuita e por prazo
+            indeterminado, a captação de minha imagem, voz e demais dados de identificação por meio
+            de fotografias, vídeos e gravações realizadas durante o evento, bem como a utilização
+            desse material pela ADAPTA EDUCAÇÃO LTDA. inscrita sob o CNPJ 26.081.999/0001-34, em
+            território nacional e internacional, para fins de divulgação institucional, promocional
+            e publicitária, em quaisquer meios de comunicação, incluindo, mas não se limitando a,
+            redes sociais, site oficial, materiais impressos, apresentações e demais canais de
+            mídia. Declaro estar ciente de que essa autorização não implica qualquer tipo de
+            remuneração ou contraprestação financeira.
+          </p>
+        </section>
+
+        <section className="space-y-2">
+          <h2 className="text-xl font-semibold text-slate-900">5. Base legal</h2>
           <p>
             O tratamento dos seus dados se fundamenta no <strong>consentimento</strong> fornecido
             por você ao realizar o credenciamento e na <strong>execução do contrato</strong>{' '}
@@ -77,7 +102,7 @@ export default function PrivacyPolicy() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-900">5. Compartilhamento de dados</h2>
+          <h2 className="text-xl font-semibold text-slate-900">6. Compartilhamento de dados</h2>
           <p>
             <strong>Não vendemos nem divulgamos seus dados pessoais a terceiros.</strong> Para
             viabilizar o credenciamento e a comunicação do evento, seus dados são tratados por
@@ -103,7 +128,7 @@ export default function PrivacyPolicy() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-900">6. Por quanto tempo guardamos</h2>
+          <h2 className="text-xl font-semibold text-slate-900">7. Por quanto tempo guardamos</h2>
           <p>
             Mantemos seus dados pessoais enquanto durar a sua relação com o evento e por até{' '}
             <strong>6 (seis) meses após o término do Adapta Summit 2026</strong>, salvo quando a
@@ -113,7 +138,7 @@ export default function PrivacyPolicy() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-900">7. Seus direitos</h2>
+          <h2 className="text-xl font-semibold text-slate-900">8. Seus direitos</h2>
           <p>
             Nos termos do art. 18 da LGPD, você pode, a qualquer momento, solicitar: confirmação da
             existência de tratamento; acesso aos dados; correção de dados incompletos, inexatos ou
@@ -131,7 +156,7 @@ export default function PrivacyPolicy() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-900">8. Segurança</h2>
+          <h2 className="text-xl font-semibold text-slate-900">9. Segurança</h2>
           <p>
             Adotamos medidas técnicas e organizacionais razoáveis para proteger seus dados contra
             acessos não autorizados e situações de destruição, perda, alteração ou divulgação
@@ -140,7 +165,7 @@ export default function PrivacyPolicy() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-900">9. Público maior de idade</h2>
+          <h2 className="text-xl font-semibold text-slate-900">10. Público maior de idade</h2>
           <p>
             O credenciamento e o evento destinam-se exclusivamente a maiores de 18 anos. Não
             coletamos intencionalmente dados de menores de idade.
@@ -148,7 +173,7 @@ export default function PrivacyPolicy() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-900">10. Armazenamento no navegador</h2>
+          <h2 className="text-xl font-semibold text-slate-900">11. Armazenamento no navegador</h2>
           <p>
             Utilizamos armazenamento local do seu navegador apenas para manter a sua sessão e o
             funcionamento da plataforma de credenciamento. Não utilizamos cookies para rastreamento
@@ -157,7 +182,7 @@ export default function PrivacyPolicy() {
         </section>
 
         <section className="space-y-2">
-          <h2 className="text-xl font-semibold text-slate-900">11. Alterações desta política</h2>
+          <h2 className="text-xl font-semibold text-slate-900">12. Alterações desta política</h2>
           <p>
             Esta Política de Privacidade pode ser atualizada periodicamente. A versão vigente estará
             sempre disponível nesta página, com a data da última atualização indicada no topo.
