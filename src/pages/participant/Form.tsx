@@ -86,6 +86,7 @@ export default function ParticipantForm() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [emailChecking, setEmailChecking] = useState(false)
+  const [consent, setConsent] = useState(false)
 
   useEffect(() => {
     if (!token) {
@@ -440,6 +441,30 @@ export default function ParticipantForm() {
                     }
                     placeholder="Sua resposta..."
                   />
+
+                  <div className="flex items-start gap-3 rounded-lg border p-3 bg-slate-50/50">
+                    <Checkbox
+                      id="consent-imagem"
+                      checked={consent}
+                      onCheckedChange={(c) => setConsent(c === true)}
+                      className="mt-1 shrink-0"
+                    />
+                    <label
+                      htmlFor="consent-imagem"
+                      className="text-xs leading-relaxed text-slate-600 cursor-pointer select-none"
+                    >
+                      Ao se inscrever e participar deste evento, autorizo de forma gratuita e por
+                      prazo indeterminado, a captação de minha imagem, voz e demais dados de
+                      identificação por meio de fotografias, vídeos e gravações realizadas durante o
+                      evento, bem como a utilização desse material pela ADAPTA EDUCAÇÃO LTDA.
+                      inscrita sob o CNPJ 26.081.999/0001-34, em território nacional e
+                      internacional, para fins de divulgação institucional, promocional e
+                      publicitária, em quaisquer meios de comunicação, incluindo, mas não se
+                      limitando a, redes sociais, site oficial, materiais impressos, apresentações e
+                      demais canais de mídia. Declaro estar ciente de que essa autorização não
+                      implica qualquer tipo de remuneração ou contraprestação financeira.
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -471,7 +496,7 @@ export default function ParticipantForm() {
                   <Button
                     type="submit"
                     className="bg-accent hover:bg-accent/90 px-8 text-white"
-                    disabled={submitting}
+                    disabled={submitting || !consent}
                   >
                     {submitting ? 'Enviando...' : 'Finalizar'}{' '}
                     {!submitting && <CheckCircle2 className="w-4 h-4 ml-2" />}

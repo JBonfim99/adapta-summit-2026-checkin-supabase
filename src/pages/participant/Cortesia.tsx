@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertCircle, CheckCircle2, Ticket as TicketIcon, Gift } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
 import { FormInput } from '@/components/FormInput'
 import pb from '@/lib/pocketbase/client'
 import { isValidCPF } from '@/lib/cpf'
@@ -48,6 +49,7 @@ export default function Cortesia() {
   const [error, setError] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
+  const [consent, setConsent] = useState(false)
 
   const methods = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -245,10 +247,35 @@ export default function Cortesia() {
                   mask="phone"
                 />
                 <FormInput name="cpf" label="CPF" placeholder="000.000.000-00" mask="cpf" />
+
+                <div className="flex items-start gap-3 rounded-lg border p-3 bg-slate-50/50">
+                  <Checkbox
+                    id="consent-imagem-cortesia"
+                    checked={consent}
+                    onCheckedChange={(c) => setConsent(c === true)}
+                    className="mt-1 shrink-0"
+                  />
+                  <label
+                    htmlFor="consent-imagem-cortesia"
+                    className="text-xs leading-relaxed text-slate-600 cursor-pointer select-none"
+                  >
+                    Ao se inscrever e participar deste evento, autorizo de forma gratuita e por
+                    prazo indeterminado, a captação de minha imagem, voz e demais dados de
+                    identificação por meio de fotografias, vídeos e gravações realizadas durante o
+                    evento, bem como a utilização desse material pela ADAPTA EDUCAÇÃO LTDA. inscrita
+                    sob o CNPJ 26.081.999/0001-34, em território nacional e internacional, para fins
+                    de divulgação institucional, promocional e publicitária, em quaisquer meios de
+                    comunicação, incluindo, mas não se limitando a, redes sociais, site oficial,
+                    materiais impressos, apresentações e demais canais de mídia. Declaro estar
+                    ciente de que essa autorização não implica qualquer tipo de remuneração ou
+                    contraprestação financeira.
+                  </label>
+                </div>
+
                 <Button
                   type="submit"
                   className="w-full bg-accent hover:bg-accent/90 text-white"
-                  disabled={submitting}
+                  disabled={submitting || !consent}
                 >
                   {submitting ? (
                     <>
