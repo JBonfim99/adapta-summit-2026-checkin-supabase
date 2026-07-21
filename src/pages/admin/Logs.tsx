@@ -54,6 +54,7 @@ export default function AdminLogs() {
   const [loading, setLoading] = useState(true)
   const [retryingAll, setRetryingAll] = useState(false)
   const [retryingId, setRetryingId] = useState('')
+  const [syncingUpgrades, setSyncingUpgrades] = useState(false)
   const [filter, setFilter] = useState<'erros' | 'todos' | 'ok' | 'manuais'>('erros')
   const [detail, setDetail] = useState<any>(null)
   const [page, setPage] = useState(1)
@@ -142,6 +143,26 @@ export default function AdminLogs() {
     }
   }
 
+  // Sync de categoria (upgrade em lote GOLD->PLATINUM): PUT /edit na INAC pros
+  // ingressos que já tinham inac_id e foram convertidos pela migration
+  // 0034_upgrade_lote_gold_platinum (marcados com "pending-inac-edit" em origem).
+  // Processa até 10 por clique — clique de novo se sobrar.
+  const handleSyncUpgrades = async () => {
+    setSyncingUpgrades(true)
+    try {
+      const res: any = await pb.send('/backend/v1/admin/sync-inac-upgrades', { method: 'POST' })
+      toast({
+        title: 'Sync de upgrades concluído',
+        description: `${res.ok || 0} atualizado(s) na INAC, ${res.failed || 0} com erro (de ${res.tried || 0} tentados)${res.skipped?.length ? `, ${res.skipped.length} pulado(s)` : ''}.`,
+      })
+      loadData()
+    } catch (e: any) {
+      toast({ title: 'Falha', description: e.message, variant: 'destructive' })
+    } finally {
+      setSyncingUpgrades(false)
+    }
+  }
+
   const FILTERS: Array<['erros' | 'todos' | 'ok' | 'manuais', string]> = [
     ['erros', `Somente erros${errorCount > 0 ? ` (${errorCount})` : ''}`],
     ['todos', 'Todos'],
@@ -158,19 +179,34 @@ export default function AdminLogs() {
             Um registro por ingresso (pedido), com o status mais recente do envio ao INAC.
           </p>
         </div>
-        <Button
-          variant="outline"
-          className="gap-2 shrink-0"
-          onClick={handleRetryAll}
-          disabled={retryingAll || errorCount === 0}
-        >
-          {retryingAll ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <RotateCw className="w-4 h-4" />
-          )}
-          Retentar erros{errorCount > 0 ? ` (${errorCount})` : ''}
-        </Button>
+        <div className="flex gap-2 shrink-0">
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={handleSyncUpgrades}
+            disabled={syncingUpgrades}
+          >
+            {syncingUpgrades ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RotateCw className="w-4 h-4" />
+            )}
+            Sync upgrades INAC
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={handleRetryAll}
+            disabled={retryingAll || errorCount === 0}
+          >
+            {retryingAll ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RotateCw className="w-4 h-4" />
+            )}
+            Retentar erros{errorCount > 0 ? ` (${errorCount})` : ''}
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-2">

@@ -317,3 +317,169 @@ routerAdd(
   },
   $apis.requireAuth(),
 )
+
+// --- SYNC DE CATEGORIA (upgrade em lote): PUT /edit pros ingressos que -------
+// já tinham inac_id (já credenciados na INAC) e foram convertidos GOLD->PLATINUM
+// por uma migration de lote (marcados com a tag "pending-inac-edit" em `origem`,
+// já que migrations não têm $http pra chamar a INAC na hora). Processa até 10
+// por chamada (clique de novo se sobrar). Idempotente: só remove a tag da
+// `origem` quando o /edit responde OK; se falhar, a tag fica e o próximo clique
+// tenta de novo.
+routerAdd(
+  'POST',
+  '/backend/v1/admin/sync-inac-upgrades',
+  (e) => {
+    const INAC_WEBHOOK_URL = $os.getenv('INAC_WEBHOOK_URL')
+    const INAC_AUTH_TOKEN = $os.getenv('INAC_AUTH_TOKEN')
+    if (!INAC_WEBHOOK_URL || !INAC_AUTH_TOKEN) {
+      return e.json(200, { tried: 0, ok: 0, failed: 0, error: 'INAC não configurado' })
+    }
+    const INAC_EDIT_URL = INAC_WEBHOOK_URL.replace('/attendees/add', '/attendees/edit')
+
+    const decodeBody = (body) => {
+      if (body == null) return ''
+      if (typeof body === 'string') return body
+      try {
+        return new TextDecoder().decode(body)
+      } catch (_) {}
+      try {
+        let s = ''
+        for (let i = 0; i < body.length; i++) s += String.fromCharCode(body[i])
+        return s
+      } catch (_) {}
+      return ''
+    }
+    const onlyDigits = (s) => (s || '').replace(/\D/g, '')
+    const sanitize = (s) => {
+      if (s == null) return ''
+      let t = String(s)
+      t = t.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+      t = t.replace(
+        /[\u200D\u20E3\u2190-\u21FF\u2300-\u27BF\u2600-\u26FF\u2B00-\u2BFF\uFE00-\uFE0F]/g,
+        '',
+      )
+      t = t.replace(/[\u0000-\u001F\u007F]/g, '')
+      return t.replace(/\s+/g, ' ').trim()
+    }
+
+    let list = []
+    try {
+      list = $app.findRecordsByFilter(
+        'ingressos',
+        "tipo_ingresso = 'PLATINUM' && origem ~ 'pending-inac-edit'",
+        'created',
+        10,
+        0,
+      )
+    } catch (_) {
+      list = []
+    }
+
+    const logColl = $app.findCollectionByNameOrId('webhooks_log')
+    let tried = 0
+    let ok = 0
+    let failed = 0
+    const skipped = []
+
+    for (let i = 0; i < list.length; i++) {
+      const ingresso = list[i]
+      const inacId = ingresso.getString('inac_id')
+      const partId = ingresso.getString('participante_id')
+      if (!inacId || !partId) {
+        skipped.push({
+          ingresso_id: ingresso.id,
+          motivo: !inacId ? 'sem inac_id' : 'sem participante',
+        })
+        continue
+      }
+      let part
+      try {
+        part = $app.findRecordById('participantes', partId)
+      } catch (_) {
+        skipped.push({ ingresso_id: ingresso.id, motivo: 'participante não encontrado' })
+        continue
+      }
+      tried++
+
+      let tel = onlyDigits(part.getString('telefone'))
+      if (tel && tel.length <= 11) tel = '55' + tel
+      const payload = {
+        id: parseInt(inacId, 10),
+        event_id: 375,
+        category_id: 6125, // Platinum
+        status: 'active',
+        fields: [
+          { id: 10133653, value: sanitize(part.getString('nome_completo')) },
+          { id: 10133654, value: part.getString('email') },
+          { id: 10133655, value: onlyDigits(part.getString('cpf')) },
+          { id: 10133656, value: tel },
+          {
+            id: 10133657,
+            value: sanitize(part.getString('nome_empresa') || part.getString('profissao')),
+          },
+          { id: 10133665, value: ingresso.getString('pedido_id') },
+        ],
+      }
+
+      let status = 0
+      let respBody = ''
+      let erroMsg = ''
+      try {
+        const res = $http.send({
+          url: INAC_EDIT_URL,
+          method: 'PUT',
+          headers: { 'X-Auth-Token': INAC_AUTH_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          timeout: 10,
+        })
+        status = res.statusCode
+        respBody = decodeBody(res.body)
+      } catch (err) {
+        erroMsg = err.message
+      }
+
+      const apiOk = status >= 200 && status < 300
+
+      if (apiOk) {
+        // Remove só a tag de pendência da origem, preserva o resto.
+        const origemAtual = ingresso.getString('origem') || ''
+        const origemLimpa = origemAtual
+          .split(';')
+          .filter((t) => t && t !== 'pending-inac-edit')
+          .join(';')
+        ingresso.set('origem', origemLimpa)
+        ingresso.set('status_webhook', 'enviado')
+      } else {
+        ingresso.set('status_webhook', 'erro')
+      }
+      try {
+        $app.save(ingresso)
+      } catch (_) {}
+
+      try {
+        const log = new Record(logColl)
+        log.set('ingresso_id', ingresso.id)
+        log.set('evento', apiOk ? 'webhook_editado' : 'webhook_edicao_erro')
+        log.set(
+          'detalhe',
+          apiOk
+            ? `Categoria atualizada na INAC p/ Platinum (attendee ${inacId})`
+            : erroMsg
+              ? `Falha de rede no /edit: ${erroMsg}`
+              : `INAC recusou o /edit (HTTP ${status})`,
+        )
+        log.set('status', status)
+        log.set('method', 'PUT')
+        log.set('payload', JSON.stringify(payload))
+        log.set('response', (respBody || erroMsg || '').substring(0, 2000))
+        $app.save(log)
+      } catch (_) {}
+
+      if (apiOk) ok++
+      else failed++
+    }
+
+    return e.json(200, { tried: tried, ok: ok, failed: failed, skipped: skipped })
+  },
+  $apis.requireAuth(),
+)
