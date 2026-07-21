@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { UploadCloud, FileType, AlertTriangle, Download, Trash2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+
 import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
@@ -17,7 +17,6 @@ export default function AdminReconciliar() {
   const [isDragging, setIsDragging] = useState(false)
   const [progress, setProgress] = useState(0)
   const [resultado, setResultado] = useState<any>(null)
-  const [quantidadeApagar, setQuantidadeApagar] = useState('151')
   const [apagando, setApagando] = useState(false)
   const [apagarProgress, setApagarProgress] = useState(0)
   const [resultadoApagar, setResultadoApagar] = useState<any>(null)
@@ -150,9 +149,8 @@ export default function AdminReconciliar() {
   }
 
   const handleApagarSeguros = async () => {
-    const n = Math.max(0, parseInt(quantidadeApagar, 10) || 0)
-    if (n === 0) return
-    const alvo = candidatosSeguros.slice(0, n)
+    const alvo = candidatosSeguros
+    if (alvo.length === 0) return
     setApagando(true)
     setApagarProgress(0)
     const res = { ok: 0, falhou: 0, erros: [] as any[] }
@@ -321,19 +319,11 @@ export default function AdminReconciliar() {
                   Limpar ingressos-fantasma (Pendente, sem participante, sem INAC)
                 </div>
                 <div className="text-sm text-slate-600">
-                  {candidatosSeguros.length} candidato(s) seguro(s) disponíveis, mais recentes
-                  primeiro. Escolha quantos apagar (ex: pra bater com o total do painel oficial).
+                  {candidatosSeguros.length} ingresso(s) extra(s) — por pessoa, o que passar do que
+                  o CSV diz que ela deveria ter. Apaga todos de uma vez pra deixar cada comprador
+                  1:1 com o CSV (os "arriscados" ficam de fora, precisam de revisão manual).
                 </div>
                 <div className="flex items-center gap-3">
-                  <Input
-                    type="number"
-                    min={0}
-                    max={candidatosSeguros.length}
-                    value={quantidadeApagar}
-                    onChange={(e) => setQuantidadeApagar(e.target.value)}
-                    className="w-28"
-                    disabled={apagando}
-                  />
                   <Button
                     variant="destructive"
                     className="gap-2"
@@ -341,7 +331,9 @@ export default function AdminReconciliar() {
                     disabled={apagando}
                   >
                     <Trash2 className="w-4 h-4" />
-                    {apagando ? 'Apagando...' : 'Apagar'}
+                    {apagando
+                      ? 'Apagando...'
+                      : `Apagar todos os ${candidatosSeguros.length} seguros`}
                   </Button>
                 </div>
                 {apagando && <Progress value={apagarProgress} className="h-2" />}
