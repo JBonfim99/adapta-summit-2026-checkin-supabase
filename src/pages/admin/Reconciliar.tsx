@@ -94,16 +94,38 @@ export default function AdminReconciliar() {
         )
       }
 
-      const rows = allLines.slice(1).map((line) => {
+      const linhas = allLines.slice(1).map((line) => {
         const cols = parseCSVLine(line)
         return {
           nome: idx.nome !== -1 ? cols[idx.nome]?.trim() : '',
-          email: idx.email !== -1 ? cols[idx.email]?.trim() : '',
+          email: idx.email !== -1 ? cols[idx.email]?.trim().toLowerCase() : '',
           cpf: idx.cpf !== -1 ? cols[idx.cpf]?.trim() : '',
           categorias: idx.categorias !== -1 ? cols[idx.categorias]?.trim() : '',
           ingressos_esperado: idx.ingressos !== -1 ? parseInt(cols[idx.ingressos], 10) || 0 : 0,
         }
       })
+
+      // Agrupa por email: se o mesmo email aparecer em mais de uma linha
+      // (ex: comprador comprou em ocasiões diferentes), soma o "ingressos"
+      // de todas e compara UMA vez — em vez de comparar cada linha
+      // separadamente contra o total atual do comprador (o que infla
+      // "excesso" artificialmente pra quem tem linha duplicada).
+      const porEmail = new Map<string, any>()
+      for (const linha of linhas) {
+        const chave = linha.email || `__sem-email__${linha.cpf}`
+        const existente = porEmail.get(chave)
+        if (!existente) {
+          porEmail.set(chave, { ...linha })
+        } else {
+          existente.ingressos_esperado += linha.ingressos_esperado
+          if (!existente.categorias.includes(linha.categorias)) {
+            existente.categorias = existente.categorias
+              ? `${existente.categorias} / ${linha.categorias}`
+              : linha.categorias
+          }
+        }
+      }
+      const rows = Array.from(porEmail.values())
 
       await processarLotes(rows)
     } catch (err: any) {
