@@ -10,6 +10,7 @@ import {
   Mail,
   BarChart3,
   Gift,
+  Scale,
 } from 'lucide-react'
 import { WhatsAppIcon } from '@/components/WhatsAppIcon'
 import { cn } from '@/lib/utils'
@@ -27,6 +28,7 @@ export function AdminLayout() {
     { name: 'Compradores', path: '/admin/compradores', icon: ShoppingBag },
     { name: 'Participantes', path: '/admin/participantes', icon: Users },
     { name: 'Cortesias', path: '/admin/cortesias', icon: Gift },
+    { name: 'Reconciliar', path: '/admin/reconciliar', icon: Scale },
     { name: 'Insights', path: '/admin/insights', icon: BarChart3 },
     { name: 'Disparo', path: '/admin/disparo', icon: Mail },
     { name: 'Disparo WhatsApp', path: '/admin/disparo-whatsapp', icon: WhatsAppIcon },

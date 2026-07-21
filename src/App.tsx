@@ -30,6 +30,7 @@ import AdminDispatch from '@/pages/admin/Disparo'
 import AdminDispatchWhatsApp from '@/pages/admin/DisparoWhatsApp'
 import AdminInsights from '@/pages/admin/Insights'
 import AdminCortesias from '@/pages/admin/Cortesias'
+import AdminReconciliar from '@/pages/admin/Reconciliar'
 
 function PreCredenciamentoRedirect() {
   const { token } = useParams()
@@ -116,6 +117,7 @@ const App = () => (
               <Route path="compradores" element={<AdminCompradores />} />
               <Route path="participantes" element={<AdminParticipants />} />
               <Route path="cortesias" element={<AdminCortesias />} />
+              <Route path="reconciliar" element={<AdminReconciliar />} />
               <Route path="insights" element={<AdminInsights />} />
               <Route path="disparo" element={<AdminDispatch />} />
               <Route path="disparo-whatsapp" element={<AdminDispatchWhatsApp />} />
