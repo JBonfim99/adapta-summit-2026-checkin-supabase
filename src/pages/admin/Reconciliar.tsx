@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { UploadCloud, FileType, AlertTriangle, Download } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { UploadCloud, FileType, AlertTriangle, Download, Trash2 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
@@ -16,7 +17,32 @@ export default function AdminReconciliar() {
   const [isDragging, setIsDragging] = useState(false)
   const [progress, setProgress] = useState(0)
   const [resultado, setResultado] = useState<any>(null)
+  const [quantidadeApagar, setQuantidadeApagar] = useState('151')
+  const [apagando, setApagando] = useState(false)
+  const [apagarProgress, setApagarProgress] = useState(0)
+  const [resultadoApagar, setResultadoApagar] = useState<any>(null)
   const { toast } = useToast()
+
+  // Candidatos seguros pra apagar: ingressos EXTRAS (além do esperado) de
+  // linhas "excesso", que estão Pendente e sem nada vinculado (sem
+  // participante, sem inac_id) — não afetam ninguém que já usou o ingresso.
+  // Ordenados do mais recente pro mais antigo (a duplicação de hoje primeiro).
+  const candidatosSeguros = useMemo(() => {
+    if (!resultado) return []
+    const candidatos: any[] = []
+    for (const a of resultado.anomalias) {
+      if (a.classificacao !== 'excesso') continue
+      const ordenados = [...a.tickets].sort((x: any, y: any) => (x.created < y.created ? -1 : 1))
+      const extras = ordenados.slice(a.esperado)
+      for (const t of extras) {
+        if (t.status === 'Pendente' && !t.participante_id && !t.inac_id) {
+          candidatos.push({ ...t, nome: a.nome, email: a.email })
+        }
+      }
+    }
+    candidatos.sort((x, y) => (x.created < y.created ? 1 : -1))
+    return candidatos
+  }, [resultado])
 
   const parseCSVLine = (text: string) => {
     const result = []
@@ -121,6 +147,37 @@ export default function AdminReconciliar() {
       toast({ title: 'Erro na reconciliação', description: err.message, variant: 'destructive' })
       setStep('upload')
     }
+  }
+
+  const handleApagarSeguros = async () => {
+    const n = Math.max(0, parseInt(quantidadeApagar, 10) || 0)
+    if (n === 0) return
+    const alvo = candidatosSeguros.slice(0, n)
+    setApagando(true)
+    setApagarProgress(0)
+    const res = { ok: 0, falhou: 0, erros: [] as any[] }
+    for (let i = 0; i < alvo.length; i++) {
+      try {
+        const r: any = await pb.send(`/backend/v1/admin/tickets/${alvo[i].id}/delete`, {
+          method: 'POST',
+        })
+        if (r.success) res.ok++
+        else {
+          res.falhou++
+          res.erros.push({ ...alvo[i], erro: r.error })
+        }
+      } catch (err: any) {
+        res.falhou++
+        res.erros.push({ ...alvo[i], erro: err.message })
+      }
+      setApagarProgress(Math.round(((i + 1) / alvo.length) * 100))
+    }
+    setResultadoApagar(res)
+    setApagando(false)
+    toast({
+      title: 'Limpeza concluída',
+      description: `${res.ok} apagado(s), ${res.falhou} com erro (de ${alvo.length} tentados).`,
+    })
   }
 
   const baixarAnomalias = () => {
@@ -257,6 +314,45 @@ export default function AdminReconciliar() {
             >
               <Download className="w-4 h-4" /> Baixar anomalias (JSON)
             </Button>
+
+            {candidatosSeguros.length > 0 && (
+              <div className="mt-6 p-4 rounded border border-rose-200 bg-rose-50/50 space-y-3">
+                <div className="text-sm font-semibold text-rose-900">
+                  Limpar ingressos-fantasma (Pendente, sem participante, sem INAC)
+                </div>
+                <div className="text-sm text-slate-600">
+                  {candidatosSeguros.length} candidato(s) seguro(s) disponíveis, mais recentes
+                  primeiro. Escolha quantos apagar (ex: pra bater com o total do painel oficial).
+                </div>
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={candidatosSeguros.length}
+                    value={quantidadeApagar}
+                    onChange={(e) => setQuantidadeApagar(e.target.value)}
+                    className="w-28"
+                    disabled={apagando}
+                  />
+                  <Button
+                    variant="destructive"
+                    className="gap-2"
+                    onClick={handleApagarSeguros}
+                    disabled={apagando}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    {apagando ? 'Apagando...' : 'Apagar'}
+                  </Button>
+                </div>
+                {apagando && <Progress value={apagarProgress} className="h-2" />}
+                {resultadoApagar && (
+                  <div className="text-sm text-slate-700">
+                    {resultadoApagar.ok} apagado(s) com sucesso
+                    {resultadoApagar.falhou > 0 ? `, ${resultadoApagar.falhou} com erro` : ''}.
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
