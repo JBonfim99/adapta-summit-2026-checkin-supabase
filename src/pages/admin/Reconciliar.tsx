@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { UploadCloud, FileType, AlertTriangle, Download, Trash2 } from 'lucide-react'
+import { UploadCloud, FileType, AlertTriangle, Download, Trash2, UserPlus } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 
@@ -20,6 +20,12 @@ export default function AdminReconciliar() {
   const [apagando, setApagando] = useState(false)
   const [apagarProgress, setApagarProgress] = useState(0)
   const [resultadoApagar, setResultadoApagar] = useState<any>(null)
+  const [criando, setCriando] = useState(false)
+  const [criarProgress, setCriarProgress] = useState(0)
+  const [resultadoCriar, setResultadoCriar] = useState<any>(null)
+  // Guarda a linha completa do CSV por email (uf/cidade/telefone), que o
+  // endpoint de reconciliação não devolve mas é preciso pra criar o comprador.
+  const [dadosPorEmail, setDadosPorEmail] = useState<Record<string, any>>({})
   const { toast } = useToast()
 
   // Candidatos seguros pra apagar: ingressos EXTRAS (além do esperado) de
@@ -41,6 +47,14 @@ export default function AdminReconciliar() {
     }
     candidatos.sort((x, y) => (x.created < y.created ? 1 : -1))
     return candidatos
+  }, [resultado])
+
+  // Compradores que estão no CSV de referência mas não existem no sistema.
+  const naoEncontrados = useMemo(() => {
+    if (!resultado) return []
+    return resultado.anomalias.filter(
+      (a: any) => a.classificacao === 'comprador_nao_encontrado' && a.email,
+    )
   }, [resultado])
 
   const parseCSVLine = (text: string) => {
@@ -85,6 +99,9 @@ export default function AdminReconciliar() {
         nome: headers.indexOf('nome'),
         email: headers.indexOf('email'),
         cpf: headers.indexOf('cpf_cnpj'),
+        uf: headers.indexOf('uf'),
+        cidade: headers.indexOf('cidade'),
+        telefone: headers.indexOf('telefone'),
         categorias: headers.indexOf('categorias'),
         ingressos: headers.indexOf('ingressos'),
       }
@@ -100,6 +117,9 @@ export default function AdminReconciliar() {
           nome: idx.nome !== -1 ? cols[idx.nome]?.trim() : '',
           email: idx.email !== -1 ? cols[idx.email]?.trim().toLowerCase() : '',
           cpf: idx.cpf !== -1 ? cols[idx.cpf]?.trim() : '',
+          uf: idx.uf !== -1 ? cols[idx.uf]?.trim() : '',
+          cidade: idx.cidade !== -1 ? cols[idx.cidade]?.trim() : '',
+          telefone: idx.telefone !== -1 ? cols[idx.telefone]?.trim() : '',
           categorias: idx.categorias !== -1 ? cols[idx.categorias]?.trim() : '',
           ingressos_esperado: idx.ingressos !== -1 ? parseInt(cols[idx.ingressos], 10) || 0 : 0,
         }
@@ -126,6 +146,11 @@ export default function AdminReconciliar() {
         }
       }
       const rows = Array.from(porEmail.values())
+
+      const mapa: Record<string, any> = {}
+      for (const r of rows) if (r.email) mapa[r.email] = r
+      setDadosPorEmail(mapa)
+      setResultadoCriar(null)
 
       await processarLotes(rows)
     } catch (err: any) {
@@ -198,6 +223,76 @@ export default function AdminReconciliar() {
       title: 'Limpeza concluída',
       description: `${res.ok} apagado(s), ${res.falhou} com erro (de ${alvo.length} tentados).`,
     })
+  }
+
+  const handleCriarFaltantes = async () => {
+    const alvo = naoEncontrados
+    if (alvo.length === 0) return
+    setCriando(true)
+    setCriarProgress(0)
+
+    const payload = alvo.map((a: any) => {
+      const extra = dadosPorEmail[a.email] || {}
+      return {
+        nome: a.nome || extra.nome || '',
+        email: a.email,
+        cpf: a.cpf || extra.cpf || '',
+        uf: extra.uf || '',
+        cidade: extra.cidade || '',
+        telefone: extra.telefone || '',
+        categorias: a.categorias || extra.categorias || '',
+        ingressos_esperado: a.esperado,
+      }
+    })
+
+    const CHUNK = 50
+    const totalChunks = Math.max(1, Math.ceil(payload.length / CHUNK))
+    const acc = {
+      criados: 0,
+      ingressos_criados: 0,
+      ja_existiam: 0,
+      indefinidos: [] as any[],
+      erros: [] as any[],
+    }
+
+    try {
+      for (let c = 0; c < totalChunks; c++) {
+        const chunk = payload.slice(c * CHUNK, (c + 1) * CHUNK)
+        const res: any = await pb.send('/backend/v1/admin/reconciliar-criar-compradores', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: chunk }),
+        })
+        acc.criados += res.criados || 0
+        acc.ingressos_criados += res.ingressos_criados || 0
+        acc.ja_existiam += res.ja_existiam || 0
+        acc.indefinidos.push(...(res.indefinidos || []))
+        acc.erros.push(...(res.erros || []))
+        setCriarProgress(Math.round(((c + 1) / totalChunks) * 100))
+      }
+      setResultadoCriar(acc)
+      toast({
+        title: 'Criação concluída',
+        description: `${acc.criados} comprador(es) criado(s) com ${acc.ingressos_criados} ingresso(s).`,
+      })
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao criar compradores',
+        description: err.message,
+        variant: 'destructive',
+      })
+    }
+    setCriando(false)
+  }
+
+  const baixarJSON = (dados: any, prefixo: string) => {
+    const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${prefixo}-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   const baixarAnomalias = () => {
@@ -363,6 +458,75 @@ export default function AdminReconciliar() {
                   <div className="text-sm text-slate-700">
                     {resultadoApagar.ok} apagado(s) com sucesso
                     {resultadoApagar.falhou > 0 ? `, ${resultadoApagar.falhou} com erro` : ''}.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {naoEncontrados.length > 0 && (
+              <div className="mt-6 p-4 rounded border border-sky-200 bg-sky-50/50 space-y-3">
+                <div className="text-sm font-semibold text-sky-900">
+                  Criar quem ainda não existe
+                </div>
+                <div className="text-sm text-slate-600">
+                  {naoEncontrados.length} comprador(es) estão no CSV de referência mas não existem
+                  no sistema. Cria cada um já com os ingressos dele (status Pendente e link de
+                  participante gerado). Não dispara e-mail de acesso — isso continua sendo um passo
+                  separado. Pode rodar de novo sem medo: quem já existir é ignorado.
+                </div>
+                <div className="flex items-center gap-3">
+                  <Button className="gap-2" onClick={handleCriarFaltantes} disabled={criando}>
+                    <UserPlus className="w-4 h-4" />
+                    {criando ? 'Criando...' : `Criar os ${naoEncontrados.length} compradores`}
+                  </Button>
+                </div>
+                {criando && <Progress value={criarProgress} className="h-2" />}
+                {resultadoCriar && (
+                  <div className="text-sm text-slate-700 space-y-2">
+                    <div>
+                      {resultadoCriar.criados} comprador(es) criado(s) com{' '}
+                      {resultadoCriar.ingressos_criados} ingresso(s)
+                      {resultadoCriar.ja_existiam > 0
+                        ? `, ${resultadoCriar.ja_existiam} já existia(m)`
+                        : ''}
+                      {resultadoCriar.erros.length > 0
+                        ? `, ${resultadoCriar.erros.length} com erro`
+                        : ''}
+                      .
+                    </div>
+                    {resultadoCriar.indefinidos.length > 0 && (
+                      <div className="flex items-start gap-2 p-3 rounded border border-amber-200 bg-amber-50 text-amber-800">
+                        <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                        <div className="space-y-2">
+                          <div>
+                            {resultadoCriar.indefinidos.length} comprador(es) NÃO foram criados: o
+                            CSV diz categoria mista (Gold + Platinum) com 3 ou mais ingressos, e não
+                            dá pra saber quantos são de cada. Confira na origem e crie na mão —
+                            criar com a categoria errada credenciaria a pessoa errada no dia.
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() =>
+                              baixarJSON(resultadoCriar.indefinidos, 'criar-indefinidos')
+                            }
+                          >
+                            <Download className="w-4 h-4" /> Baixar indefinidos (JSON)
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {resultadoCriar.erros.length > 0 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => baixarJSON(resultadoCriar.erros, 'criar-erros')}
+                      >
+                        <Download className="w-4 h-4" /> Baixar erros (JSON)
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
