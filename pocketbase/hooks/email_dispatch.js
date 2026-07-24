@@ -82,18 +82,45 @@ routerAdd(
     const apiKey = $os.getenv('SENDGRID_API_KEY')
     if (!apiKey) return e.json(200, { html: '', error: 'SENDGRID_API_KEY não configurada' })
 
+    // Decodificador UTF-8 manual: o TextDecoder do JSVM do PocketBase não
+    // decodifica multi-byte corretamente aqui (cai no fallback ingênuo de
+    // char-por-byte, que quebra acento — "á" virava "Ã¡"). Isso monta os
+    // bytes UTF-8 em code points de verdade.
     const decodeBody = (body) => {
       if (body == null) return ''
       if (typeof body === 'string') return body
+      let bytes
       try {
-        return new TextDecoder().decode(body)
-      } catch (_) {}
-      try {
-        let s = ''
-        for (let i = 0; i < body.length; i++) s += String.fromCharCode(body[i])
-        return s
-      } catch (_) {}
-      return ''
+        bytes = new Uint8Array(body)
+      } catch (_) {
+        bytes = body
+      }
+      let result = ''
+      let i = 0
+      const len = bytes.length
+      while (i < len) {
+        const b1 = bytes[i++]
+        if (b1 < 0x80) {
+          result += String.fromCharCode(b1)
+        } else if ((b1 & 0xe0) === 0xc0 && i < len) {
+          const b2 = bytes[i++]
+          result += String.fromCharCode(((b1 & 0x1f) << 6) | (b2 & 0x3f))
+        } else if ((b1 & 0xf0) === 0xe0 && i + 1 < len) {
+          const b2 = bytes[i++]
+          const b3 = bytes[i++]
+          result += String.fromCharCode(((b1 & 0x0f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f))
+        } else if ((b1 & 0xf8) === 0xf0 && i + 2 < len) {
+          const b2 = bytes[i++]
+          const b3 = bytes[i++]
+          const b4 = bytes[i++]
+          let cp = ((b1 & 0x07) << 18) | ((b2 & 0x3f) << 12) | ((b3 & 0x3f) << 6) | (b4 & 0x3f)
+          cp -= 0x10000
+          result += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))
+        } else {
+          // byte inválido/incompleto — ignora em vez de corromper o resto.
+        }
+      }
+      return result
     }
 
     try {
