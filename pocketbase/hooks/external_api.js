@@ -12,9 +12,16 @@
 //   POST /backend/v1/external/reenviar-comprador    — redispara e-mail (template Email02)
 //   POST /backend/v1/external/reenviar-participante — redispara e-mail de participante
 //
+=======
 // REGRA JSVM: cada handler declara suas próprias constantes/helpers (não dá
 // pra compartilhar `const` de topo de arquivo entre handlers diferentes).
-// ============================================================================
+//
+// AUDITORIA: os 4 endpoints POST (criação, credenciamento, os 2 reenvios)
+// gravam uma linha em `webhooks_log` (evento api_criacao_comprador /
+// api_credenciamento / api_reenvio_comprador / api_reenvio_participante),
+// visível na tela Logs — inclusive na aba "Ações manuais". Os GETs (busca) não
+// são logados, só leitura.
+// ========================================================================================================================================================
 
 // --- GET /external/compradores: busca comprador(es) + ingressos ------------
 routerAdd('GET', '/backend/v1/external/compradores', (e) => {
@@ -386,6 +393,38 @@ routerAdd('POST', '/backend/v1/external/compradores', (e) => {
     }
   }
 
+  // audit: registra a CRIAÇÃO via API nos Logs.
+  try {
+    const logColl = $app.findCollectionByNameOrId('webhooks_log')
+    const log = new Record(logColl)
+    log.set('evento', 'api_criacao_comprador')
+    log.set('method', 'API')
+    log.set('status', 200)
+    log.set(
+      'detalhe',
+      'Comprador ' +
+        (nome || email) +
+        ' (' +
+        email +
+        ') criado via API externa — ' +
+        ingressosCriados.length +
+        ' ingresso(s). E-mail: ' +
+        (emailResult.enviado ? 'enviado' : 'não enviado (' + emailResult.erro + ')'),
+    )
+    log.set(
+      'payload',
+      JSON.stringify({
+        acao: 'api_criacao_comprador',
+        comprador_id: compradorId,
+        nome: nome,
+        email: email,
+        ingressos: ingressosCriados,
+      }),
+    )
+    log.set('response', JSON.stringify(emailResult))
+    $app.save(log)
+  } catch (_) {}
+
   return e.json(200, {
     success: true,
     comprador_id: compradorId,
@@ -582,6 +621,39 @@ routerAdd('POST', '/backend/v1/external/credenciamento', (e) => {
     inacMsg = err.message
   }
 
+  // audit: registra o CREDENCIAMENTO via API nos Logs.
+  try {
+    const logColl = $app.findCollectionByNameOrId('webhooks_log')
+    const log = new Record(logColl)
+    log.set('ingresso_id', ingresso.id)
+    log.set('evento', 'api_credenciamento')
+    log.set('method', 'API')
+    log.set('status', 200)
+    log.set(
+      'detalhe',
+      'Ingresso ' +
+        ingresso.getString('pedido_id') +
+        ' credenciado via API externa — ' +
+        nomeCompleto +
+        ' (' +
+        emailNorm +
+        '). INAC: ' +
+        (inacOk ? 'ok (attendee credenciado)' : 'falhou (' + inacMsg + ')'),
+    )
+    log.set(
+      'payload',
+      JSON.stringify({
+        acao: 'api_credenciamento',
+        ingresso_id: ingresso.id,
+        pedido_id: ingresso.getString('pedido_id'),
+        nome_completo: nomeCompleto,
+        email: emailNorm,
+      }),
+    )
+    log.set('response', JSON.stringify({ inac_ok: inacOk, qrcode: qrcode, inac_msg: inacMsg }))
+    $app.save(log)
+  } catch (_) {}
+
   return e.json(200, {
     success: true,
     ingresso_id: ingresso.id,
@@ -724,6 +796,37 @@ routerAdd('POST', '/backend/v1/external/reenviar-comprador', (e) => {
   } catch (err) {
     erro = err.message
   }
+
+  // audit: registra o REENVIO via API nos Logs.
+  try {
+    const logColl = $app.findCollectionByNameOrId('webhooks_log')
+    const log = new Record(logColl)
+    log.set('evento', 'api_reenvio_comprador')
+    log.set('method', 'API')
+    log.set('status', enviado ? 200 : 0)
+    log.set(
+      'detalhe',
+      'E-mail (' +
+        templateNome +
+        ') redisparado via API externa pro comprador ' +
+        (nome || email) +
+        ' (' +
+        email +
+        ') — ' +
+        (enviado ? 'enviado' : 'falhou (' + erro + ')'),
+    )
+    log.set(
+      'payload',
+      JSON.stringify({
+        acao: 'api_reenvio_comprador',
+        comprador_id: comprador.id,
+        email: email,
+        template: templateNome,
+      }),
+    )
+    log.set('response', enviado ? 'OK' : erro)
+    $app.save(log)
+  } catch (_) {}
 
   return e.json(200, {
     success: enviado,
@@ -880,6 +983,38 @@ routerAdd('POST', '/backend/v1/external/reenviar-participante', (e) => {
   } catch (err) {
     erro = err.message
   }
+
+  // audit: registra o REENVIO via API nos Logs.
+  try {
+    const logColl = $app.findCollectionByNameOrId('webhooks_log')
+    const log = new Record(logColl)
+    log.set('ingresso_id', ingressoId)
+    log.set('evento', 'api_reenvio_participante')
+    log.set('method', 'API')
+    log.set('status', enviado ? 200 : 0)
+    log.set(
+      'detalhe',
+      'E-mail (' +
+        templateNome +
+        ') redisparado via API externa pro participante ' +
+        (nome || email) +
+        ' (' +
+        email +
+        ') — ' +
+        (enviado ? 'enviado' : 'falhou (' + erro + ')'),
+    )
+    log.set(
+      'payload',
+      JSON.stringify({
+        acao: 'api_reenvio_participante',
+        participante_id: participante.id,
+        email: email,
+        template: templateNome,
+      }),
+    )
+    log.set('response', enviado ? 'OK' : erro)
+    $app.save(log)
+  } catch (_) {}
 
   return e.json(200, {
     success: enviado,

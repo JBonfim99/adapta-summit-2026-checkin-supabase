@@ -34,6 +34,22 @@ const MANUAL_EVENTOS: Record<string, { label: string; cls: string }> = {
     label: 'Comprador excluído',
     cls: 'border-rose-200 bg-rose-50 text-rose-700',
   },
+  api_criacao_comprador: {
+    label: 'API: comprador criado',
+    cls: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+  },
+  api_credenciamento: {
+    label: 'API: credenciamento',
+    cls: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+  },
+  api_reenvio_comprador: {
+    label: 'API: reenvio comprador',
+    cls: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+  },
+  api_reenvio_participante: {
+    label: 'API: reenvio participante',
+    cls: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+  },
 }
 
 // Pedido do log: usa o ingresso expandido; se ele foi excluído, cai no payload.

@@ -24,7 +24,9 @@ routerAdd(
       if (perPage > 200) perPage = 200
       const offset = (page - 1) * perPage
 
-      const MANUAL_LIST = "'excluido_manual','comprador_excluido','editado_manual','tipo_alterado'"
+      const MANUAL_LIST =
+        "'excluido_manual','comprador_excluido','editado_manual','tipo_alterado'," +
+        "'api_criacao_comprador','api_credenciamento','api_reenvio_comprador','api_reenvio_participante'"
 
       // CTE com as linhas "representativas": último log por ingresso vivo +
       // eventos manuais órfãos (ingresso não existe mais).
