@@ -1,7 +1,7 @@
 // ============================================================================
 // API EXTERNA — uso interno (parceiros/automação fora do painel admin).
 // Autenticação: chave estática fixa, enviada no header `X-Api-Key`.
-// Chave: summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7
+// Chave: summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5
 // (documentada + exibida na aba "API" do admin e no arquivo external-api.json)
 //
 // Endpoints:
@@ -20,11 +20,13 @@
 // api_credenciamento / api_reenvio_comprador / api_reenvio_participante),
 // visível na tela Logs — inclusive na aba "Ações manuais". Os GETs (busca) não
 // são logados, só leitura.
+//
+// Chave rotacionada em 2026-07-24 (a anterior foi invalidada).
 // ============================================================================
 
 // --- GET /external/compradores: busca comprador(es) + ingressos ------------
 routerAdd('GET', '/backend/v1/external/compradores', (e) => {
-  const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+  const API_KEY = 'summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5'
   const providedKey = e.request.header.get('X-Api-Key') || ''
   if (providedKey !== API_KEY) {
     return e.unauthorizedError('Chave de API inválida ou ausente (header X-Api-Key).')
@@ -107,7 +109,7 @@ routerAdd('GET', '/backend/v1/external/compradores', (e) => {
 
 // --- GET /external/participantes: busca participante(s) credenciado(s) -----
 routerAdd('GET', '/backend/v1/external/participantes', (e) => {
-  const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+  const API_KEY = 'summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5'
   const providedKey = e.request.header.get('X-Api-Key') || ''
   if (providedKey !== API_KEY) {
     return e.unauthorizedError('Chave de API inválida ou ausente (header X-Api-Key).')
@@ -189,7 +191,7 @@ routerAdd('GET', '/backend/v1/external/participantes', (e) => {
 
 // --- POST /external/compradores: cria comprador + ingressos + dispara email -
 routerAdd('POST', '/backend/v1/external/compradores', (e) => {
-  const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+  const API_KEY = 'summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5'
   const providedKey = e.request.header.get('X-Api-Key') || ''
   if (providedKey !== API_KEY) {
     return e.unauthorizedError('Chave de API inválida ou ausente (header X-Api-Key).')
@@ -434,7 +436,7 @@ routerAdd('POST', '/backend/v1/external/compradores', (e) => {
 
 // --- POST /external/credenciamento: credencia (sistema + INAC) -------------
 routerAdd('POST', '/backend/v1/external/credenciamento', (e) => {
-  const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+  const API_KEY = 'summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5'
   const providedKey = e.request.header.get('X-Api-Key') || ''
   if (providedKey !== API_KEY) {
     return e.unauthorizedError('Chave de API inválida ou ausente (header X-Api-Key).')
@@ -662,7 +664,7 @@ routerAdd('POST', '/backend/v1/external/credenciamento', (e) => {
 
 // --- POST /external/reenviar-comprador: redispara e-mail (template Email02) -
 routerAdd('POST', '/backend/v1/external/reenviar-comprador', (e) => {
-  const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+  const API_KEY = 'summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5'
   const providedKey = e.request.header.get('X-Api-Key') || ''
   if (providedKey !== API_KEY) {
     return e.unauthorizedError('Chave de API inválida ou ausente (header X-Api-Key).')
@@ -838,7 +840,7 @@ routerAdd('POST', '/backend/v1/external/reenviar-comprador', (e) => {
 
 // --- POST /external/reenviar-participante: redispara e-mail de participante -
 routerAdd('POST', '/backend/v1/external/reenviar-participante', (e) => {
-  const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+  const API_KEY = 'summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5'
   const providedKey = e.request.header.get('X-Api-Key') || ''
   if (providedKey !== API_KEY) {
     return e.unauthorizedError('Chave de API inválida ou ausente (header X-Api-Key).')

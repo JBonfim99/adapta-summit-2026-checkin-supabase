@@ -5,7 +5,7 @@
   "autenticacao": {
     "tipo": "header estático",
     "header": "X-Api-Key",
-    "chave": "summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7",
+    "chave": "summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5",
     "observacao": "Chave fixa única para todos os endpoints. Uso interno — não é rotacionada automaticamente."
   },
   "endpoints": [

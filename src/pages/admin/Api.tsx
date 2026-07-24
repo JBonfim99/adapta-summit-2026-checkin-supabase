@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Copy, Check, Download, KeyRound, Globe } from 'lucide-react'
 
-const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+const API_KEY = 'summit26_bi2cq40ggp9vyr62pxefccnn58elnfpe51v3vpp5'
 const BASE_URL = 'https://adapta-summit-2026-d2d58.shrd00.internal.goskip.dev'
 
 const METHOD_COLOR: Record<string, string> = {
