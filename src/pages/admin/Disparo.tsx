@@ -19,7 +19,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Mail, Send, Loader2, RotateCw, AlertTriangle, Inbox, Users } from 'lucide-react'
+import { Mail, Send, Loader2, RotateCw, AlertTriangle, Inbox, Users, Eye } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -72,6 +72,12 @@ export default function AdminDispatch() {
   const [retryingId, setRetryingId] = useState<string | null>(null)
   const [cronInfo, setCronInfo] = useState<{ last_run: string; now: string } | null>(null)
   const [detailDisparo, setDetailDisparo] = useState<Disparo | null>(null)
+
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewHtml, setPreviewHtml] = useState('')
+  const [previewSubject, setPreviewSubject] = useState('')
+  const [previewError, setPreviewError] = useState('')
 
   const loadTemplates = useCallback(() => {
     setLoadingTemplates(true)
@@ -171,6 +177,28 @@ export default function AdminDispatch() {
     }
   }
 
+  const handlePreviewTemplate = async () => {
+    if (!templateId) return
+    setPreviewOpen(true)
+    setPreviewLoading(true)
+    setPreviewError('')
+    setPreviewHtml('')
+    setPreviewSubject('')
+    try {
+      const res: any = await pb.send(
+        `/backend/v1/admin/sendgrid/templates/${templateId}/preview`,
+        {},
+      )
+      if (res.error) setPreviewError(res.error)
+      setPreviewHtml(res.html || '')
+      setPreviewSubject(res.subject || '')
+    } catch (e: any) {
+      setPreviewError(e.message || 'Falha ao carregar preview')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
   const handleRetry = async (id: string) => {
     setRetryingId(id)
     try {
@@ -236,7 +264,18 @@ export default function AdminDispatch() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-medium">Template (SendGrid)</label>
+              <div className="flex items-center gap-1.5">
+                <label className="text-sm font-medium">Template (SendGrid)</label>
+                <button
+                  type="button"
+                  onClick={handlePreviewTemplate}
+                  disabled={!templateId}
+                  className="text-muted-foreground hover:text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title="Ver preview do template"
+                >
+                  <Eye className="w-4 h-4" />
+                </button>
+              </div>
               {loadingTemplates ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground h-10 px-3 border rounded-md">
                   <Loader2 className="w-4 h-4 animate-spin" /> Carregando templates...
@@ -471,6 +510,39 @@ export default function AdminDispatch() {
               Confirmar disparo
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Preview do template (HTML) */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-3xl h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Preview: {templateName}</DialogTitle>
+            {previewSubject && <DialogDescription>Assunto: {previewSubject}</DialogDescription>}
+          </DialogHeader>
+          <div className="flex-1 min-h-0 rounded-lg border bg-white overflow-hidden">
+            {previewLoading ? (
+              <div className="h-full flex items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="w-5 h-5 animate-spin" /> Carregando preview...
+              </div>
+            ) : previewError ? (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-rose-600 p-6 text-center">
+                <AlertTriangle className="w-6 h-6" />
+                <p className="text-sm">{previewError}</p>
+              </div>
+            ) : previewHtml ? (
+              <iframe
+                title="Preview do template"
+                srcDoc={previewHtml}
+                sandbox=""
+                className="w-full h-full border-0"
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                Sem conteúdo HTML pra mostrar.
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

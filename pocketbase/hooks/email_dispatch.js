@@ -71,6 +71,63 @@ routerAdd(
   $apis.requireAuth(),
 )
 
+// --- Preview HTML de um template (pro ícone de olho no dropdown) ------------
+routerAdd(
+  'GET',
+  '/backend/v1/admin/sendgrid/templates/{id}/preview',
+  (e) => {
+    const templateId = e.request.pathValue('id')
+    if (!templateId) return e.badRequestError('id é obrigatório')
+
+    const apiKey = $os.getenv('SENDGRID_API_KEY')
+    if (!apiKey) return e.json(200, { html: '', error: 'SENDGRID_API_KEY não configurada' })
+
+    const decodeBody = (body) => {
+      if (body == null) return ''
+      if (typeof body === 'string') return body
+      try {
+        return new TextDecoder().decode(body)
+      } catch (_) {}
+      try {
+        let s = ''
+        for (let i = 0; i < body.length; i++) s += String.fromCharCode(body[i])
+        return s
+      } catch (_) {}
+      return ''
+    }
+
+    try {
+      const res = $http.send({
+        url: 'https://api.sendgrid.com/v3/templates/' + templateId,
+        method: 'GET',
+        headers: { Authorization: 'Bearer ' + apiKey },
+        timeout: 20,
+      })
+      const txt = decodeBody(res.body)
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return e.json(200, { html: '', error: 'SendGrid HTTP ' + res.statusCode })
+      }
+      let parsed = {}
+      try {
+        parsed = JSON.parse(txt)
+      } catch (_) {}
+      const versions = parsed.versions || []
+      let version = versions.find((v) => v && (v.active === 1 || v.active === true))
+      if (!version) version = versions[0]
+      if (!version) return e.json(200, { html: '', error: 'Template sem versão ativa' })
+
+      return e.json(200, {
+        html: version.html_content || '',
+        subject: version.subject || '',
+        name: parsed.name || templateId,
+      })
+    } catch (err) {
+      return e.json(200, { html: '', error: err.message })
+    }
+  },
+  $apis.requireAuth(),
+)
+
 // --- HEARTBEAT + HEALTH -----------------------------------------------------
 cronAdd('cron_heartbeat', '* * * * *', () => {
   try {
