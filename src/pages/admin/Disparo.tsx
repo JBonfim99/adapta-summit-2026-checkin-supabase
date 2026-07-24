@@ -19,7 +19,18 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Mail, Send, Loader2, RotateCw, AlertTriangle, Inbox, Users, Eye } from 'lucide-react'
+import {
+  Mail,
+  Send,
+  Loader2,
+  RotateCw,
+  AlertTriangle,
+  Inbox,
+  Users,
+  Eye,
+  ChevronLeft,
+  ChevronRight,
+} from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 import { useToast } from '@/hooks/use-toast'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -78,6 +89,9 @@ export default function AdminDispatch() {
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewSubject, setPreviewSubject] = useState('')
   const [previewError, setPreviewError] = useState('')
+
+  const [paginaHistorico, setPaginaHistorico] = useState(1)
+  const HISTORICO_POR_PAGINA = 10
 
   const loadTemplates = useCallback(() => {
     setLoadingTemplates(true)
@@ -377,84 +391,121 @@ export default function AdminDispatch() {
           </div>
         ) : (
           <div className="space-y-3">
-            {disparos.map((d) => {
-              const total = d.total || 0
-              const enviados = d.enviados || 0
-              const erros = d.erros || 0
-              const restantes = Math.max(0, total - enviados - erros)
-              const pct = total > 0 ? Math.round(((enviados + erros) / total) * 100) : 0
-              const emAndamento = d.status === 'em_andamento'
-
-              return (
-                <Card key={d.id} className="border shadow-sm">
-                  <CardContent className="p-5 space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold truncate">
-                            {d.nome || d.template_nome}
-                          </span>
-                          {emAndamento ? (
-                            <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1">
-                              <Loader2 className="w-3 h-3 animate-spin" /> Em andamento
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
-                              Concluído
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {CLUSTERS[d.cluster] || d.cluster} ·{' '}
-                          {new Date(d.created).toLocaleString('pt-BR')}
-                        </p>
-                      </div>
-                      {erros > 0 && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 gap-1 shrink-0"
-                          onClick={() => handleRetry(d.id)}
-                          disabled={retryingId === d.id}
-                        >
-                          {retryingId === d.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <RotateCw className="w-3 h-3" />
-                          )}
-                          Retentar erros ({erros})
-                        </Button>
-                      )}
-                    </div>
-
-                    <Progress value={pct} className="h-2" />
-
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-4 text-sm">
-                        <span className="text-emerald-700 font-medium">
-                          {enviados}{' '}
-                          <span className="text-muted-foreground font-normal">
-                            de {total} enviados
-                          </span>
-                        </span>
-                        {restantes > 0 && (
-                          <span className="text-amber-600">{restantes} na fila</span>
-                        )}
-                        {erros > 0 && <span className="text-rose-600">{erros} com erro</span>}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1 text-primary shrink-0"
-                        onClick={() => setDetailDisparo(d)}
-                      >
-                        <Users className="w-4 h-4" /> Ver contatos
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+            {disparos
+              .slice(
+                (paginaHistorico - 1) * HISTORICO_POR_PAGINA,
+                paginaHistorico * HISTORICO_POR_PAGINA,
               )
-            })}
+              .map((d) => {
+                const total = d.total || 0
+                const enviados = d.enviados || 0
+                const erros = d.erros || 0
+                const restantes = Math.max(0, total - enviados - erros)
+                const pct = total > 0 ? Math.round(((enviados + erros) / total) * 100) : 0
+                const emAndamento = d.status === 'em_andamento'
+
+                return (
+                  <Card key={d.id} className="border shadow-sm">
+                    <CardContent className="p-5 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold truncate">
+                              {d.nome || d.template_nome}
+                            </span>
+                            {emAndamento ? (
+                              <Badge className="bg-amber-100 text-amber-700 border-amber-200 gap-1">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Em andamento
+                              </Badge>
+                            ) : (
+                              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
+                                Concluído
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {CLUSTERS[d.cluster] || d.cluster} ·{' '}
+                            {new Date(d.created).toLocaleString('pt-BR')}
+                          </p>
+                        </div>
+                        {erros > 0 && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 gap-1 shrink-0"
+                            onClick={() => handleRetry(d.id)}
+                            disabled={retryingId === d.id}
+                          >
+                            {retryingId === d.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <RotateCw className="w-3 h-3" />
+                            )}
+                            Retentar erros ({erros})
+                          </Button>
+                        )}
+                      </div>
+
+                      <Progress value={pct} className="h-2" />
+
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-4 text-sm">
+                          <span className="text-emerald-700 font-medium">
+                            {enviados}{' '}
+                            <span className="text-muted-foreground font-normal">
+                              de {total} enviados
+                            </span>
+                          </span>
+                          {restantes > 0 && (
+                            <span className="text-amber-600">{restantes} na fila</span>
+                          )}
+                          {erros > 0 && <span className="text-rose-600">{erros} com erro</span>}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1 text-primary shrink-0"
+                          onClick={() => setDetailDisparo(d)}
+                        >
+                          <Users className="w-4 h-4" /> Ver contatos
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })}
+          </div>
+        )}
+        {disparos.length > HISTORICO_POR_PAGINA && (
+          <div className="flex items-center justify-between mt-4">
+            <p className="text-xs text-muted-foreground">
+              Página {paginaHistorico} de {Math.ceil(disparos.length / HISTORICO_POR_PAGINA)} ·{' '}
+              {disparos.length} disparo(s)
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() => setPaginaHistorico((p) => Math.max(1, p - 1))}
+                disabled={paginaHistorico <= 1}
+              >
+                <ChevronLeft className="w-4 h-4" /> Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() =>
+                  setPaginaHistorico((p) =>
+                    Math.min(Math.ceil(disparos.length / HISTORICO_POR_PAGINA), p + 1),
+                  )
+                }
+                disabled={paginaHistorico >= Math.ceil(disparos.length / HISTORICO_POR_PAGINA)}
+              >
+                Próxima <ChevronRight className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         )}
       </div>
