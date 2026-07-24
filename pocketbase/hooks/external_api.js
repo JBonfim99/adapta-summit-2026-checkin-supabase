@@ -12,7 +12,6 @@
 //   POST /backend/v1/external/reenviar-comprador    — redispara e-mail (template Email02)
 //   POST /backend/v1/external/reenviar-participante — redispara e-mail de participante
 //
-=======
 // REGRA JSVM: cada handler declara suas próprias constantes/helpers (não dá
 // pra compartilhar `const` de topo de arquivo entre handlers diferentes).
 //
@@ -21,7 +20,7 @@
 // api_credenciamento / api_reenvio_comprador / api_reenvio_participante),
 // visível na tela Logs — inclusive na aba "Ações manuais". Os GETs (busca) não
 // são logados, só leitura.
-// ========================================================================================================================================================
+// ============================================================================
 
 // --- GET /external/compradores: busca comprador(es) + ingressos ------------
 routerAdd('GET', '/backend/v1/external/compradores', (e) => {
