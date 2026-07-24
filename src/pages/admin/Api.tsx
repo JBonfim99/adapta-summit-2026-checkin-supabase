@@ -163,6 +163,42 @@ const ENDPOINTS = [
   "inac": { "credenciado": true, "qrcode": "6a3e7e67bcc45", "erro": "" }
 }`,
   },
+  {
+    metodo: 'POST',
+    caminho: '/backend/v1/external/reenviar-comprador',
+    descricao:
+      'Redispara o e-mail de acesso pra um comprador já existente — template "Skip-Summit26-Send-Comprador-Email02" (segundo lembrete). Gera um novo token de acesso (60 dias).',
+    params: [['comprador_id / email', 'um dos dois, obrigatório']],
+    exemplo: `curl -X POST "${BASE_URL}/backend/v1/external/reenviar-comprador" \\
+  -H "X-Api-Key: ${API_KEY}" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "email": "fulano@empresa.com" }'`,
+    resposta: `{
+  "success": true,
+  "comprador_id": "abc123def456xyz",
+  "email": "fulano@empresa.com",
+  "template": "Skip-Summit26-Send-Comprador-Email02",
+  "erro": ""
+}`,
+  },
+  {
+    metodo: 'POST',
+    caminho: '/backend/v1/external/reenviar-participante',
+    descricao:
+      'Redispara o e-mail de credenciamento (com o QR code) pra um participante já credenciado — template "Skip-Summit26-Send-Participante". Reaproveita o token do ingresso se ainda for válido.',
+    params: [['participante_id / email', 'um dos dois, obrigatório']],
+    exemplo: `curl -X POST "${BASE_URL}/backend/v1/external/reenviar-participante" \\
+  -H "X-Api-Key: ${API_KEY}" \\
+  -H "Content-Type: application/json" \\
+  -d '{ "email": "fulano@empresa.com" }'`,
+    resposta: `{
+  "success": true,
+  "participante_id": "part123",
+  "email": "fulano@empresa.com",
+  "template": "Skip-Summit26-Send-Participante",
+  "erro": ""
+}`,
+  },
 ]
 
 export default function AdminApi() {

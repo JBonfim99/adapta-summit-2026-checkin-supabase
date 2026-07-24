@@ -137,6 +137,38 @@
         "ingresso_id": "ing123",
         "inac": { "credenciado": true, "qrcode": "6a3e7e67bcc45", "erro": "" }
       }
+    },
+    {
+      "metodo": "POST",
+      "caminho": "/backend/v1/external/reenviar-comprador",
+      "descricao": "Redispara o e-mail de acesso pra um comprador já existente, usando o template 'Skip-Summit26-Send-Comprador-Email02' (segundo lembrete). Gera um novo token de acesso (60 dias).",
+      "body": {
+        "comprador_id": "string — um dos dois (comprador_id ou email)",
+        "email": "string — um dos dois (comprador_id ou email)"
+      },
+      "resposta_exemplo": {
+        "success": true,
+        "comprador_id": "abc123def456xyz",
+        "email": "fulano@empresa.com",
+        "template": "Skip-Summit26-Send-Comprador-Email02",
+        "erro": ""
+      }
+    },
+    {
+      "metodo": "POST",
+      "caminho": "/backend/v1/external/reenviar-participante",
+      "descricao": "Redispara o e-mail de credenciamento (com o QR code) pra um participante já credenciado, usando o template 'Skip-Summit26-Send-Participante'. Reaproveita o token do ingresso se ainda for válido, senão gera um novo (60 dias).",
+      "body": {
+        "participante_id": "string — um dos dois (participante_id ou email)",
+        "email": "string — um dos dois (participante_id ou email)"
+      },
+      "resposta_exemplo": {
+        "success": true,
+        "participante_id": "part123",
+        "email": "fulano@empresa.com",
+        "template": "Skip-Summit26-Send-Participante",
+        "erro": ""
+      }
     }
   ],
   "erros_comuns": {

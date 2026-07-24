@@ -5,10 +5,12 @@
 // (documentada + exibida na aba "API" do admin e no arquivo external-api.json)
 //
 // Endpoints:
-//   GET  /backend/v1/external/compradores      — busca compradores + ingressos
-//   GET  /backend/v1/external/participantes    — busca participantes credenciados
-//   POST /backend/v1/external/compradores      — cria comprador + ingressos, dispara email
-//   POST /backend/v1/external/credenciamento   — credencia (nosso sistema + INAC)
+//   GET  /backend/v1/external/compradores        — busca compradores + ingressos
+//   GET  /backend/v1/external/participantes      — busca participantes credenciados
+//   POST /backend/v1/external/compradores        — cria comprador + ingressos, dispara email
+//   POST /backend/v1/external/credenciamento     — credencia (nosso sistema + INAC)
+//   POST /backend/v1/external/reenviar-comprador    — redispara e-mail (template Email02)
+//   POST /backend/v1/external/reenviar-participante — redispara e-mail de participante
 //
 // REGRA JSVM: cada handler declara suas próprias constantes/helpers (não dá
 // pra compartilhar `const` de topo de arquivo entre handlers diferentes).
@@ -584,5 +586,306 @@ routerAdd('POST', '/backend/v1/external/credenciamento', (e) => {
     success: true,
     ingresso_id: ingresso.id,
     inac: { credenciado: inacOk, qrcode: qrcode, erro: inacOk ? '' : inacMsg },
+  })
+})
+
+// --- POST /external/reenviar-comprador: redispara e-mail (template Email02) -
+routerAdd('POST', '/backend/v1/external/reenviar-comprador', (e) => {
+  const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+  const providedKey = e.request.header.get('X-Api-Key') || ''
+  if (providedKey !== API_KEY) {
+    return e.unauthorizedError('Chave de API inválida ou ausente (header X-Api-Key).')
+  }
+
+  // Decodificador UTF-8 manual (o TextDecoder do JSVM não decodifica
+  // multi-byte direito aqui — ver correção aplicada no preview de template).
+  const decodeBody = (body) => {
+    if (body == null) return ''
+    if (typeof body === 'string') return body
+    let bytes
+    try {
+      bytes = new Uint8Array(body)
+    } catch (_) {
+      bytes = body
+    }
+    let result = ''
+    let i = 0
+    const len = bytes.length
+    while (i < len) {
+      const b1 = bytes[i++]
+      if (b1 < 0x80) {
+        result += String.fromCharCode(b1)
+      } else if ((b1 & 0xe0) === 0xc0 && i < len) {
+        const b2 = bytes[i++]
+        result += String.fromCharCode(((b1 & 0x1f) << 6) | (b2 & 0x3f))
+      } else if ((b1 & 0xf0) === 0xe0 && i + 1 < len) {
+        const b2 = bytes[i++]
+        const b3 = bytes[i++]
+        result += String.fromCharCode(((b1 & 0x0f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f))
+      } else if ((b1 & 0xf8) === 0xf0 && i + 2 < len) {
+        const b2 = bytes[i++]
+        const b3 = bytes[i++]
+        const b4 = bytes[i++]
+        let cp = ((b1 & 0x07) << 18) | ((b2 & 0x3f) << 12) | ((b3 & 0x3f) << 6) | (b4 & 0x3f)
+        cp -= 0x10000
+        result += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))
+      } else {
+        // ignora byte inválido
+      }
+    }
+    return result
+  }
+
+  const body = e.requestInfo().body || {}
+  const compradorId = (body.comprador_id || '').toString().trim()
+  const emailParam = (body.email || '').toString().trim().toLowerCase()
+  if (!compradorId && !emailParam) return e.badRequestError('Informe comprador_id ou email')
+
+  let comprador
+  try {
+    comprador = compradorId
+      ? $app.findRecordById('compradores', compradorId)
+      : $app.findFirstRecordByData('compradores', 'email', emailParam)
+  } catch (_) {
+    return e.notFoundError('Comprador não encontrado')
+  }
+
+  const email = comprador.getString('email')
+  const nome = comprador.getString('nome')
+  if (!email) return e.badRequestError('Este comprador não tem e-mail cadastrado')
+
+  const apiKeySendgrid = $os.getenv('SENDGRID_API_KEY')
+  if (!apiKeySendgrid) return e.badRequestError('SENDGRID_API_KEY não configurada')
+
+  const templateNome = 'Skip-Summit26-Send-Comprador-Email02'
+  let templateId = ''
+  try {
+    const res = $http.send({
+      url: 'https://api.sendgrid.com/v3/templates?generations=dynamic&page_size=200',
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + apiKeySendgrid },
+      timeout: 20,
+    })
+    const parsed = JSON.parse(decodeBody(res.body))
+    const list = parsed.result || parsed.templates || []
+    for (const t of list) {
+      if (t && t.name === templateNome && t.id) {
+        templateId = t.id
+        break
+      }
+    }
+  } catch (err) {
+    return e.badRequestError('Falha ao consultar templates no SendGrid: ' + err.message)
+  }
+  if (!templateId) {
+    return e.badRequestError('Template "' + templateNome + '" não encontrado no SendGrid')
+  }
+
+  let token = ''
+  try {
+    const tokenColl = $app.findCollectionByNameOrId('tokens_acesso')
+    token = $security.randomString(40)
+    const tr = new Record(tokenColl)
+    tr.set('comprador_id', comprador.id)
+    tr.set('token', token)
+    tr.set('usado', false)
+    const exp = new Date()
+    exp.setDate(exp.getDate() + 60)
+    tr.set('expira_em', exp.toISOString())
+    $app.save(tr)
+  } catch (err) {
+    return e.badRequestError('Falha ao gerar token de acesso: ' + err.message)
+  }
+
+  let enviado = false
+  let erro = ''
+  try {
+    const res = $http.send({
+      url: 'https://api.sendgrid.com/v3/mail/send',
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + apiKeySendgrid, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: { email: 'duvidas@adapta.org', name: 'Adapta Summit 2026' },
+        template_id: templateId,
+        personalizations: [
+          {
+            to: [{ email: email, name: nome }],
+            dynamic_template_data: {
+              firstname: (nome.split(' ')[0] || nome || '').trim(),
+              token: token,
+            },
+          },
+        ],
+      }),
+      timeout: 20,
+    })
+    enviado = res.statusCode >= 200 && res.statusCode < 300
+    if (!enviado) erro = 'SendGrid HTTP ' + res.statusCode
+  } catch (err) {
+    erro = err.message
+  }
+
+  return e.json(200, {
+    success: enviado,
+    comprador_id: comprador.id,
+    email: email,
+    template: templateNome,
+    erro: erro,
+  })
+})
+
+// --- POST /external/reenviar-participante: redispara e-mail de participante -
+routerAdd('POST', '/backend/v1/external/reenviar-participante', (e) => {
+  const API_KEY = 'summit26_sgzef29bc7sykc55e5b8prffzgqgaldc7ctxdnl7'
+  const providedKey = e.request.header.get('X-Api-Key') || ''
+  if (providedKey !== API_KEY) {
+    return e.unauthorizedError('Chave de API inválida ou ausente (header X-Api-Key).')
+  }
+
+  const decodeBody = (body) => {
+    if (body == null) return ''
+    if (typeof body === 'string') return body
+    let bytes
+    try {
+      bytes = new Uint8Array(body)
+    } catch (_) {
+      bytes = body
+    }
+    let result = ''
+    let i = 0
+    const len = bytes.length
+    while (i < len) {
+      const b1 = bytes[i++]
+      if (b1 < 0x80) {
+        result += String.fromCharCode(b1)
+      } else if ((b1 & 0xe0) === 0xc0 && i < len) {
+        const b2 = bytes[i++]
+        result += String.fromCharCode(((b1 & 0x1f) << 6) | (b2 & 0x3f))
+      } else if ((b1 & 0xf0) === 0xe0 && i + 1 < len) {
+        const b2 = bytes[i++]
+        const b3 = bytes[i++]
+        result += String.fromCharCode(((b1 & 0x0f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f))
+      } else if ((b1 & 0xf8) === 0xf0 && i + 2 < len) {
+        const b2 = bytes[i++]
+        const b3 = bytes[i++]
+        const b4 = bytes[i++]
+        let cp = ((b1 & 0x07) << 18) | ((b2 & 0x3f) << 12) | ((b3 & 0x3f) << 6) | (b4 & 0x3f)
+        cp -= 0x10000
+        result += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))
+      } else {
+        // ignora byte inválido
+      }
+    }
+    return result
+  }
+
+  const body = e.requestInfo().body || {}
+  const participanteId = (body.participante_id || '').toString().trim()
+  const emailParam = (body.email || '').toString().trim().toLowerCase()
+  if (!participanteId && !emailParam) {
+    return e.badRequestError('Informe participante_id ou email')
+  }
+
+  let participante
+  try {
+    participante = participanteId
+      ? $app.findRecordById('participantes', participanteId)
+      : $app.findFirstRecordByData('participantes', 'email', emailParam)
+  } catch (_) {
+    return e.notFoundError('Participante não encontrado')
+  }
+
+  const email = participante.getString('email')
+  const nome = participante.getString('nome_completo')
+  const ingressoId = participante.getString('ingresso_id')
+  if (!email) return e.badRequestError('Este participante não tem e-mail cadastrado')
+  if (!ingressoId) return e.badRequestError('Este participante não está vinculado a um ingresso')
+
+  const apiKeySendgrid = $os.getenv('SENDGRID_API_KEY')
+  if (!apiKeySendgrid) return e.badRequestError('SENDGRID_API_KEY não configurada')
+
+  const templateNome = 'Skip-Summit26-Send-Participante'
+  let templateId = ''
+  try {
+    const res = $http.send({
+      url: 'https://api.sendgrid.com/v3/templates?generations=dynamic&page_size=200',
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + apiKeySendgrid },
+      timeout: 20,
+    })
+    const parsed = JSON.parse(decodeBody(res.body))
+    const list = parsed.result || parsed.templates || []
+    for (const t of list) {
+      if (t && t.name === templateNome && t.id) {
+        templateId = t.id
+        break
+      }
+    }
+  } catch (err) {
+    return e.badRequestError('Falha ao consultar templates no SendGrid: ' + err.message)
+  }
+  if (!templateId) {
+    return e.badRequestError('Template "' + templateNome + '" não encontrado no SendGrid')
+  }
+
+  // {{token}} = token do INGRESSO do participante (links_participante) —
+  // acha o existente ou cria um novo de 60 dias, igual ao fluxo do cron.
+  let token = ''
+  try {
+    try {
+      const link = $app.findFirstRecordByFilter('links_participante', 'ingresso_id = {:iid}', {
+        iid: ingressoId,
+      })
+      token = link.getString('token')
+    } catch (_) {
+      const linksColl = $app.findCollectionByNameOrId('links_participante')
+      token = $security.randomString(40)
+      const lr = new Record(linksColl)
+      lr.set('ingresso_id', ingressoId)
+      lr.set('token', token)
+      lr.set('usado', false)
+      const exp = new Date()
+      exp.setDate(exp.getDate() + 60)
+      lr.set('expira_em', exp.toISOString())
+      $app.save(lr)
+    }
+  } catch (err) {
+    return e.badRequestError('Falha ao gerar token do ingresso: ' + err.message)
+  }
+
+  let enviado = false
+  let erro = ''
+  try {
+    const res = $http.send({
+      url: 'https://api.sendgrid.com/v3/mail/send',
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + apiKeySendgrid, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: { email: 'duvidas@adapta.org', name: 'Adapta Summit 2026' },
+        template_id: templateId,
+        personalizations: [
+          {
+            to: [{ email: email, name: nome }],
+            dynamic_template_data: {
+              firstname: (nome.split(' ')[0] || nome || '').trim(),
+              token: token,
+            },
+          },
+        ],
+      }),
+      timeout: 20,
+    })
+    enviado = res.statusCode >= 200 && res.statusCode < 300
+    if (!enviado) erro = 'SendGrid HTTP ' + res.statusCode
+  } catch (err) {
+    erro = err.message
+  }
+
+  return e.json(200, {
+    success: enviado,
+    participante_id: participante.id,
+    email: email,
+    template: templateNome,
+    erro: erro,
   })
 })
