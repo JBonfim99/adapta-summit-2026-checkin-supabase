@@ -6,6 +6,7 @@ import { AlertCircle, ArrowRightLeft, CheckCircle2, Loader2, QrCode, Save } from
 import PessoaForm from '@/components/helpdesk/PessoaForm'
 import QrGrande from '@/components/helpdesk/QrGrande'
 import {
+  avisosDe,
   hdCredenciar,
   hdEditar,
   hdGerarQr,
@@ -32,6 +33,25 @@ function Erro({ msg }: { msg: string }) {
     <div className="flex items-start gap-3 rounded-xl border-2 border-rose-200 bg-rose-50 p-4 text-base text-rose-800">
       <AlertCircle className="w-6 h-6 shrink-0 mt-0.5" />
       <span>{msg}</span>
+    </div>
+  )
+}
+
+// Ação concluída, mas com alguma parte que não saiu perfeita. Aparece sempre —
+// nunca engolimos esse tipo de problema.
+function Avisos({ lista }: { lista: string[] }) {
+  if (!lista || lista.length === 0) return null
+  return (
+    <div className="space-y-2">
+      {lista.map((a, i) => (
+        <div
+          key={i}
+          className="flex items-start gap-3 rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-base text-amber-900"
+        >
+          <AlertCircle className="w-6 h-6 shrink-0 mt-0.5" />
+          <span>{a}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -69,12 +89,14 @@ export function CredenciarDialog({
   const [salvando, setSalvando] = useState(false)
   const [qr, setQr] = useState('')
   const [avisoQr, setAvisoQr] = useState('')
+  const [avisos, setAvisos] = useState<string[]>([])
 
   useEffect(() => {
     if (!ingresso) return
     setErro('')
     setQr('')
     setAvisoQr('')
+    setAvisos([])
     setSalvando(false)
     const doc = (comprador?.documento || '').replace(/\D/g, '')
     setForm({
@@ -101,8 +123,10 @@ export function CredenciarDialog({
     setSalvando(true)
     try {
       const res: any = await hdCredenciar(ingresso.id, form)
+      setAvisos(avisosDe(res))
       if (res.qrcode) setQr(res.qrcode)
-      else setAvisoQr(res.inac_msg || 'A credencial foi registrada, mas o QR ainda não veio.')
+      else
+        setAvisoQr(res.inac_msg || 'o servidor não informou o motivo — chame o suporte se repetir')
       onDone()
     } catch (e: any) {
       setErro(e.message)
@@ -125,6 +149,7 @@ export function CredenciarDialog({
             <div className="flex items-center justify-center gap-2 text-emerald-700 text-lg font-semibold">
               <CheckCircle2 className="w-6 h-6" /> Credencial criada com sucesso
             </div>
+            <Avisos lista={avisos} />
             <QrGrande value={qr} nome={form.nome_completo} arquivo={ingresso?.pedido_id} />
             <Button variant="outline" size="lg" className="w-full h-14 text-base" onClick={onClose}>
               Concluir
@@ -133,8 +158,9 @@ export function CredenciarDialog({
         ) : avisoQr ? (
           <div className="space-y-5 py-2">
             <Erro
-              msg={`A pessoa foi credenciada, mas o QR Code ainda não foi gerado (${avisoQr}). Feche e clique em "Ver QR Code" daqui a pouco para tentar de novo.`}
+              msg={`A pessoa foi credenciada, mas o QR Code ainda NÃO foi gerado. Motivo: ${avisoQr}. Feche esta janela e clique em "Gerar credencial" no ingresso daqui a pouco.`}
             />
+            <Avisos lista={avisos} />
             <Button variant="outline" size="lg" className="w-full h-14 text-base" onClick={onClose}>
               Fechar
             </Button>
@@ -204,12 +230,14 @@ export function QrDialog({
   const [nome, setNome] = useState('')
   const [temParticipante, setTemParticipante] = useState(false)
   const [erro, setErro] = useState('')
+  const [avisos, setAvisos] = useState<string[]>([])
 
   useEffect(() => {
     if (!ingresso) return
     setQr('')
     setErro('')
     setNome('')
+    setAvisos([])
     setCarregando(true)
     hdVerQr(ingresso.id)
       .then((res: any) => {
@@ -227,6 +255,12 @@ export function QrDialog({
     setGerando(true)
     try {
       const res: any = await hdGerarQr(ingresso.id)
+      setAvisos(avisosDe(res))
+      if (!res.qrcode) {
+        setErro(
+          'O servidor respondeu que deu certo, mas não devolveu o código da credencial. Chame o suporte antes de tentar de novo.',
+        )
+      }
       setQr(res.qrcode || '')
       onDone()
     } catch (e: any) {
@@ -289,6 +323,7 @@ export function QrDialog({
           )}
 
           <Erro msg={erro} />
+          <Avisos lista={avisos} />
 
           <Button variant="outline" size="lg" className="w-full h-14 text-base" onClick={onClose}>
             Fechar
@@ -313,6 +348,7 @@ export function AlterarDialog({
   const [form, setForm] = useState<HDPessoaForm>(VAZIO)
   const [erro, setErro] = useState('')
   const [ok, setOk] = useState('')
+  const [avisos, setAvisos] = useState<string[]>([])
   const [salvando, setSalvando] = useState(false)
   const [trocando, setTrocando] = useState(false)
   const [confirmarTroca, setConfirmarTroca] = useState(false)
@@ -322,6 +358,7 @@ export function AlterarDialog({
     if (!ingresso) return
     setErro('')
     setOk('')
+    setAvisos([])
     setConfirmarTroca(false)
     setTipoAtual(ingresso.tipo_ingresso)
     const p = ingresso.participante
@@ -340,9 +377,11 @@ export function AlterarDialog({
     if (!ingresso) return
     setErro('')
     setOk('')
+    setAvisos([])
     setSalvando(true)
     try {
-      await hdEditar(ingresso.id, form)
+      const res: any = await hdEditar(ingresso.id, form)
+      setAvisos(avisosDe(res))
       setOk('Dados alterados com sucesso.')
       onDone()
     } catch (e: any) {
@@ -356,9 +395,11 @@ export function AlterarDialog({
     if (!ingresso) return
     setErro('')
     setOk('')
+    setAvisos([])
     setTrocando(true)
     try {
-      await hdTrocarTipo(ingresso.id, outroTipo as 'GOLD' | 'PLATINUM')
+      const res: any = await hdTrocarTipo(ingresso.id, outroTipo as 'GOLD' | 'PLATINUM')
+      setAvisos(avisosDe(res))
       setTipoAtual(outroTipo)
       setConfirmarTroca(false)
       setOk(`Ingresso alterado para ${outroTipo}.`)
@@ -467,6 +508,7 @@ export function AlterarDialog({
           </div>
 
           <Erro msg={erro} />
+          <Avisos lista={avisos} />
           {ok && (
             <div className="flex items-start gap-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4 text-base text-emerald-800">
               <CheckCircle2 className="w-6 h-6 shrink-0 mt-0.5" />

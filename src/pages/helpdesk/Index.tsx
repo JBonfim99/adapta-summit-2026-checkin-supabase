@@ -28,10 +28,16 @@ import { AlterarDialog, CredenciarDialog, QrDialog } from '@/components/helpdesk
 
 // ------------------------------------------------------------------ login
 
-function LoginHelpdesk({ onEntrar }: { onEntrar: () => void }) {
+function LoginHelpdesk({
+  onEntrar,
+  avisoInicial,
+}: {
+  onEntrar: () => void
+  avisoInicial?: string
+}) {
   const [senha, setSenha] = useState('')
   const [nome, setNome] = useState('')
-  const [erro, setErro] = useState('')
+  const [erro, setErro] = useState(avisoInicial || '')
   const [entrando, setEntrando] = useState(false)
 
   const entrar = async (ev: React.FormEvent) => {
@@ -71,7 +77,6 @@ function LoginHelpdesk({ onEntrar }: { onEntrar: () => void }) {
               onChange={(e) => setNome(e.target.value)}
               autoComplete="off"
             />
-            <p className="text-sm text-slate-500">Fica registrado em tudo que você fizer aqui.</p>
           </div>
 
           <div className="space-y-2">
@@ -205,6 +210,7 @@ export default function Helpdesk() {
   const [buscando, setBuscando] = useState(false)
   const [buscou, setBuscou] = useState(false)
   const [erro, setErro] = useState('')
+  const [motivoSaida, setMotivoSaida] = useState('')
   const [resultados, setResultados] = useState<HDComprador[]>([])
   const [ultimaBusca, setUltimaBusca] = useState('')
 
@@ -223,15 +229,23 @@ export default function Helpdesk() {
     setResultados([])
     setBuscou(false)
     setQ('')
+    setMotivoSaida('')
     setLogado(false)
   }
 
+  // Nada de erro sem explicação: se a senha for recusada no meio do
+  // atendimento, o motivo aparece na tela de entrada.
   const tratarErro = (e: any) => {
     if (e instanceof HelpdeskAuthError) {
+      setMotivoSaida(
+        `${e.message} Se a senha do balcão foi trocada agora, peça a nova para o responsável.`,
+      )
+      setResultados([])
+      setBuscou(false)
       setLogado(false)
       return
     }
-    setErro(e.message)
+    setErro(e?.message || 'Algo falhou e o sistema não recebeu o motivo. Chame o suporte.')
   }
 
   const buscar = async (termo?: string) => {
@@ -258,7 +272,18 @@ export default function Helpdesk() {
     if (ultimaBusca) buscar(ultimaBusca)
   }
 
-  if (!logado) return <LoginHelpdesk onEntrar={() => setLogado(true)} />
+  if (!logado) {
+    return (
+      <LoginHelpdesk
+        avisoInicial={motivoSaida}
+        onEntrar={() => {
+          setMotivoSaida('')
+          setErro('')
+          setLogado(true)
+        }}
+      />
+    )
+  }
 
   return (
     <div className="min-h-screen bg-slate-100">

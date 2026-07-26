@@ -452,6 +452,9 @@ routerAdd('POST', '/backend/v1/helpdesk/credenciar', (e) => {
   }
 
   // pós-commit: cria a credencial na INAC e guarda o QR
+  // "avisos" carrega tudo que deu errado DEPOIS da ação principal — nada aqui
+  // pode falhar em silêncio, o balcão precisa saber o que sobrou pendente.
+  const avisos = []
   let qrcode = ''
   let inacOk = false
   let inacMsg = ''
@@ -485,7 +488,10 @@ routerAdd('POST', '/backend/v1/helpdesk/credenciar', (e) => {
       }
 
       if (!token) {
-        inacMsg = 'INAC_AUTH_TOKEN não configurado'
+        inacMsg = 'o token de acesso à INAC não está configurado no servidor'
+        avisos.push(
+          'A pessoa foi cadastrada aqui, mas NENHUMA credencial foi emitida: o token da INAC não está configurado no servidor. Avise o suporte agora — enquanto isso nenhum QR Code vai ser gerado.',
+        )
         ing2.set('status_webhook', 'erro')
         $app.save(ing2)
       } else {
@@ -525,7 +531,17 @@ routerAdd('POST', '/backend/v1/helpdesk/credenciar', (e) => {
         } else {
           ing2.set('status_webhook', 'erro')
         }
-        $app.save(ing2)
+        try {
+          $app.save(ing2)
+        } catch (errSave) {
+          avisos.push(
+            'A credencial foi criada na INAC (id ' +
+              inacId +
+              '), mas NÃO foi possível gravar isso aqui: ' +
+              ((errSave && errSave.message) || 'erro desconhecido') +
+              '. Mostre o QR desta tela para a pessoa e avise o suporte. NÃO clique em gerar de novo — isso duplicaria a credencial dela.',
+          )
+        }
 
         log(
           ingressoId,
@@ -541,38 +557,64 @@ routerAdd('POST', '/backend/v1/helpdesk/credenciar', (e) => {
       }
     }
   } catch (err) {
-    inacMsg = (err && err.message) || 'erro'
+    inacMsg = (err && err.message) || 'erro inesperado ao falar com a INAC'
+    avisos.push(
+      'A pessoa foi cadastrada aqui, mas houve um erro ao gerar a credencial: ' +
+        inacMsg +
+        '. Use o botão "Gerar credencial" no ingresso para tentar de novo.',
+    )
   }
 
-  log(
-    ingressoId,
-    'helpdesk_credenciamento',
-    'Help desk (' +
-      operador +
-      ') — ingresso ' +
-      pedidoId +
-      ' (' +
-      tipo +
-      ') — credenciou ' +
-      nome +
-      (inacOk ? ' — QR gerado.' : ' — FALHA ao gerar o QR na INAC.'),
-    {
-      origem: 'helpdesk',
-      acao: 'credenciamento',
-      operador: operador,
-      pedido_id: pedidoId,
-      tipo: tipo,
-      dados: {
-        nome_completo: nome,
-        email: email,
-        cpf: cpf,
-        telefone: telefone,
-        empresa: empresa,
-      },
-    },
-    inacOk ? 'INAC /add OK' : 'INAC: ' + inacMsg,
-    200,
-  )
+  // Registro de auditoria da ação principal, com confirmação de gravação.
+  let logOk = true
+  try {
+    const collA = $app.findCollectionByNameOrId('webhooks_log')
+    const recA = new Record(collA)
+    recA.set('ingresso_id', ingressoId)
+    recA.set('evento', 'helpdesk_credenciamento')
+    recA.set('method', 'HELPDESK')
+    recA.set('status', 200)
+    recA.set(
+      'detalhe',
+      'Help desk (' +
+        operador +
+        ') — ingresso ' +
+        pedidoId +
+        ' (' +
+        tipo +
+        ') — credenciou ' +
+        nome +
+        (inacOk ? ' — QR gerado.' : ' — FALHA ao gerar o QR na INAC.'),
+    )
+    recA.set(
+      'payload',
+      JSON.stringify({
+        origem: 'helpdesk',
+        acao: 'credenciamento',
+        operador: operador,
+        pedido_id: pedidoId,
+        tipo: tipo,
+        dados: {
+          nome_completo: nome,
+          email: email,
+          cpf: cpf,
+          telefone: telefone,
+          empresa: empresa,
+        },
+      }),
+    )
+    recA.set('response', inacOk ? 'INAC /add OK' : 'INAC: ' + inacMsg)
+    $app.save(recA)
+  } catch (errL) {
+    logOk = false
+    avisos.push(
+      'A ação foi concluída, mas o registro dela no histórico falhou: ' +
+        ((errL && errL.message) || 'erro desconhecido') +
+        '. Anote o pedido ' +
+        pedidoId +
+        ' e avise o suporte.',
+    )
+  }
 
   return e.json(200, {
     ok: true,
@@ -582,6 +624,8 @@ routerAdd('POST', '/backend/v1/helpdesk/credenciar', (e) => {
     nome: nome,
     pedido_id: pedidoId,
     tipo_ingresso: tipo,
+    avisos: avisos,
+    log_ok: logOk,
   })
 })
 
@@ -833,36 +877,58 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/editar', (e) => {
     })
   }
 
-  log(
-    ticketId,
-    'helpdesk_edicao',
-    'Help desk (' +
-      operador +
-      ') — ingresso ' +
-      ingresso.getString('pedido_id') +
-      ' — dados alterados: ' +
-      antes.nome_completo +
-      ' -> ' +
-      nome,
-    {
-      origem: 'helpdesk',
-      acao: 'edicao',
-      operador: operador,
-      pedido_id: ingresso.getString('pedido_id'),
-      antes: antes,
-      depois: {
-        nome_completo: nome,
-        email: email,
-        cpf: cpf,
-        telefone: telefone,
-        empresa: empresa,
-      },
-    },
-    inacId ? 'INAC /edit OK (' + inacMsg + ')' : inacMsg,
-    200,
-  )
+  // Registro de auditoria da ação principal, com confirmação de gravação.
+  const avisos = []
+  let logOk = true
+  try {
+    const collA = $app.findCollectionByNameOrId('webhooks_log')
+    const recA = new Record(collA)
+    recA.set('ingresso_id', ticketId)
+    recA.set('evento', 'helpdesk_edicao')
+    recA.set('method', 'HELPDESK')
+    recA.set('status', 200)
+    recA.set(
+      'detalhe',
+      'Help desk (' +
+        operador +
+        ') — ingresso ' +
+        ingresso.getString('pedido_id') +
+        ' — dados alterados: ' +
+        antes.nome_completo +
+        ' -> ' +
+        nome,
+    )
+    recA.set(
+      'payload',
+      JSON.stringify({
+        origem: 'helpdesk',
+        acao: 'edicao',
+        operador: operador,
+        pedido_id: ingresso.getString('pedido_id'),
+        antes: antes,
+        depois: {
+          nome_completo: nome,
+          email: email,
+          cpf: cpf,
+          telefone: telefone,
+          empresa: empresa,
+        },
+      }),
+    )
+    recA.set('response', inacId ? 'INAC /edit OK (' + inacMsg + ')' : inacMsg)
+    $app.save(recA)
+  } catch (errL) {
+    logOk = false
+    avisos.push(
+      'A alteração foi salva, mas o registro dela no histórico falhou: ' +
+        ((errL && errL.message) || 'erro desconhecido') +
+        '. Anote o pedido ' +
+        ingresso.getString('pedido_id') +
+        ' e avise o suporte.',
+    )
+  }
 
-  return e.json(200, { ok: true })
+  return e.json(200, { ok: true, avisos: avisos, log_ok: logOk })
 })
 
 // --- Trocar o tipo do ingresso (GOLD <-> PLATINUM) ---
@@ -1042,31 +1108,53 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/tipo', (e) => {
     })
   }
 
-  log(
-    ticketId,
-    'helpdesk_tipo_alterado',
-    'Help desk (' +
-      operador +
-      ') — ingresso ' +
-      ingresso.getString('pedido_id') +
-      ' — tipo alterado de ' +
-      tipoAntes +
-      ' para ' +
-      tipo +
-      (inacId ? ' (INAC atualizada).' : '.'),
-    {
-      origem: 'helpdesk',
-      acao: 'tipo',
-      operador: operador,
-      pedido_id: ingresso.getString('pedido_id'),
-      de: tipoAntes,
-      para: tipo,
-    },
-    inacId ? 'INAC /edit OK (' + inacMsg + ')' : inacMsg,
-    200,
-  )
+  // Registro de auditoria da ação principal, com confirmação de gravação.
+  const avisos = []
+  let logOk = true
+  try {
+    const collA = $app.findCollectionByNameOrId('webhooks_log')
+    const recA = new Record(collA)
+    recA.set('ingresso_id', ticketId)
+    recA.set('evento', 'helpdesk_tipo_alterado')
+    recA.set('method', 'HELPDESK')
+    recA.set('status', 200)
+    recA.set(
+      'detalhe',
+      'Help desk (' +
+        operador +
+        ') — ingresso ' +
+        ingresso.getString('pedido_id') +
+        ' — tipo alterado de ' +
+        tipoAntes +
+        ' para ' +
+        tipo +
+        (inacId ? ' (INAC atualizada).' : '.'),
+    )
+    recA.set(
+      'payload',
+      JSON.stringify({
+        origem: 'helpdesk',
+        acao: 'tipo',
+        operador: operador,
+        pedido_id: ingresso.getString('pedido_id'),
+        de: tipoAntes,
+        para: tipo,
+      }),
+    )
+    recA.set('response', inacId ? 'INAC /edit OK (' + inacMsg + ')' : inacMsg)
+    $app.save(recA)
+  } catch (errL) {
+    logOk = false
+    avisos.push(
+      'A troca de tipo foi feita, mas o registro dela no histórico falhou: ' +
+        ((errL && errL.message) || 'erro desconhecido') +
+        '. Anote o pedido ' +
+        ingresso.getString('pedido_id') +
+        ' e avise o suporte.',
+    )
+  }
 
-  return e.json(200, { ok: true, tipo: tipo })
+  return e.json(200, { ok: true, tipo: tipo, avisos: avisos, log_ok: logOk })
 })
 
 // --- Ver o QR Code da credencial (registra a consulta) ---
@@ -1104,21 +1192,6 @@ routerAdd('GET', '/backend/v1/helpdesk/ticket/{id}/qr', (e) => {
     } catch (_) {}
     return ''
   }
-  const log = (ingId, evento, detalhe, payloadObj, response, status) => {
-    try {
-      const coll = $app.findCollectionByNameOrId('webhooks_log')
-      const rec = new Record(coll)
-      if (ingId) rec.set('ingresso_id', ingId)
-      rec.set('evento', evento)
-      rec.set('method', 'HELPDESK')
-      rec.set('status', typeof status === 'number' ? status : 200)
-      rec.set('detalhe', detalhe || '')
-      rec.set('payload', JSON.stringify(payloadObj || {}))
-      rec.set('response', (response || '').toString().substring(0, 500))
-      $app.save(rec)
-    } catch (_) {}
-  }
-
   const expected = secret('HELPDESK_PASSWORD')
   if (!expected) return e.json(503, { message: 'Área de help desk não configurada.' })
   let sent = readH('X-Helpdesk-Key')
@@ -1144,24 +1217,43 @@ routerAdd('GET', '/backend/v1/helpdesk/ticket/{id}/qr', (e) => {
   }
 
   const qr = ingresso.getString('inac_qr')
+  const avisos = []
+  let logOk = true
   if (qr) {
-    log(
-      ticketId,
-      'helpdesk_qr',
-      'Help desk (' +
-        operador +
-        ') — QR Code consultado — ingresso ' +
-        ingresso.getString('pedido_id') +
-        (nomePart ? ' — ' + nomePart : ''),
-      {
-        origem: 'helpdesk',
-        acao: 'qr_consultado',
-        operador: operador,
-        pedido_id: ingresso.getString('pedido_id'),
-      },
-      'QR entregue no balcão.',
-      200,
-    )
+    try {
+      const collA = $app.findCollectionByNameOrId('webhooks_log')
+      const recA = new Record(collA)
+      recA.set('ingresso_id', ticketId)
+      recA.set('evento', 'helpdesk_qr')
+      recA.set('method', 'HELPDESK')
+      recA.set('status', 200)
+      recA.set(
+        'detalhe',
+        'Help desk (' +
+          operador +
+          ') — QR Code consultado — ingresso ' +
+          ingresso.getString('pedido_id') +
+          (nomePart ? ' — ' + nomePart : ''),
+      )
+      recA.set(
+        'payload',
+        JSON.stringify({
+          origem: 'helpdesk',
+          acao: 'qr_consultado',
+          operador: operador,
+          pedido_id: ingresso.getString('pedido_id'),
+        }),
+      )
+      recA.set('response', 'QR entregue no balcão.')
+      $app.save(recA)
+    } catch (errL) {
+      logOk = false
+      avisos.push(
+        'O QR Code apareceu normalmente, mas esta consulta não foi registrada no histórico: ' +
+          ((errL && errL.message) || 'erro desconhecido') +
+          '. Avise o suporte.',
+      )
+    }
   }
 
   return e.json(200, {
@@ -1171,6 +1263,8 @@ routerAdd('GET', '/backend/v1/helpdesk/ticket/{id}/qr', (e) => {
     tipo_ingresso: ingresso.getString('tipo_ingresso'),
     nome: nomePart,
     tem_participante: !!partId,
+    avisos: avisos,
+    log_ok: logOk,
   })
 })
 
@@ -1321,43 +1415,94 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/gerar-qr', (e) => {
   const ok = !!qrcode
   const msg = erroMsg ? erroMsg : 'HTTP ' + status + (ok ? '' : ' ' + respTxt.substring(0, 200))
 
-  if (ok) {
-    ingresso.set('inac_id', inacId)
-    ingresso.set('inac_qr', qrcode)
-    ingresso.set('status_webhook', 'enviado')
-  } else {
-    ingresso.set('status_webhook', 'erro')
-  }
-  try {
-    $app.save(ingresso)
-  } catch (_) {}
-
-  log(
-    ticketId,
-    ok ? 'helpdesk_qr_gerado' : 'helpdesk_erro',
-    'Help desk (' +
-      operador +
-      ') — ' +
-      (ok ? 'credencial gerada' : 'FALHA ao gerar credencial') +
-      ' — ingresso ' +
-      ingresso.getString('pedido_id') +
-      ' — ' +
-      part.getString('nome_completo'),
-    {
-      origem: 'helpdesk',
-      acao: 'gerar_qr',
-      operador: operador,
-      pedido_id: ingresso.getString('pedido_id'),
-      inac_id: inacId,
-    },
-    ok ? 'INAC /add OK — ' + msg : 'INAC: ' + msg,
-    status || 200,
-  )
+  const avisos = []
 
   if (!ok) {
+    log(
+      ticketId,
+      'helpdesk_erro',
+      'Help desk (' +
+        operador +
+        ') — FALHA ao gerar credencial — ingresso ' +
+        ingresso.getString('pedido_id') +
+        ' — ' +
+        part.getString('nome_completo'),
+      {
+        origem: 'helpdesk',
+        acao: 'gerar_qr_falha',
+        operador: operador,
+        pedido_id: ingresso.getString('pedido_id'),
+      },
+      'INAC: ' + msg,
+      status || 200,
+    )
+    try {
+      ingresso.set('status_webhook', 'erro')
+      $app.save(ingresso)
+    } catch (_) {}
     return e.json(502, {
-      message: 'A INAC não confirmou a credencial (' + msg + '). Tente de novo em instantes.',
+      message:
+        'A INAC não confirmou a credencial. Motivo: ' +
+        msg +
+        '. Tente de novo em alguns segundos; se repetir, chame o suporte antes de tentar outra vez.',
     })
   }
-  return e.json(200, { ok: true, qrcode: qrcode })
+
+  ingresso.set('inac_id', inacId)
+  ingresso.set('inac_qr', qrcode)
+  ingresso.set('status_webhook', 'enviado')
+  try {
+    $app.save(ingresso)
+  } catch (errSave) {
+    avisos.push(
+      'A credencial foi criada na INAC (id ' +
+        inacId +
+        '), mas NÃO foi possível gravar isso aqui: ' +
+        ((errSave && errSave.message) || 'erro desconhecido') +
+        '. Mostre o QR desta tela para a pessoa e avise o suporte. NÃO gere de novo — isso duplicaria a credencial dela.',
+    )
+  }
+
+  // Registro de auditoria da ação principal, com confirmação de gravação.
+  let logOk = true
+  try {
+    const collA = $app.findCollectionByNameOrId('webhooks_log')
+    const recA = new Record(collA)
+    recA.set('ingresso_id', ticketId)
+    recA.set('evento', 'helpdesk_qr_gerado')
+    recA.set('method', 'HELPDESK')
+    recA.set('status', status || 200)
+    recA.set(
+      'detalhe',
+      'Help desk (' +
+        operador +
+        ') — credencial gerada — ingresso ' +
+        ingresso.getString('pedido_id') +
+        ' — ' +
+        part.getString('nome_completo'),
+    )
+    recA.set(
+      'payload',
+      JSON.stringify({
+        origem: 'helpdesk',
+        acao: 'gerar_qr',
+        operador: operador,
+        pedido_id: ingresso.getString('pedido_id'),
+        inac_id: inacId,
+      }),
+    )
+    recA.set('response', 'INAC /add OK — ' + msg)
+    $app.save(recA)
+  } catch (errL) {
+    logOk = false
+    avisos.push(
+      'A credencial foi gerada, mas o registro dela no histórico falhou: ' +
+        ((errL && errL.message) || 'erro desconhecido') +
+        '. Anote o pedido ' +
+        ingresso.getString('pedido_id') +
+        ' e avise o suporte.',
+    )
+  }
+
+  return e.json(200, { ok: true, qrcode: qrcode, avisos: avisos, log_ok: logOk })
 })

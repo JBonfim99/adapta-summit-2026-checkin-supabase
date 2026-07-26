@@ -47,6 +47,37 @@ export interface HDPessoaForm {
 
 export class HelpdeskAuthError extends Error {}
 
+// Tempo máximo de espera. Ações que falam com a INAC podem demorar ~15s.
+const TIMEOUT_MS = 45000
+
+// Tradução do código HTTP para uma frase que o atendente entende.
+function motivoHttp(status: number): string {
+  if (status === 400) return 'O servidor recusou os dados enviados'
+  if (status === 403) return 'Acesso negado pelo servidor'
+  if (status === 404) return 'Registro não encontrado no servidor'
+  if (status === 429) return 'Muitas tentativas seguidas — espere alguns segundos'
+  if (status === 502) return 'A INAC (sistema das credenciais) não respondeu'
+  if (status === 503) return 'O servidor está fora do ar ou reiniciando'
+  if (status === 504) return 'O servidor demorou demais para responder'
+  if (status >= 500) return 'Erro interno do servidor'
+  return 'O servidor recusou a operação'
+}
+
+// Junta os avisos que o servidor devolve quando a ação foi feita, mas alguma
+// parte dela não saiu perfeita (log não gravado, gravação parcial, etc).
+export function avisosDe(res: any): string[] {
+  const lista: string[] = Array.isArray(res?.avisos) ? [...res.avisos] : []
+  if (res && res.log_ok === false) {
+    lista.push(
+      'A ação foi feita, mas o registro dela no histórico (/admin/logs) não pôde ser gravado. Anote o que foi feito e avise o suporte.',
+    )
+  }
+  if (res && res.inac_ok === false && res.inac_msg) {
+    lista.push(`A INAC não confirmou a credencial. Motivo: ${res.inac_msg}`)
+  }
+  return lista
+}
+
 export const getKey = () => localStorage.getItem(KEY_STORAGE) || ''
 export const getOperador = () => localStorage.getItem(OP_STORAGE) || ''
 export const saveSession = (key: string, operador: string) => {
@@ -59,32 +90,69 @@ export const clearSession = () => {
 }
 
 async function request(path: string, init: RequestInit = {}, key?: string): Promise<any> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+
   let res: Response
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'X-Helpdesk-Key': key ?? getKey(),
         ...(init.headers || {}),
       },
     })
+  } catch (err: any) {
+    clearTimeout(timer)
+    if (err?.name === 'AbortError') {
+      throw new Error(
+        `A operação passou de ${TIMEOUT_MS / 1000} segundos e foi cancelada. ATENÇÃO: ela pode ter sido concluída no servidor — busque a pessoa de novo e confira o resultado ANTES de repetir.`,
+      )
+    }
+    throw new Error(
+      `Não deu para falar com o servidor (${err?.message || 'falha de rede'}). Confira a internet e tente de novo.`,
+    )
+  }
+  clearTimeout(timer)
+
+  let texto = ''
+  try {
+    texto = await res.text()
   } catch {
-    throw new Error('Sem conexão com o servidor. Verifique a internet e tente de novo.')
+    texto = ''
   }
 
-  let data: any = {}
-  try {
-    data = await res.json()
-  } catch {
-    data = {}
+  let data: any = null
+  let jsonOk = false
+  if (texto) {
+    try {
+      data = JSON.parse(texto)
+      jsonOk = true
+    } catch {
+      jsonOk = false
+    }
   }
 
   if (res.status === 401) {
     clearSession()
-    throw new HelpdeskAuthError(data.message || 'Sessão expirada. Entre novamente.')
+    throw new HelpdeskAuthError(
+      data?.message || 'A senha do balcão foi recusada pelo servidor. Entre de novo.',
+    )
   }
-  if (!res.ok) throw new Error(data.message || 'Não foi possível concluir. Tente de novo.')
+
+  if (!res.ok) {
+    const doServidor = data?.message || data?.error || (!jsonOk ? texto.slice(0, 200) : '')
+    throw new Error(`${doServidor || motivoHttp(res.status)} (código ${res.status})`)
+  }
+
+  if (!jsonOk) {
+    throw new Error(
+      `O servidor respondeu algo que o sistema não entendeu (código ${res.status}). Tente de novo; se repetir, chame o suporte.`,
+    )
+  }
+
   return data
 }
 
