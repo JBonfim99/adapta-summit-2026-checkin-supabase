@@ -25,6 +25,8 @@ export interface HDIngresso {
   tem_qr: boolean
   status_webhook: string
   origem: string
+  /** true quando este ingresso é resposta direta da busca */
+  match: boolean
   participante: HDParticipante | null
 }
 
@@ -34,6 +36,10 @@ export interface HDComprador {
   email: string
   documento: string
   telefone: string
+  /** true quando a busca casou com os dados do próprio comprador */
+  match_comprador: boolean
+  total_ingressos: number
+  ingressos_encontrados: number
   ingressos: HDIngresso[]
 }
 

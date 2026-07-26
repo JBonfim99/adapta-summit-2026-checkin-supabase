@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,8 +12,11 @@ import {
   Pencil,
   QrCode,
   Search,
+  Ticket,
   UserPlus,
+  Users,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import {
   clearSession,
   getKey,
@@ -110,7 +113,7 @@ function LoginHelpdesk({
   )
 }
 
-// --------------------------------------------------------------- ingresso
+// ------------------------------------------------------------------ peças
 
 function TipoBadge({ tipo }: { tipo: string }) {
   return (
@@ -127,13 +130,76 @@ function TipoBadge({ tipo }: { tipo: string }) {
   )
 }
 
-function LinhaIngresso({
+function CardComprador({
+  comp,
+  ativo,
+  onSelecionar,
+}: {
+  comp: HDComprador
+  ativo: boolean
+  onSelecionar: () => void
+}) {
+  const comCredencial = comp.ingressos.filter((i) => i.credenciado && i.tem_qr).length
+  const semCredencial = comp.total_ingressos - comCredencial
+  const parcial = !comp.match_comprador && comp.ingressos_encontrados < comp.total_ingressos
+
+  return (
+    <button
+      type="button"
+      onClick={onSelecionar}
+      aria-pressed={ativo}
+      className={cn(
+        'w-full text-left rounded-xl border-2 bg-white p-4 space-y-2 transition-colors',
+        ativo
+          ? 'border-primary ring-2 ring-primary/25 bg-primary/5'
+          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50',
+      )}
+    >
+      <div className="text-lg font-bold text-slate-900 leading-tight">{comp.nome}</div>
+      <div className="text-sm text-slate-600 break-all">{comp.email}</div>
+      {(comp.documento || comp.telefone) && (
+        <div className="text-sm text-slate-600">
+          {[comp.documento, comp.telefone].filter(Boolean).join(' · ')}
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 pt-1">
+        <Badge variant="outline" className="text-sm border-slate-300 bg-slate-50 text-slate-700">
+          {comp.total_ingressos} ingresso{comp.total_ingressos === 1 ? '' : 's'}
+        </Badge>
+        {comCredencial > 0 && (
+          <Badge
+            variant="outline"
+            className="text-sm border-emerald-200 bg-emerald-50 text-emerald-700"
+          >
+            {comCredencial} com credencial
+          </Badge>
+        )}
+        {semCredencial > 0 && (
+          <Badge variant="outline" className="text-sm border-rose-200 bg-rose-50 text-rose-700">
+            {semCredencial} sem credencial
+          </Badge>
+        )}
+      </div>
+
+      {parcial && (
+        <p className="text-sm text-slate-500">
+          {comp.ingressos_encontrados} de {comp.total_ingressos} combinam com a busca
+        </p>
+      )}
+    </button>
+  )
+}
+
+function CardIngresso({
   ing,
+  comp,
   onCredenciar,
   onQr,
   onAlterar,
 }: {
   ing: HDIngresso
+  comp: HDComprador
   onCredenciar: () => void
   onQr: () => void
   onAlterar: () => void
@@ -142,22 +208,22 @@ function LinhaIngresso({
   const pronto = ing.credenciado && ing.tem_qr
 
   return (
-    <div className="rounded-xl border-2 p-4 sm:p-5 space-y-4 bg-white">
+    <div className="rounded-xl border-2 bg-white p-4 sm:p-5 space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <TipoBadge tipo={ing.tipo_ingresso} />
         <span className="text-sm text-slate-500">
           Pedido <span className="font-mono font-semibold text-slate-700">{ing.pedido_id}</span>
         </span>
         {pronto ? (
-          <span className="ml-auto inline-flex items-center gap-2 text-base font-semibold text-emerald-700">
+          <span className="sm:ml-auto inline-flex items-center gap-2 text-base font-semibold text-emerald-700">
             <CheckCircle2 className="w-5 h-5" /> Credencial pronta
           </span>
         ) : semPessoa ? (
-          <span className="ml-auto inline-flex items-center gap-2 text-base font-semibold text-rose-700">
+          <span className="sm:ml-auto inline-flex items-center gap-2 text-base font-semibold text-rose-700">
             <AlertCircle className="w-5 h-5" /> Ainda não credenciado
           </span>
         ) : (
-          <span className="ml-auto inline-flex items-center gap-2 text-base font-semibold text-amber-700">
+          <span className="sm:ml-auto inline-flex items-center gap-2 text-base font-semibold text-amber-700">
             <AlertCircle className="w-5 h-5" /> Falta gerar a credencial
           </span>
         )}
@@ -177,6 +243,11 @@ function LinhaIngresso({
           Ninguém usou este ingresso ainda. Use o botão <b>Credenciar</b>.
         </div>
       )}
+
+      <div className="rounded-lg bg-slate-50 border px-3 py-2 text-sm text-slate-600">
+        Comprado por <span className="font-semibold text-slate-800">{comp.nome}</span>
+        {comp.email ? <span className="break-all"> · {comp.email}</span> : null}
+      </div>
 
       <div className="flex flex-col sm:flex-row gap-3">
         {semPessoa ? (
@@ -214,6 +285,8 @@ export default function Helpdesk() {
   const [motivoSaida, setMotivoSaida] = useState('')
   const [resultados, setResultados] = useState<HDComprador[]>([])
   const [ultimaBusca, setUltimaBusca] = useState('')
+  const [selecionado, setSelecionado] = useState<string | null>(null)
+  const [verTodos, setVerTodos] = useState(false)
 
   const [credenciar, setCredenciar] = useState<{ ing: HDIngresso; comp: HDComprador } | null>(null)
   const [qrDe, setQrDe] = useState<HDIngresso | null>(null)
@@ -221,6 +294,7 @@ export default function Helpdesk() {
   const [novoAberto, setNovoAberto] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
+  const painelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (logado) inputRef.current?.focus()
@@ -250,7 +324,7 @@ export default function Helpdesk() {
     setErro(e?.message || 'Algo falhou e o sistema não recebeu o motivo. Chame o suporte.')
   }
 
-  const buscar = async (termo?: string) => {
+  const buscar = async (termo?: string, preservarSelecao = false) => {
     const alvo = (termo ?? q).trim()
     if (alvo.length < 3) {
       setErro('Digite pelo menos 3 letras ou números para buscar.')
@@ -263,6 +337,14 @@ export default function Helpdesk() {
       setResultados(res)
       setBuscou(true)
       setUltimaBusca(alvo)
+      if (preservarSelecao) {
+        setSelecionado((atual) =>
+          atual && res.some((c) => c.id === atual) ? atual : res.length === 1 ? res[0].id : null,
+        )
+      } else {
+        setSelecionado(res.length === 1 ? res[0].id : null)
+        setVerTodos(false)
+      }
     } catch (e: any) {
       tratarErro(e)
     } finally {
@@ -271,8 +353,40 @@ export default function Helpdesk() {
   }
 
   const recarregar = () => {
-    if (ultimaBusca) buscar(ultimaBusca)
+    if (ultimaBusca) buscar(ultimaBusca, true)
   }
+
+  // No celular as colunas viram uma só: ao escolher o comprador, leva a tela
+  // até os ingressos dele para o atendente não ter que caçar onde mudou.
+  const selecionarComprador = (id: string) => {
+    setSelecionado((atual) => (atual === id ? null : id))
+    setVerTodos(false)
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setTimeout(() => {
+        painelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 60)
+    }
+  }
+
+  const compradoresVisiveis = useMemo(
+    () => (selecionado ? resultados.filter((c) => c.id === selecionado) : resultados),
+    [resultados, selecionado],
+  )
+
+  const itens = useMemo(() => {
+    const lista: { ing: HDIngresso; comp: HDComprador }[] = []
+    for (const c of compradoresVisiveis) {
+      for (const ing of c.ingressos) {
+        if (verTodos || ing.match) lista.push({ ing, comp: c })
+      }
+    }
+    return lista
+  }, [compradoresVisiveis, verTodos])
+
+  const totalDosVisiveis = compradoresVisiveis.reduce((n, c) => n + c.total_ingressos, 0)
+  const totalQueCombinam = compradoresVisiveis.reduce((n, c) => n + c.ingressos_encontrados, 0)
+  const podeExpandir = totalDosVisiveis > totalQueCombinam
+  const compradorAtivo = selecionado ? compradoresVisiveis[0] : null
 
   if (!logado) {
     return (
@@ -290,7 +404,7 @@ export default function Helpdesk() {
   return (
     <div className="min-h-screen bg-slate-100">
       <header className="bg-white border-b sticky top-0 z-20">
-        <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-bold text-slate-900">Help Desk</h1>
             <p className="text-sm text-slate-500">Atendente: {getOperador()}</p>
@@ -301,49 +415,53 @@ export default function Helpdesk() {
         </div>
       </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+      <main className="max-w-6xl mx-auto px-4 py-6 space-y-6">
         <Card className="p-5 space-y-4 shadow-sm">
-          <Label htmlFor="hd-busca" className="text-lg font-semibold text-slate-900">
-            Buscar pessoa
-          </Label>
-          <Input
-            id="hd-busca"
-            ref={inputRef}
-            className="h-16 text-xl"
-            placeholder="Nome, e-mail, CPF ou telefone"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') buscar()
-            }}
-            autoComplete="off"
-          />
-          <Button
-            size="lg"
-            className="w-full h-16 text-lg gap-2"
-            onClick={() => buscar()}
-            disabled={buscando}
-          >
-            {buscando ? (
-              <>
-                <Loader2 className="w-6 h-6 animate-spin" /> Buscando...
-              </>
-            ) : (
-              <>
-                <Search className="w-6 h-6" /> Buscar
-              </>
-            )}
-          </Button>
+          <div className="flex flex-col lg:flex-row gap-4 lg:items-end">
+            <div className="flex-1 space-y-2">
+              <Label htmlFor="hd-busca" className="text-lg font-semibold text-slate-900">
+                Buscar pessoa
+              </Label>
+              <Input
+                id="hd-busca"
+                ref={inputRef}
+                className="h-16 text-xl"
+                placeholder="Nome, e-mail, CPF ou telefone"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') buscar()
+                }}
+                autoComplete="off"
+              />
+            </div>
+            <Button
+              size="lg"
+              className="h-16 text-lg gap-2 lg:w-52"
+              onClick={() => buscar()}
+              disabled={buscando}
+            >
+              {buscando ? (
+                <>
+                  <Loader2 className="w-6 h-6 animate-spin" /> Buscando...
+                </>
+              ) : (
+                <>
+                  <Search className="w-6 h-6" /> Buscar
+                </>
+              )}
+            </Button>
+          </div>
           <p className="text-sm text-slate-500">
             Pode digitar só parte do nome ou do e-mail. Também funciona com o número do pedido.
           </p>
 
-          <div className="border-t pt-4 space-y-2">
-            <p className="text-base text-slate-700">A pessoa não está no sistema?</p>
+          <div className="border-t pt-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <p className="text-base text-slate-700 sm:flex-1">A pessoa não está no sistema?</p>
             <Button
               variant="outline"
               size="lg"
-              className="w-full h-14 text-base gap-2"
+              className="h-14 text-base gap-2 sm:w-64"
               onClick={() => setNovoAberto(true)}
             >
               <UserPlus className="w-5 h-5" /> Novo credenciamento
@@ -369,7 +487,7 @@ export default function Helpdesk() {
             </div>
             <Button
               size="lg"
-              className="w-full h-14 text-base gap-2"
+              className="w-full sm:w-auto sm:mx-auto h-14 text-base gap-2 px-8"
               onClick={() => setNovoAberto(true)}
             >
               <UserPlus className="w-5 h-5" /> Novo credenciamento
@@ -377,37 +495,112 @@ export default function Helpdesk() {
           </Card>
         )}
 
-        {resultados.map((c) => (
-          <Card key={c.id} className="p-5 space-y-4 shadow-sm">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-slate-400 font-semibold">
-                Comprador
+        {resultados.length > 0 && (
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] items-start">
+            {/* ---------------- coluna 1: compradores ---------------- */}
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+                  <Users className="w-4 h-4" /> Compradores ({resultados.length})
+                </h2>
+                {selecionado && resultados.length > 1 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 text-sm"
+                    onClick={() => {
+                      setSelecionado(null)
+                      setVerTodos(false)
+                    }}
+                  >
+                    Ver todos
+                  </Button>
+                )}
               </div>
-              <div className="text-xl font-bold text-slate-900">{c.nome}</div>
-              <div className="text-base text-slate-600 break-all">{c.email}</div>
-              <div className="text-base text-slate-600">
-                {[c.documento, c.telefone].filter(Boolean).join(' · ')}
-              </div>
-            </div>
 
-            <div className="space-y-3">
-              <div className="text-base font-semibold text-slate-700">
-                {c.ingressos.length === 0
-                  ? 'Nenhum ingresso neste cadastro'
-                  : `${c.ingressos.length} ingresso(s)`}
+              <div className="space-y-3 lg:sticky lg:top-28 lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto lg:pr-1">
+                {resultados.map((c) => (
+                  <CardComprador
+                    key={c.id}
+                    comp={c}
+                    ativo={selecionado === c.id}
+                    onSelecionar={() => selecionarComprador(c.id)}
+                  />
+                ))}
+                {resultados.length > 1 && (
+                  <p className="text-sm text-slate-500 px-1">
+                    Toque em um comprador para ver só os ingressos dele.
+                  </p>
+                )}
               </div>
-              {c.ingressos.map((ing) => (
-                <LinhaIngresso
-                  key={ing.id}
-                  ing={ing}
-                  onCredenciar={() => setCredenciar({ ing, comp: c })}
-                  onQr={() => setQrDe(ing)}
-                  onAlterar={() => setAlterar(ing)}
-                />
-              ))}
-            </div>
-          </Card>
-        ))}
+            </section>
+
+            {/* ---------------- coluna 2: participantes ---------------- */}
+            <section ref={painelRef} className="space-y-3 scroll-mt-24">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-500">
+                  <Ticket className="w-4 h-4" /> Participantes ({itens.length})
+                </h2>
+                {podeExpandir && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 text-sm"
+                    onClick={() => setVerTodos((v) => !v)}
+                  >
+                    {verTodos
+                      ? 'Mostrar só quem combina com a busca'
+                      : `Ver todos os ${totalDosVisiveis} ingressos`}
+                  </Button>
+                )}
+              </div>
+
+              <p className="text-sm text-slate-500">
+                {compradorAtivo ? (
+                  <>
+                    Ingressos de <b className="text-slate-700">{compradorAtivo.nome}</b>
+                    {!verTodos && podeExpandir ? ` que combinam com "${ultimaBusca}"` : ''}
+                  </>
+                ) : verTodos ? (
+                  'Todos os ingressos dos compradores encontrados.'
+                ) : (
+                  <>
+                    Só os ingressos que combinam com <b className="text-slate-700">{ultimaBusca}</b>
+                    .
+                  </>
+                )}
+              </p>
+
+              {itens.length === 0 ? (
+                <Card className="p-8 text-center space-y-4">
+                  <p className="text-base text-slate-600">
+                    Este comprador não tem nenhum ingresso no sistema.
+                  </p>
+                  <Button
+                    size="lg"
+                    className="h-14 text-base gap-2 px-8"
+                    onClick={() => setNovoAberto(true)}
+                  >
+                    <UserPlus className="w-5 h-5" /> Novo credenciamento
+                  </Button>
+                </Card>
+              ) : (
+                <div className="space-y-3">
+                  {itens.map(({ ing, comp }) => (
+                    <CardIngresso
+                      key={ing.id}
+                      ing={ing}
+                      comp={comp}
+                      onCredenciar={() => setCredenciar({ ing, comp })}
+                      onQr={() => setQrDe(ing)}
+                      onAlterar={() => setAlterar(ing)}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
       </main>
 
       <CredenciarDialog
@@ -417,12 +610,12 @@ export default function Helpdesk() {
         onDone={recarregar}
       />
       <QrDialog ingresso={qrDe} onClose={() => setQrDe(null)} onDone={recarregar} />
+      <AlterarDialog ingresso={alterar} onClose={() => setAlterar(null)} onDone={recarregar} />
       <NovoCredenciamentoDialog
         aberto={novoAberto}
         onClose={() => setNovoAberto(false)}
         onDone={recarregar}
       />
-      <AlterarDialog ingresso={alterar} onClose={() => setAlterar(null)} onDone={recarregar} />
     </div>
   )
 }

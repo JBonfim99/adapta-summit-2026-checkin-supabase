@@ -113,22 +113,23 @@ routerAdd('GET', '/backend/v1/helpdesk/search', (e) => {
       ",'.',''),'-',''),'/',''),' ',''),'(',''),')','')"
 
     const params = { like: '%' + q + '%' }
-    const ors = [
-      'lower(c.nome) LIKE {:like}',
-      'lower(c.email) LIKE {:like}',
+
+    // Duas famílias de condição, porque a origem do match muda o que a tela
+    // mostra: se casou pelos dados do COMPRADOR, todos os ingressos dele
+    // interessam; se casou pelos dados de um PARTICIPANTE (ou pelo nº do
+    // pedido), só aquele ingresso interessa.
+    const orsComprador = ['lower(c.nome) LIKE {:like}', 'lower(c.email) LIKE {:like}']
+    const orsIngresso = [
       'lower(p.nome_completo) LIKE {:like}',
       'lower(p.email) LIKE {:like}',
       'lower(i.pedido_id) LIKE {:like}',
     ]
-    const orsC = ['lower(c.nome) LIKE {:like}', 'lower(c.email) LIKE {:like}']
     if (dig.length >= 3) {
       params.dig = '%' + dig + '%'
-      ors.push(clean('c.documento') + ' LIKE {:dig}')
-      ors.push(clean('c.telefone') + ' LIKE {:dig}')
-      ors.push(clean('p.cpf') + ' LIKE {:dig}')
-      ors.push(clean('p.telefone') + ' LIKE {:dig}')
-      orsC.push(clean('c.documento') + ' LIKE {:dig}')
-      orsC.push(clean('c.telefone') + ' LIKE {:dig}')
+      orsComprador.push(clean('c.documento') + ' LIKE {:dig}')
+      orsComprador.push(clean('c.telefone') + ' LIKE {:dig}')
+      orsIngresso.push(clean('p.cpf') + ' LIKE {:dig}')
+      orsIngresso.push(clean('p.telefone') + ' LIKE {:dig}')
     }
 
     const vistos = {}
@@ -140,28 +141,39 @@ routerAdd('GET', '/backend/v1/helpdesk/search', (e) => {
       }
     }
 
+    // 1) compradores que casam pelos próprios dados (inclusive sem ingresso)
+    const matchComprador = {}
     const m1 = arrayOf(new DynamicModel({ cid: '' }))
     $app
       .db()
       .newQuery(
-        'SELECT DISTINCT i.comprador_id as cid FROM ingressos i ' +
-          'LEFT JOIN compradores c ON c.id = i.comprador_id ' +
-          'LEFT JOIN participantes p ON p.id = i.participante_id ' +
-          'WHERE (' +
-          ors.join(' OR ') +
-          ') LIMIT 40',
+        'SELECT c.id as cid FROM compradores c WHERE (' + orsComprador.join(' OR ') + ') LIMIT 40',
       )
       .bind(params)
       .all(m1)
-    for (let i = 0; i < m1.length; i++) addCid(m1[i].cid)
+    for (let i = 0; i < m1.length; i++) {
+      matchComprador[m1[i].cid] = true
+      addCid(m1[i].cid)
+    }
 
-    const m2 = arrayOf(new DynamicModel({ cid: '' }))
+    // 2) ingressos que casam pelo participante ou pelo número do pedido
+    const matchIngresso = {}
+    const m2 = arrayOf(new DynamicModel({ iid: '', cid: '' }))
     $app
       .db()
-      .newQuery('SELECT c.id as cid FROM compradores c WHERE (' + orsC.join(' OR ') + ') LIMIT 40')
+      .newQuery(
+        'SELECT i.id as iid, i.comprador_id as cid FROM ingressos i ' +
+          'LEFT JOIN participantes p ON p.id = i.participante_id ' +
+          'WHERE (' +
+          orsIngresso.join(' OR ') +
+          ') LIMIT 100',
+      )
       .bind(params)
       .all(m2)
-    for (let i = 0; i < m2.length; i++) addCid(m2[i].cid)
+    for (let i = 0; i < m2.length; i++) {
+      matchIngresso[m2[i].iid] = true
+      addCid(m2[i].cid)
+    }
 
     if (ordem.length === 0) return e.json(200, { ok: true, compradores: [] })
 
@@ -237,6 +249,8 @@ routerAdd('GET', '/backend/v1/helpdesk/search', (e) => {
         tem_qr: !!r.inac_qr,
         status_webhook: r.status_webhook,
         origem: r.origem,
+        // true = este ingresso é resposta direta da busca
+        match: !!matchComprador[r.comprador_id] || !!matchIngresso[r.id],
         participante: r.part_id
           ? {
               id: r.part_id,
@@ -257,13 +271,19 @@ routerAdd('GET', '/backend/v1/helpdesk/search', (e) => {
     for (let i = 0; i < safeIds.length; i++) {
       const c = byId[safeIds[i]]
       if (!c) continue
+      const lista = porComprador[c.id] || []
+      let encontrados = 0
+      for (let j = 0; j < lista.length; j++) if (lista[j].match) encontrados++
       out.push({
         id: c.id,
         nome: c.nome,
         email: c.email,
         documento: c.documento,
         telefone: c.telefone,
-        ingressos: porComprador[c.id] || [],
+        match_comprador: !!matchComprador[c.id],
+        total_ingressos: lista.length,
+        ingressos_encontrados: encontrados,
+        ingressos: lista,
       })
     }
 
