@@ -54,6 +54,10 @@ const MANUAL_EVENTOS: Record<string, { label: string; cls: string }> = {
     label: 'Help desk: credenciou',
     cls: 'border-teal-200 bg-teal-50 text-teal-700',
   },
+  helpdesk_novo_credenciamento: {
+    label: 'Help desk: NOVO credenciamento',
+    cls: 'border-violet-300 bg-violet-100 text-violet-800',
+  },
   helpdesk_edicao: {
     label: 'Help desk: editou',
     cls: 'border-teal-200 bg-teal-50 text-teal-700',

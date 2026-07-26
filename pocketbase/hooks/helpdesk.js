@@ -1524,3 +1524,389 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/gerar-qr', (e) => {
 
   return e.json(200, { ok: true, qrcode: qrcode, avisos: avisos, log_ok: logOk })
 })
+
+// --- Novo credenciamento: pessoa que NÃO está na base (comprou na porta, ou
+//     o ingresso não foi importado). Cria comprador (ou reaproveita pelo
+//     e-mail), cria o ingresso com pedido_id prefixado com H, cria o
+//     participante e já emite a credencial na INAC. Exige motivo escrito.
+routerAdd('POST', '/backend/v1/helpdesk/novo-credenciamento', (e) => {
+  const secret = (n) => {
+    let v = ''
+    try {
+      v = $os.getenv(n) || ''
+    } catch (_) {}
+    if (!v) {
+      try {
+        if (typeof $secrets !== 'undefined' && $secrets && $secrets.get) v = $secrets.get(n) || ''
+      } catch (_) {}
+    }
+    return v
+  }
+  const readH = (n) => {
+    try {
+      const v = e.request.header.get(n)
+      if (v) return v.toString()
+    } catch (_) {}
+    try {
+      const h = e.requestInfo().headers || {}
+      const k = n.toLowerCase().replace(/-/g, '_')
+      if (h[k]) return h[k].toString()
+    } catch (_) {}
+    return ''
+  }
+  const digits = (s) => (s || '').toString().replace(/\D/g, '')
+  const sanitize = (s) => {
+    if (s == null) return ''
+    let t = String(s)
+    t = t.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '')
+    t = t.replace(
+      /[\u200D\u20E3\u2190-\u21FF\u2300-\u27BF\u2600-\u26FF\u2B00-\u2BFF\uFE00-\uFE0F]/g,
+      '',
+    )
+    t = t.replace(/[\u0000-\u001F\u007F]/g, '')
+    return t.replace(/\s+/g, ' ').trim()
+  }
+  const decode = (b) => {
+    if (b == null) return ''
+    if (typeof b === 'string') return b
+    try {
+      return new TextDecoder().decode(b)
+    } catch (_) {}
+    return ''
+  }
+  const cpfFmt = (s) => {
+    const d = digits(s)
+    if (d.length !== 11) return (s || '').toString().trim()
+    return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4')
+  }
+  const validCPF = (s) => {
+    const c = digits(s)
+    if (c.length !== 11 || /^(\d)\1{10}$/.test(c)) return false
+    let sum = 0
+    for (let i = 0; i < 9; i++) sum += parseInt(c[i], 10) * (10 - i)
+    let d1 = 11 - (sum % 11)
+    if (d1 >= 10) d1 = 0
+    if (d1 !== parseInt(c[9], 10)) return false
+    sum = 0
+    for (let i = 0; i < 10; i++) sum += parseInt(c[i], 10) * (11 - i)
+    let d2 = 11 - (sum % 11)
+    if (d2 >= 10) d2 = 0
+    return d2 === parseInt(c[10], 10)
+  }
+
+  const body = e.requestInfo().body || {}
+  const expected = secret('HELPDESK_PASSWORD')
+  if (!expected) return e.json(503, { message: 'Área de help desk não configurada.' })
+  let sent = readH('X-Helpdesk-Key')
+  if (!sent && body._key) sent = String(body._key)
+  if (sent !== expected) return e.json(401, { message: 'Senha incorreta.' })
+
+  const operador = (body.operador || '').toString().replace(/\s+/g, ' ').trim()
+  const quem = operador || 'não identificado'
+
+  const nome = (body.nome_completo || '').toString().replace(/\s+/g, ' ').trim()
+  const email = (body.email || '').toString().trim().toLowerCase()
+  const cpf = cpfFmt((body.cpf || '').toString())
+  const telefone = (body.telefone || '').toString().trim()
+  const empresa = (body.empresa || '').toString().trim()
+  const tipo = (body.tipo || '').toString().trim().toUpperCase()
+  const motivo = (body.motivo || '').toString().replace(/\s+/g, ' ').trim()
+
+  if (tipo !== 'GOLD' && tipo !== 'PLATINUM') {
+    return e.json(400, { message: 'Escolha o tipo do ingresso: GOLD ou PLATINUM.' })
+  }
+  if (motivo.length < 5) {
+    return e.json(400, {
+      message:
+        'Escreva o motivo deste novo credenciamento (pelo menos 5 letras). Nada foi criado ainda.',
+    })
+  }
+  if (nome.length < 3) return e.json(400, { message: 'Informe o nome completo.' })
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return e.json(400, { message: 'E-mail inválido.' })
+  if (!validCPF(cpf)) return e.json(400, { message: 'CPF inválido.' })
+  if (digits(telefone).length < 10) {
+    return e.json(400, { message: 'Telefone inválido (informe com DDD).' })
+  }
+
+  // Já existe alguém credenciado com esse e-mail ou CPF? Então não é caso de
+  // novo credenciamento — a pessoa tem que ser achada na busca.
+  try {
+    $app.findFirstRecordByFilter('participantes', 'email = {:em}', { em: email })
+    return e.json(400, {
+      message:
+        'Este e-mail já está em um credenciamento. Busque a pessoa na tela inicial em vez de criar um novo.',
+    })
+  } catch (_) {}
+
+  try {
+    const recs = $app.findRecordsByFilter(
+      'participantes',
+      'cpf = {:fmt} || cpf = {:raw}',
+      '',
+      50,
+      0,
+      { fmt: cpf, raw: digits(cpf) },
+    )
+    for (let i = 0; i < recs.length; i++) {
+      const iid = recs[i].getString('ingresso_id')
+      try {
+        const ing = $app.findRecordById('ingressos', iid)
+        if (ing.getString('status') === 'Pré-Credenciado') {
+          return e.json(400, {
+            message:
+              'Este CPF já está em um credenciamento (pedido ' +
+              ing.getString('pedido_id') +
+              '). Busque a pessoa na tela inicial em vez de criar um novo.',
+          })
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  // pedido_id único, prefixo H de "help desk"
+  let pedidoId = ''
+  for (let i = 0; i < 30; i++) {
+    const cand = 'H' + $security.randomString(6).toUpperCase()
+    let existe = false
+    try {
+      $app.findFirstRecordByData('ingressos', 'pedido_id', cand)
+      existe = true
+    } catch (_) {}
+    if (!existe) {
+      pedidoId = cand
+      break
+    }
+  }
+  if (!pedidoId) {
+    return e.json(500, {
+      message: 'Não foi possível gerar um número de pedido novo. Tente de novo em alguns segundos.',
+    })
+  }
+
+  let ingressoId = ''
+  let compradorCriado = false
+
+  try {
+    $app.runInTransaction((txApp) => {
+      // comprador: reaproveita pelo e-mail (o índice de e-mail é único)
+      let compradorId = ''
+      try {
+        const c = txApp.findFirstRecordByFilter('compradores', 'email = {:em}', { em: email })
+        compradorId = c.id
+      } catch (_) {}
+      if (!compradorId) {
+        const compColl = txApp.findCollectionByNameOrId('compradores')
+        const comp = new Record(compColl)
+        comp.set('nome', nome)
+        comp.set('email', email)
+        comp.set('documento', digits(cpf))
+        comp.set('telefone', telefone)
+        txApp.save(comp)
+        compradorId = comp.id
+        compradorCriado = true
+      }
+
+      const ingColl = txApp.findCollectionByNameOrId('ingressos')
+      const ing = new Record(ingColl)
+      ing.set('comprador_id', compradorId)
+      ing.set('pedido_id', pedidoId)
+      ing.set('tipo_ingresso', tipo)
+      ing.set('status', 'Pendente')
+      ing.set('status_webhook', 'pendente')
+      ing.set('origem', 'helpdesk')
+      txApp.save(ing)
+      ingressoId = ing.id
+
+      const partColl = txApp.findCollectionByNameOrId('participantes')
+      const part = new Record(partColl)
+      part.set('ingresso_id', ing.id)
+      part.set('nome_completo', nome)
+      part.set('email', email)
+      part.set('cpf', cpf)
+      part.set('telefone', telefone)
+      part.set('tem_empresa', false)
+      part.set('nome_empresa', '')
+      part.set('cargo', '')
+      part.set('profissao', empresa)
+      part.set('nicho', '')
+      part.set('ia_uso_diario', 0)
+      part.set('ia_profundidade', 0)
+      part.set('terms_accepted_at', new Date().toISOString())
+      txApp.save(part)
+
+      ing.set('participante_id', part.id)
+      ing.set('status', 'Pré-Credenciado')
+      ing.set('preenchido_em', new Date().toISOString())
+      txApp.save(ing)
+    })
+  } catch (err) {
+    const m = (err && err.message) || 'erro desconhecido'
+    if (/unique/i.test(m) && m.indexOf('compradores') !== -1) {
+      return e.json(400, {
+        message: 'Já existe um comprador com este e-mail. Busque por ele na tela inicial.',
+      })
+    }
+    return e.json(400, { message: 'Não foi possível criar o credenciamento: ' + m })
+  }
+
+  // credencial na INAC
+  const avisos = []
+  let qrcode = ''
+  let inacOk = false
+  let inacMsg = ''
+
+  const base = secret('INAC_WEBHOOK_URL')
+  const addUrl = base || 'https://painel.credenciamento.digital/apiservicev1/attendees/add'
+  const token = secret('INAC_AUTH_TOKEN')
+
+  if (!token) {
+    inacMsg = 'o token de acesso à INAC não está configurado no servidor'
+    avisos.push(
+      'A pessoa foi cadastrada aqui (pedido ' +
+        pedidoId +
+        '), mas NENHUMA credencial foi emitida: o token da INAC não está configurado no servidor. Avise o suporte agora.',
+    )
+  } else {
+    let tel = digits(telefone)
+    if (tel && tel.length <= 11) tel = '55' + tel
+    const payload = {
+      event_id: 375,
+      category_id: tipo === 'PLATINUM' ? 6125 : 6123,
+      status: 'active',
+      fields: [
+        { id: 10133653, value: sanitize(nome) },
+        { id: 10133654, value: email },
+        { id: 10133655, value: digits(cpf) },
+        { id: 10133656, value: tel },
+        { id: 10133657, value: sanitize(empresa) },
+        { id: 10133665, value: pedidoId },
+      ],
+    }
+
+    let status = 0
+    let respTxt = ''
+    let erroMsg = ''
+    try {
+      const res = $http.send({
+        url: addUrl,
+        method: 'POST',
+        headers: { 'X-Auth-Token': token, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        timeout: 15,
+      })
+      status = res.statusCode
+      respTxt = decode(res.body)
+    } catch (err) {
+      erroMsg = (err && err.message) || 'erro de rede'
+    }
+
+    let inacId = ''
+    if (status >= 200 && status < 300) {
+      try {
+        const data = JSON.parse(respTxt)
+        if (data && data.status === true && data.attendee) {
+          inacId = String(data.attendee.id || '')
+          qrcode = String(data.attendee.qrcode || '')
+        }
+      } catch (_) {}
+    }
+    inacOk = !!qrcode
+    inacMsg = erroMsg ? erroMsg : 'HTTP ' + status + (inacOk ? '' : ' ' + respTxt.substring(0, 200))
+    if (!inacOk) {
+      avisos.push(
+        'A pessoa foi cadastrada (pedido ' +
+          pedidoId +
+          '), mas o QR Code NÃO saiu. Motivo: ' +
+          inacMsg +
+          '. Busque por ela na tela inicial e use "Gerar credencial".',
+      )
+    }
+
+    try {
+      const ing2 = $app.findRecordById('ingressos', ingressoId)
+      if (inacOk) {
+        ing2.set('inac_id', inacId)
+        ing2.set('inac_qr', qrcode)
+        ing2.set('status_webhook', 'enviado')
+      } else {
+        ing2.set('status_webhook', 'erro')
+      }
+      $app.save(ing2)
+    } catch (errSave) {
+      avisos.push(
+        'A credencial foi criada na INAC, mas NÃO foi possível gravar isso aqui: ' +
+          ((errSave && errSave.message) || 'erro desconhecido') +
+          '. Mostre o QR desta tela e avise o suporte. NÃO gere de novo — isso duplicaria a credencial.',
+      )
+    }
+  }
+
+  // Registro de auditoria da ação principal, com confirmação de gravação.
+  let logOk = true
+  try {
+    const collA = $app.findCollectionByNameOrId('webhooks_log')
+    const recA = new Record(collA)
+    recA.set('ingresso_id', ingressoId)
+    recA.set('evento', 'helpdesk_novo_credenciamento')
+    recA.set('method', 'HELPDESK')
+    recA.set('status', 200)
+    recA.set(
+      'detalhe',
+      'Help desk (' +
+        quem +
+        ') — NOVO credenciamento criado do zero — pedido ' +
+        pedidoId +
+        ' (' +
+        tipo +
+        ') — ' +
+        nome +
+        (compradorCriado ? ' — comprador novo criado' : ' — vinculado a comprador existente') +
+        (inacOk ? ' — QR gerado.' : ' — SEM QR (falha na INAC).') +
+        ' — motivo: ' +
+        motivo,
+    )
+    recA.set(
+      'payload',
+      JSON.stringify({
+        origem: 'helpdesk',
+        acao: 'novo_credenciamento',
+        operador: quem,
+        pedido_id: pedidoId,
+        tipo: tipo,
+        motivo: motivo,
+        comprador_criado: compradorCriado,
+        dados: {
+          nome_completo: nome,
+          email: email,
+          cpf: cpf,
+          telefone: telefone,
+          empresa: empresa,
+        },
+      }),
+    )
+    recA.set('response', inacOk ? 'INAC /add OK' : 'INAC: ' + inacMsg)
+    $app.save(recA)
+  } catch (errL) {
+    logOk = false
+    avisos.push(
+      'O credenciamento foi criado, mas o registro dele no histórico falhou: ' +
+        ((errL && errL.message) || 'erro desconhecido') +
+        '. Anote o pedido ' +
+        pedidoId +
+        ' e avise o suporte.',
+    )
+  }
+
+  return e.json(200, {
+    ok: true,
+    qrcode: qrcode,
+    inac_ok: inacOk,
+    inac_msg: inacMsg,
+    nome: nome,
+    pedido_id: pedidoId,
+    tipo_ingresso: tipo,
+    comprador_criado: compradorCriado,
+    avisos: avisos,
+    log_ok: logOk,
+  })
+})

@@ -25,6 +25,7 @@ import {
   type HDIngresso,
 } from '@/lib/helpdesk'
 import { AlterarDialog, CredenciarDialog, QrDialog } from '@/components/helpdesk/AcoesDialogs'
+import NovoCredenciamentoDialog from '@/components/helpdesk/NovoCredenciamentoDialog'
 
 // ------------------------------------------------------------------ login
 
@@ -217,6 +218,7 @@ export default function Helpdesk() {
   const [credenciar, setCredenciar] = useState<{ ing: HDIngresso; comp: HDComprador } | null>(null)
   const [qrDe, setQrDe] = useState<HDIngresso | null>(null)
   const [alterar, setAlterar] = useState<HDIngresso | null>(null)
+  const [novoAberto, setNovoAberto] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -335,6 +337,18 @@ export default function Helpdesk() {
           <p className="text-sm text-slate-500">
             Pode digitar só parte do nome ou do e-mail. Também funciona com o número do pedido.
           </p>
+
+          <div className="border-t pt-4 space-y-2">
+            <p className="text-base text-slate-700">A pessoa não está no sistema?</p>
+            <Button
+              variant="outline"
+              size="lg"
+              className="w-full h-14 text-base gap-2"
+              onClick={() => setNovoAberto(true)}
+            >
+              <UserPlus className="w-5 h-5" /> Novo credenciamento
+            </Button>
+          </div>
         </Card>
 
         {erro && (
@@ -345,11 +359,21 @@ export default function Helpdesk() {
         )}
 
         {buscou && resultados.length === 0 && !buscando && (
-          <Card className="p-8 text-center space-y-2">
-            <p className="text-lg font-semibold text-slate-800">Ninguém encontrado</p>
-            <p className="text-base text-slate-600">
-              Tente escrever só o primeiro nome, ou buscar pelo e-mail ou CPF.
-            </p>
+          <Card className="p-8 text-center space-y-4">
+            <div className="space-y-2">
+              <p className="text-lg font-semibold text-slate-800">Ninguém encontrado</p>
+              <p className="text-base text-slate-600">
+                Tente escrever só o primeiro nome, ou buscar pelo e-mail ou CPF. Se a pessoa
+                realmente não estiver no sistema, faça um credenciamento novo.
+              </p>
+            </div>
+            <Button
+              size="lg"
+              className="w-full h-14 text-base gap-2"
+              onClick={() => setNovoAberto(true)}
+            >
+              <UserPlus className="w-5 h-5" /> Novo credenciamento
+            </Button>
           </Card>
         )}
 
@@ -393,6 +417,11 @@ export default function Helpdesk() {
         onDone={recarregar}
       />
       <QrDialog ingresso={qrDe} onClose={() => setQrDe(null)} onDone={recarregar} />
+      <NovoCredenciamentoDialog
+        aberto={novoAberto}
+        onClose={() => setNovoAberto(false)}
+        onDone={recarregar}
+      />
       <AlterarDialog ingresso={alterar} onClose={() => setAlterar(null)} onDone={recarregar} />
     </div>
   )

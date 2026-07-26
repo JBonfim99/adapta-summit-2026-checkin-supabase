@@ -37,7 +37,7 @@ const MOTIVOS_RAPIDOS = [
   'Cortesia / autorização da organização',
 ]
 
-function Erro({ msg }: { msg: string }) {
+export function Erro({ msg }: { msg: string }) {
   if (!msg) return null
   return (
     <div className="flex items-start gap-3 rounded-xl border-2 border-rose-200 bg-rose-50 p-4 text-base text-rose-800">
@@ -49,7 +49,7 @@ function Erro({ msg }: { msg: string }) {
 
 // Ação concluída, mas com alguma parte que não saiu perfeita. Aparece sempre —
 // nunca engolimos esse tipo de problema.
-function Avisos({ lista }: { lista: string[] }) {
+export function Avisos({ lista }: { lista: string[] }) {
   if (!lista || lista.length === 0) return null
   return (
     <div className="space-y-2">
@@ -66,7 +66,7 @@ function Avisos({ lista }: { lista: string[] }) {
   )
 }
 
-function TipoBadge({ tipo }: { tipo: string }) {
+export function TipoBadge({ tipo }: { tipo: string }) {
   return (
     <Badge
       variant="outline"

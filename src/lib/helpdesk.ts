@@ -188,6 +188,18 @@ export async function hdTrocarTipo(ingressoId: string, tipo: 'GOLD' | 'PLATINUM'
   })
 }
 
+export interface HDNovoCredenciamento extends HDPessoaForm {
+  tipo: 'GOLD' | 'PLATINUM'
+  motivo: string
+}
+
+export async function hdNovoCredenciamento(dados: HDNovoCredenciamento) {
+  return request('/backend/v1/helpdesk/novo-credenciamento', {
+    method: 'POST',
+    body: JSON.stringify({ ...dados, operador: getOperador() }),
+  })
+}
+
 export async function hdVerQr(ingressoId: string) {
   const params = new URLSearchParams({ operador: getOperador() })
   return request(`/backend/v1/helpdesk/ticket/${ingressoId}/qr?${params.toString()}`)
