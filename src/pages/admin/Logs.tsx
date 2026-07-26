@@ -50,7 +50,33 @@ const MANUAL_EVENTOS: Record<string, { label: string; cls: string }> = {
     label: 'API: reenvio participante',
     cls: 'border-indigo-200 bg-indigo-50 text-indigo-700',
   },
+  helpdesk_credenciamento: {
+    label: 'Help desk: credenciou',
+    cls: 'border-teal-200 bg-teal-50 text-teal-700',
+  },
+  helpdesk_edicao: {
+    label: 'Help desk: editou',
+    cls: 'border-teal-200 bg-teal-50 text-teal-700',
+  },
+  helpdesk_tipo_alterado: {
+    label: 'Help desk: trocou tipo',
+    cls: 'border-teal-200 bg-teal-50 text-teal-700',
+  },
+  helpdesk_qr: {
+    label: 'Help desk: viu QR',
+    cls: 'border-teal-200 bg-teal-50 text-teal-700',
+  },
+  helpdesk_qr_gerado: {
+    label: 'Help desk: gerou QR',
+    cls: 'border-teal-200 bg-teal-50 text-teal-700',
+  },
+  helpdesk_erro: {
+    label: 'Help desk: falha',
+    cls: 'border-rose-200 bg-rose-50 text-rose-700',
+  },
 }
+
+type LogFilter = 'erros' | 'todos' | 'ok' | 'manuais' | 'helpdesk'
 
 // Pedido do log: usa o ingresso expandido; se ele foi excluído, cai no payload.
 const pedidoDoLog = (log: any) => {
@@ -71,7 +97,7 @@ export default function AdminLogs() {
   const [retryingAll, setRetryingAll] = useState(false)
   const [retryingId, setRetryingId] = useState('')
   const [syncingUpgrades, setSyncingUpgrades] = useState(false)
-  const [filter, setFilter] = useState<'erros' | 'todos' | 'ok' | 'manuais'>('erros')
+  const [filter, setFilter] = useState<LogFilter>('erros')
   const [detail, setDetail] = useState<any>(null)
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
@@ -114,7 +140,7 @@ export default function AdminLogs() {
     return sw ? sw === 'erro' : !isOk(log.status)
   }
 
-  const changeFilter = (k: 'erros' | 'todos' | 'ok' | 'manuais') => {
+  const changeFilter = (k: LogFilter) => {
     setPage(1)
     setFilter(k)
   }
@@ -179,11 +205,12 @@ export default function AdminLogs() {
     }
   }
 
-  const FILTERS: Array<['erros' | 'todos' | 'ok' | 'manuais', string]> = [
+  const FILTERS: Array<[LogFilter, string]> = [
     ['erros', `Somente erros${errorCount > 0 ? ` (${errorCount})` : ''}`],
     ['todos', 'Todos'],
     ['ok', 'Somente OK'],
     ['manuais', 'Ações manuais'],
+    ['helpdesk', 'Help desk'],
   ]
 
   return (
@@ -192,7 +219,9 @@ export default function AdminLogs() {
         <div>
           <h2 className="text-2xl font-bold">Logs</h2>
           <p className="text-muted-foreground">
-            Um registro por ingresso (pedido), com o status mais recente do envio ao INAC.
+            {filter === 'helpdesk'
+              ? 'Histórico completo das ações feitas na área /helpdesk (todas as ações, com o nome do atendente).'
+              : 'Um registro por ingresso (pedido), com o status mais recente do envio ao INAC.'}
           </p>
         </div>
         <div className="flex gap-2 shrink-0">

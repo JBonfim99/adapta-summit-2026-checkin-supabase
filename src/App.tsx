@@ -32,6 +32,7 @@ import AdminInsights from '@/pages/admin/Insights'
 import AdminCortesias from '@/pages/admin/Cortesias'
 import AdminReconciliar from '@/pages/admin/Reconciliar'
 import AdminApi from '@/pages/admin/Api'
+import Helpdesk from '@/pages/helpdesk/Index'
 
 function PreCredenciamentoRedirect() {
   const { token } = useParams()
@@ -110,6 +111,8 @@ const App = () => (
               <Route path="/pre-credenciamento/:token" element={<PreCredenciamentoRedirect />} />
               <Route path="/credenciamento" element={<CredenciamentoRedirect />} />
             </Route>
+
+            <Route path="/helpdesk" element={<Helpdesk />} />
 
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin" element={<AdminLayout />}>
