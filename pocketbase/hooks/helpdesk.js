@@ -1007,6 +1007,14 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/tipo', (e) => {
     return e.json(400, { message: 'Tipo deve ser GOLD ou PLATINUM.' })
   }
 
+  // Motivo é obrigatório: troca de tipo sem justificativa não passa daqui.
+  const motivo = (body.motivo || '').toString().replace(/\s+/g, ' ').trim()
+  if (motivo.length < 5) {
+    return e.json(400, {
+      message: 'Escreva o motivo da troca de tipo (pelo menos 5 letras). A troca não foi feita.',
+    })
+  }
+
   let ingresso
   try {
     ingresso = $app.findRecordById('ingressos', ticketId)
@@ -1086,7 +1094,14 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/tipo', (e) => {
           ') — falha ao trocar o tipo na INAC do ingresso ' +
           ingresso.getString('pedido_id') +
           '. Nada foi alterado.',
-        { origem: 'helpdesk', acao: 'tipo_falha', operador: operador, de: tipoAntes, para: tipo },
+        {
+          origem: 'helpdesk',
+          acao: 'tipo_falha',
+          operador: operador,
+          de: tipoAntes,
+          para: tipo,
+          motivo: motivo,
+        },
         respTxt || erroMsg,
         status,
       )
@@ -1128,7 +1143,9 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/tipo', (e) => {
         tipoAntes +
         ' para ' +
         tipo +
-        (inacId ? ' (INAC atualizada).' : '.'),
+        (inacId ? ' (INAC atualizada)' : '') +
+        ' — motivo: ' +
+        motivo,
     )
     recA.set(
       'payload',
@@ -1139,6 +1156,7 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/tipo', (e) => {
         pedido_id: ingresso.getString('pedido_id'),
         de: tipoAntes,
         para: tipo,
+        motivo: motivo,
       }),
     )
     recA.set('response', inacId ? 'INAC /edit OK (' + inacMsg + ')' : inacMsg)

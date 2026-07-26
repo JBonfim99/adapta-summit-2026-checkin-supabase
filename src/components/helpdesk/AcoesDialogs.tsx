@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { AlertCircle, ArrowRightLeft, CheckCircle2, Loader2, QrCode, Save } from 'lucide-react'
 import PessoaForm from '@/components/helpdesk/PessoaForm'
 import QrGrande from '@/components/helpdesk/QrGrande'
@@ -26,6 +28,14 @@ const VAZIO: HDPessoaForm = {
   telefone: '',
   empresa: '',
 }
+
+// Atalhos para o motivo da troca de tipo: o atendente toca em um e, se quiser,
+// completa o texto. Evita motivo vazio ou escrito de qualquer jeito.
+const MOTIVOS_RAPIDOS = [
+  'Upgrade pago no balcão',
+  'Erro no cadastro da compra',
+  'Cortesia / autorização da organização',
+]
 
 function Erro({ msg }: { msg: string }) {
   if (!msg) return null
@@ -351,7 +361,9 @@ export function AlterarDialog({
   const [avisos, setAvisos] = useState<string[]>([])
   const [salvando, setSalvando] = useState(false)
   const [trocando, setTrocando] = useState(false)
-  const [confirmarTroca, setConfirmarTroca] = useState(false)
+  const [motivoAberto, setMotivoAberto] = useState(false)
+  const [motivo, setMotivo] = useState('')
+  const [erroMotivo, setErroMotivo] = useState('')
   const [tipoAtual, setTipoAtual] = useState('GOLD')
 
   useEffect(() => {
@@ -359,7 +371,9 @@ export function AlterarDialog({
     setErro('')
     setOk('')
     setAvisos([])
-    setConfirmarTroca(false)
+    setMotivoAberto(false)
+    setMotivo('')
+    setErroMotivo('')
     setTipoAtual(ingresso.tipo_ingresso)
     const p = ingresso.participante
     setForm({
@@ -391,136 +405,209 @@ export function AlterarDialog({
     }
   }
 
+  const abrirMotivo = () => {
+    setMotivo('')
+    setErroMotivo('')
+    setMotivoAberto(true)
+  }
+
+  const fecharMotivo = () => {
+    if (trocando) return
+    setMotivoAberto(false)
+    setErroMotivo('')
+  }
+
   const trocarTipo = async () => {
     if (!ingresso) return
+    const texto = motivo.trim()
+    if (texto.length < 5) {
+      setErroMotivo(
+        'Escreva o motivo da troca (pelo menos 5 letras). Toque em um dos motivos comuns acima se preferir.',
+      )
+      return
+    }
     setErro('')
     setOk('')
     setAvisos([])
+    setErroMotivo('')
     setTrocando(true)
     try {
-      const res: any = await hdTrocarTipo(ingresso.id, outroTipo as 'GOLD' | 'PLATINUM')
+      const res: any = await hdTrocarTipo(ingresso.id, outroTipo as 'GOLD' | 'PLATINUM', texto)
       setAvisos(avisosDe(res))
       setTipoAtual(outroTipo)
-      setConfirmarTroca(false)
-      setOk(`Ingresso alterado para ${outroTipo}.`)
+      setMotivoAberto(false)
+      setOk(`Ingresso alterado para ${outroTipo}. Motivo registrado: "${texto}"`)
       onDone()
     } catch (e: any) {
-      setErro(e.message)
+      setErroMotivo(e.message)
     } finally {
       setTrocando(false)
     }
   }
 
   return (
-    <Dialog open={!!ingresso} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-2xl">Alterar ingresso</DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={!!ingresso} onOpenChange={(o) => !o && onClose()}>
+        <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl">Alterar ingresso</DialogTitle>
+          </DialogHeader>
 
-        <div className="space-y-6">
-          <div className="flex items-center gap-3 rounded-xl bg-slate-50 border p-4">
-            <TipoBadge tipo={tipoAtual} />
-            <span className="text-base text-slate-700">
-              Pedido <span className="font-mono font-semibold">{ingresso?.pedido_id}</span>
-            </span>
-          </div>
+          <div className="space-y-6">
+            <div className="flex items-center gap-3 rounded-xl bg-slate-50 border p-4">
+              <TipoBadge tipo={tipoAtual} />
+              <span className="text-base text-slate-700">
+                Pedido <span className="font-mono font-semibold">{ingresso?.pedido_id}</span>
+              </span>
+            </div>
 
-          {/* 1. Tipo do ingresso */}
-          <div className="rounded-xl border-2 p-5 space-y-4">
-            <h3 className="text-lg font-bold text-slate-900">1. Tipo do ingresso</h3>
-            <p className="text-base text-slate-600">
-              Hoje este ingresso é <b>{tipoAtual}</b>.
-            </p>
-            {confirmarTroca ? (
-              <div className="space-y-3">
-                <div className="rounded-xl border-2 border-amber-200 bg-amber-50 p-4 text-base text-amber-900">
-                  Confirma mudar de <b>{tipoAtual}</b> para <b>{outroTipo}</b>? A credencial da
-                  pessoa é atualizada na hora.
-                </div>
-                <div className="flex flex-col-reverse sm:flex-row gap-3">
-                  <Button
-                    variant="outline"
-                    size="lg"
-                    className="h-14 text-base sm:flex-1"
-                    onClick={() => setConfirmarTroca(false)}
-                    disabled={trocando}
-                  >
-                    Não, voltar
-                  </Button>
-                  <Button
-                    size="lg"
-                    className="h-14 text-base sm:flex-1 gap-2"
-                    onClick={trocarTipo}
-                    disabled={trocando}
-                  >
-                    {trocando ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" /> Alterando...
-                      </>
-                    ) : (
-                      <>Sim, mudar para {outroTipo}</>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            ) : (
+            {/* 1. Tipo do ingresso */}
+            <div className="rounded-xl border-2 p-5 space-y-4">
+              <h3 className="text-lg font-bold text-slate-900">1. Tipo do ingresso</h3>
+              <p className="text-base text-slate-600">
+                Hoje este ingresso é <b>{tipoAtual}</b>.
+              </p>
               <Button
                 variant="outline"
                 size="lg"
                 className="w-full h-14 text-base gap-2"
-                onClick={() => setConfirmarTroca(true)}
+                onClick={abrirMotivo}
               >
                 <ArrowRightLeft className="w-5 h-5" /> Mudar para {outroTipo}
               </Button>
-            )}
-          </div>
-
-          {/* 2. Dados da pessoa */}
-          <div className="rounded-xl border-2 p-5 space-y-4">
-            <h3 className="text-lg font-bold text-slate-900">2. Dados da pessoa</h3>
-            {ingresso?.participante ? (
-              <>
-                <PessoaForm valor={form} onChange={setForm} disabled={salvando} />
-                <Button
-                  size="lg"
-                  className="w-full h-14 text-base gap-2"
-                  onClick={salvarDados}
-                  disabled={salvando}
-                >
-                  {salvando ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin" /> Salvando...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-5 h-5" /> Salvar alterações
-                    </>
-                  )}
-                </Button>
-              </>
-            ) : (
-              <p className="text-base text-slate-600">
-                Este ingresso ainda não tem ninguém credenciado. Feche esta janela e clique em
-                "Credenciar".
-              </p>
-            )}
-          </div>
-
-          <Erro msg={erro} />
-          <Avisos lista={avisos} />
-          {ok && (
-            <div className="flex items-start gap-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4 text-base text-emerald-800">
-              <CheckCircle2 className="w-6 h-6 shrink-0 mt-0.5" />
-              <span>{ok}</span>
             </div>
-          )}
 
-          <Button variant="outline" size="lg" className="w-full h-14 text-base" onClick={onClose}>
-            Fechar
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
+            {/* 2. Dados da pessoa */}
+            <div className="rounded-xl border-2 p-5 space-y-4">
+              <h3 className="text-lg font-bold text-slate-900">2. Dados da pessoa</h3>
+              {ingresso?.participante ? (
+                <>
+                  <PessoaForm valor={form} onChange={setForm} disabled={salvando} />
+                  <Button
+                    size="lg"
+                    className="w-full h-14 text-base gap-2"
+                    onClick={salvarDados}
+                    disabled={salvando}
+                  >
+                    {salvando ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" /> Salvando...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-5 h-5" /> Salvar alterações
+                      </>
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <p className="text-base text-slate-600">
+                  Este ingresso ainda não tem ninguém credenciado. Feche esta janela e clique em
+                  "Credenciar".
+                </p>
+              )}
+            </div>
+
+            <Erro msg={erro} />
+            <Avisos lista={avisos} />
+            {ok && (
+              <div className="flex items-start gap-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4 text-base text-emerald-800">
+                <CheckCircle2 className="w-6 h-6 shrink-0 mt-0.5" />
+                <span>{ok}</span>
+              </div>
+            )}
+
+            <Button variant="outline" size="lg" className="w-full h-14 text-base" onClick={onClose}>
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Popup do motivo — a troca de tipo só acontece com justificativa escrita */}
+      <Dialog open={motivoAberto} onOpenChange={(o) => !o && fecharMotivo()}>
+        <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl">Por que está mudando o tipo?</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-5">
+            <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-base text-amber-900">
+              O ingresso <b>{ingresso?.pedido_id}</b> vai mudar de <b>{tipoAtual}</b> para{' '}
+              <b>{outroTipo}</b>. A credencial da pessoa é atualizada na hora.
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-base font-semibold text-slate-800">
+                Motivos mais comuns (toque em um)
+              </Label>
+              <div className="grid gap-2">
+                {MOTIVOS_RAPIDOS.map((m) => (
+                  <Button
+                    key={m}
+                    type="button"
+                    variant={motivo === m ? 'default' : 'outline'}
+                    className="h-12 justify-start text-base"
+                    disabled={trocando}
+                    onClick={() => {
+                      setMotivo(m)
+                      setErroMotivo('')
+                    }}
+                  >
+                    {m}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="hd-motivo" className="text-base font-semibold text-slate-800">
+                Motivo da troca
+              </Label>
+              <Textarea
+                id="hd-motivo"
+                className="text-lg min-h-24"
+                placeholder="Escreva o motivo com suas palavras"
+                value={motivo}
+                disabled={trocando}
+                onChange={(ev) => {
+                  setMotivo(ev.target.value)
+                  setErroMotivo('')
+                }}
+              />
+              <p className="text-sm text-slate-500">Obrigatório — pelo menos 5 letras.</p>
+            </div>
+
+            <Erro msg={erroMotivo} />
+
+            <div className="flex flex-col-reverse sm:flex-row gap-3">
+              <Button
+                variant="outline"
+                size="lg"
+                className="h-14 text-base sm:flex-1"
+                onClick={fecharMotivo}
+                disabled={trocando}
+              >
+                Cancelar
+              </Button>
+              <Button
+                size="lg"
+                className="h-14 text-base sm:flex-[2] gap-2"
+                onClick={trocarTipo}
+                disabled={trocando}
+              >
+                {trocando ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" /> Alterando...
+                  </>
+                ) : (
+                  <>Confirmar mudança para {outroTipo}</>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
