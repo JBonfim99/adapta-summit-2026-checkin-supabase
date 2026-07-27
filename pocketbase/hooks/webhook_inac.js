@@ -67,7 +67,10 @@ routerAdd(
       }
       let tel = onlyDigits(part.getString('telefone'))
       if (tel && tel.length <= 11) tel = '55' + tel
-      const categoryId = ingresso.getString('tipo_ingresso') === 'PLATINUM' ? 6125 : 6123
+      const categoryId =
+        { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[
+          ingresso.getString('tipo_ingresso')
+        ] || 6123
 
       const payload = {
         event_id: 375,
@@ -232,7 +235,10 @@ routerAdd(
 
       let tel = onlyDigits(part.getString('telefone'))
       if (tel && tel.length <= 11) tel = '55' + tel
-      const categoryId = ingresso.getString('tipo_ingresso') === 'PLATINUM' ? 6125 : 6123
+      const categoryId =
+        { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[
+          ingresso.getString('tipo_ingresso')
+        ] || 6123
       const payload = {
         event_id: 375,
         category_id: categoryId,

@@ -22,6 +22,7 @@ import { useToast } from '@/hooks/use-toast'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
+import { TIPOS_INGRESSO } from '@/lib/ticket-types'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,6 +63,7 @@ export function BuyerTicketsSheet({
   const [editTicket, setEditTicket] = useState<any | null>(null)
   const [changeTypeTicket, setChangeTypeTicket] = useState<any | null>(null)
   const [changingType, setChangingType] = useState(false)
+  const [changeTypeTarget, setChangeTypeTarget] = useState('')
   const { toast } = useToast()
 
   const loadTickets = async () => {
@@ -125,7 +127,8 @@ export function BuyerTicketsSheet({
 
   const handleChangeType = async () => {
     if (!changeTypeTicket) return
-    const target = changeTypeTicket.tipo_ingresso === 'GOLD' ? 'PLATINUM' : 'GOLD'
+    const target = changeTypeTarget
+    if (!target) return
     setChangingType(true)
     try {
       const res: any = await pb.send(
@@ -223,8 +226,11 @@ export function BuyerTicketsSheet({
                         <SelectValue placeholder="Selecione o tipo" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="GOLD">GOLD</SelectItem>
-                        <SelectItem value="PLATINUM">PLATINUM</SelectItem>
+                        {TIPOS_INGRESSO.map((t) => (
+                          <SelectItem key={t} value={t}>
+                            {t}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -312,8 +318,11 @@ export function BuyerTicketsSheet({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-slate-500 hover:text-slate-700"
-                              title="Alterar tipo (GOLD/PLATINUM)"
-                              onClick={() => setChangeTypeTicket(t)}
+                              title="Alterar tipo do ingresso"
+                              onClick={() => {
+                                setChangeTypeTarget('')
+                                setChangeTypeTicket(t)
+                              }}
                             >
                               <ArrowLeftRight className="w-4 h-4" />
                             </Button>
@@ -423,13 +432,23 @@ export function BuyerTicketsSheet({
             <AlertDialogDescription asChild>
               <div className="space-y-2 pt-1 text-sm">
                 <p>
-                  Ingresso <strong>{changeTypeTicket?.pedido_id}</strong>:{' '}
-                  <strong>{changeTypeTicket?.tipo_ingresso}</strong> →{' '}
-                  <strong>
-                    {changeTypeTicket?.tipo_ingresso === 'GOLD' ? 'PLATINUM' : 'GOLD'}
-                  </strong>
-                  .
+                  Ingresso <strong>{changeTypeTicket?.pedido_id}</strong> — hoje é{' '}
+                  <strong>{changeTypeTicket?.tipo_ingresso}</strong>. Escolha o novo tipo:
                 </p>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  {TIPOS_INGRESSO.filter((t) => t !== changeTypeTicket?.tipo_ingresso).map((t) => (
+                    <Button
+                      key={t}
+                      type="button"
+                      variant={changeTypeTarget === t ? 'default' : 'outline'}
+                      size="sm"
+                      disabled={changingType}
+                      onClick={() => setChangeTypeTarget(t)}
+                    >
+                      {t}
+                    </Button>
+                  ))}
+                </div>
                 {changeTypeTicket?.inac_id && (
                   <p>
                     A categoria na <strong>INAC</strong> também será atualizada.
@@ -445,7 +464,7 @@ export function BuyerTicketsSheet({
                 ev.preventDefault()
                 handleChangeType()
               }}
-              disabled={changingType}
+              disabled={changingType || !changeTypeTarget}
               className="bg-primary text-white"
             >
               {changingType ? 'Alterando...' : 'Alterar'}

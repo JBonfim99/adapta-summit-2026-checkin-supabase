@@ -19,6 +19,7 @@ import {
   Users,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { classeTipoBalcao } from '@/lib/ticket-types'
 import {
   clearSession,
   getKey,
@@ -120,14 +121,7 @@ function LoginHelpdesk({
 
 function TipoBadge({ tipo }: { tipo: string }) {
   return (
-    <Badge
-      variant="outline"
-      className={
-        tipo === 'PLATINUM'
-          ? 'border-slate-300 bg-slate-800 text-white text-sm px-3 py-1'
-          : 'border-amber-300 bg-amber-100 text-amber-900 text-sm px-3 py-1'
-      }
-    >
+    <Badge variant="outline" className={`text-sm px-3 py-1 ${classeTipoBalcao(tipo)}`}>
       {tipo}
     </Badge>
   )
@@ -341,7 +335,7 @@ export default function Helpdesk() {
   useEffect(() => {
     if (!logado) return
     inputRef.current?.focus()
-    console.log('[helpdesk] senha do balcão:', getKey())
+    console.log(getKey())
   }, [logado])
 
   const sair = () => {

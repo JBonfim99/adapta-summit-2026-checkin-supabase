@@ -237,6 +237,8 @@ export default function AdminParticipants() {
           <option value="all">Todos os Tipos</option>
           <option value="GOLD">GOLD</option>
           <option value="PLATINUM">PLATINUM</option>
+          <option value="PALESTRANTES">PALESTRANTES</option>
+          <option value="HACKATHON">HACKATHON</option>
         </select>
       </div>
 

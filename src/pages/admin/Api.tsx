@@ -101,7 +101,7 @@ const ENDPOINTS = [
     metodo: 'POST',
     caminho: '/backend/v1/external/compradores',
     descricao:
-      'Cria (ou atualiza, se o e-mail já existir) um comprador com N ingressos GOLD/PLATINUM. Dispara automaticamente o e-mail de acesso (template SendGrid "Skip-Summit26-Send-Comprador").',
+      'Cria (ou atualiza, se o e-mail já existir) um comprador com N ingressos (GOLD, PLATINUM, PALESTRANTES ou HACKATHON). Dispara automaticamente o e-mail de acesso (template SendGrid "Skip-Summit26-Send-Comprador").',
     params: [
       ['nome', 'string, opcional'],
       ['email', 'string, obrigatório'],

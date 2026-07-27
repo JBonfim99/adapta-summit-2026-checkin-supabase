@@ -189,7 +189,7 @@ export async function hdEditar(ingressoId: string, pessoa: HDPessoaForm) {
   })
 }
 
-export async function hdTrocarTipo(ingressoId: string, tipo: 'GOLD' | 'PLATINUM', motivo: string) {
+export async function hdTrocarTipo(ingressoId: string, tipo: string, motivo: string) {
   return request(`/backend/v1/helpdesk/ticket/${ingressoId}/tipo`, {
     method: 'POST',
     body: JSON.stringify({ tipo, motivo, operador: getOperador() }),
@@ -197,7 +197,7 @@ export async function hdTrocarTipo(ingressoId: string, tipo: 'GOLD' | 'PLATINUM'
 }
 
 export interface HDNovoCredenciamento extends HDPessoaForm {
-  tipo: 'GOLD' | 'PLATINUM'
+  tipo: string
   motivo: string
 }
 

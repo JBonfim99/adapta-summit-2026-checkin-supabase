@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/badge'
+import { classeTipo } from '@/lib/ticket-types'
 
 export function StatusBadge({ status }: { status: string }) {
   switch (status?.toLowerCase()) {
@@ -47,26 +48,11 @@ export function StatusBadge({ status }: { status: string }) {
 }
 
 export function TypeBadge({ type }: { type: string }) {
-  switch (type?.toUpperCase()) {
-    case 'GOLD':
-      return (
-        <Badge
-          variant="secondary"
-          className="bg-amber-100 text-amber-800 hover:bg-amber-100 border-amber-200"
-        >
-          GOLD
-        </Badge>
-      )
-    case 'PLATINUM':
-      return (
-        <Badge
-          variant="secondary"
-          className="bg-indigo-100 text-indigo-800 hover:bg-indigo-100 border-indigo-200"
-        >
-          PLATINUM
-        </Badge>
-      )
-    default:
-      return <Badge variant="outline">{type || 'N/A'}</Badge>
-  }
+  const t = (type || '').toUpperCase()
+  if (!t) return <Badge variant="outline">N/A</Badge>
+  return (
+    <Badge variant="secondary" className={`whitespace-nowrap ${classeTipo(t)}`}>
+      {t}
+    </Badge>
+  )
 }

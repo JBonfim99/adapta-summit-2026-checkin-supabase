@@ -546,7 +546,8 @@ routerAdd('POST', '/backend/v1/helpdesk/credenciar', (e) => {
       if (tel && tel.length <= 11) tel = '55' + tel
       const payload = {
         event_id: 375,
-        category_id: tipo === 'PLATINUM' ? 6125 : 6123,
+        category_id:
+          { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[tipo] || 6123,
         status: 'active',
         fields: [
           { id: 10133653, value: sanitize(nome) },
@@ -872,7 +873,10 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/editar', (e) => {
     const payload = {
       id: parseInt(inacId, 10) || inacId,
       event_id: 375,
-      category_id: ingresso.getString('tipo_ingresso') === 'PLATINUM' ? 6125 : 6123,
+      category_id:
+        { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[
+          ingresso.getString('tipo_ingresso')
+        ] || 6123,
       status: 'active',
       fields: [
         { id: 10133653, value: sanitize(nome) },
@@ -1074,8 +1078,8 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/tipo', (e) => {
     (body.operador || '').toString().replace(/\s+/g, ' ').trim() || 'não identificado'
   const ticketId = e.request.pathValue('id')
   const tipo = (body.tipo || '').toString().trim().toUpperCase()
-  if (tipo !== 'GOLD' && tipo !== 'PLATINUM') {
-    return e.json(400, { message: 'Tipo deve ser GOLD ou PLATINUM.' })
+  if (['GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON'].indexOf(tipo) === -1) {
+    return e.json(400, { message: 'Tipo deve ser GOLD, PLATINUM, PALESTRANTES ou HACKATHON.' })
   }
 
   // Motivo é obrigatório: troca de tipo sem justificativa não passa daqui.
@@ -1118,7 +1122,8 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/tipo', (e) => {
     const payload = {
       id: parseInt(inacId, 10) || inacId,
       event_id: 375,
-      category_id: tipo === 'PLATINUM' ? 6125 : 6123,
+      category_id:
+        { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[tipo] || 6123,
       status: 'active',
       fields: [
         { id: 10133653, value: sanitize(part.getString('nome_completo')) },
@@ -1458,7 +1463,10 @@ routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/gerar-qr', (e) => {
   if (tel && tel.length <= 11) tel = '55' + tel
   const payload = {
     event_id: 375,
-    category_id: ingresso.getString('tipo_ingresso') === 'PLATINUM' ? 6125 : 6123,
+    category_id:
+      { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[
+        ingresso.getString('tipo_ingresso')
+      ] || 6123,
     status: 'active',
     fields: [
       { id: 10133653, value: sanitize(part.getString('nome_completo')) },
@@ -1683,8 +1691,8 @@ routerAdd('POST', '/backend/v1/helpdesk/novo-credenciamento', (e) => {
   const tipo = (body.tipo || '').toString().trim().toUpperCase()
   const motivo = (body.motivo || '').toString().replace(/\s+/g, ' ').trim()
 
-  if (tipo !== 'GOLD' && tipo !== 'PLATINUM') {
-    return e.json(400, { message: 'Escolha o tipo do ingresso: GOLD ou PLATINUM.' })
+  if (['GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON'].indexOf(tipo) === -1) {
+    return e.json(400, { message: 'Escolha o tipo do ingresso.' })
   }
   if (motivo.length < 5) {
     return e.json(400, {
@@ -1842,7 +1850,8 @@ routerAdd('POST', '/backend/v1/helpdesk/novo-credenciamento', (e) => {
     if (tel && tel.length <= 11) tel = '55' + tel
     const payload = {
       event_id: 375,
-      category_id: tipo === 'PLATINUM' ? 6125 : 6123,
+      category_id:
+        { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[tipo] || 6123,
       status: 'active',
       fields: [
         { id: 10133653, value: sanitize(nome) },

@@ -206,7 +206,8 @@ routerAdd('POST', '/backend/v1/cortesia/registrar', (e) => {
         return ''
       }
       const categoria = ingresso.getString('tipo_ingresso')
-      const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
+      const categoryId =
+        { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[categoria] || 6123
       let tel = telDigits
       if (tel && tel.length <= 11) tel = '55' + tel
       const sanitize = (s) => {
@@ -344,7 +345,7 @@ routerAdd(
       const anfitriao = (body.anfitriao || '').toString().trim()
       if (anfitriao.length < 2) return e.badRequestError('Informe o nome do anfitrião.')
       let tipo = (body.tipo_ingresso || 'GOLD').toString().toUpperCase()
-      if (tipo !== 'GOLD' && tipo !== 'PLATINUM') tipo = 'GOLD'
+      if (['GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON'].indexOf(tipo) === -1) tipo = 'GOLD'
       let limite = parseInt(body.limite, 10)
       if (isNaN(limite) || limite < 0) limite = 0
 

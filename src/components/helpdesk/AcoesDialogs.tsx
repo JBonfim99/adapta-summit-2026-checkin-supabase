@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { AlertCircle, ArrowRightLeft, CheckCircle2, Loader2, QrCode, Save } from 'lucide-react'
 import PessoaForm from '@/components/helpdesk/PessoaForm'
 import QrGrande from '@/components/helpdesk/QrGrande'
+import { TIPOS_INGRESSO, classeTipoBalcao } from '@/lib/ticket-types'
 import {
   avisosDe,
   hdCredenciar,
@@ -68,14 +69,7 @@ export function Avisos({ lista }: { lista: string[] }) {
 
 export function TipoBadge({ tipo }: { tipo: string }) {
   return (
-    <Badge
-      variant="outline"
-      className={
-        tipo === 'PLATINUM'
-          ? 'border-slate-300 bg-slate-800 text-white text-sm px-3 py-1'
-          : 'border-amber-300 bg-amber-100 text-amber-900 text-sm px-3 py-1'
-      }
-    >
+    <Badge variant="outline" className={`text-sm px-3 py-1 ${classeTipoBalcao(tipo)}`}>
       {tipo}
     </Badge>
   )
@@ -365,6 +359,7 @@ export function AlterarDialog({
   const [motivo, setMotivo] = useState('')
   const [erroMotivo, setErroMotivo] = useState('')
   const [tipoAtual, setTipoAtual] = useState('GOLD')
+  const [novoTipo, setNovoTipo] = useState('')
 
   useEffect(() => {
     if (!ingresso) return
@@ -374,6 +369,7 @@ export function AlterarDialog({
     setMotivoAberto(false)
     setMotivo('')
     setErroMotivo('')
+    setNovoTipo('')
     setTipoAtual(ingresso.tipo_ingresso)
     const p = ingresso.participante
     setForm({
@@ -385,7 +381,7 @@ export function AlterarDialog({
     })
   }, [ingresso])
 
-  const outroTipo = tipoAtual === 'GOLD' ? 'PLATINUM' : 'GOLD'
+  const outrosTipos = TIPOS_INGRESSO.filter((t) => t !== tipoAtual)
 
   const salvarDados = async () => {
     if (!ingresso) return
@@ -405,7 +401,8 @@ export function AlterarDialog({
     }
   }
 
-  const abrirMotivo = () => {
+  const abrirMotivo = (destino: string) => {
+    setNovoTipo(destino)
     setMotivo('')
     setErroMotivo('')
     setMotivoAberto(true)
@@ -418,7 +415,7 @@ export function AlterarDialog({
   }
 
   const trocarTipo = async () => {
-    if (!ingresso) return
+    if (!ingresso || !novoTipo) return
     const texto = motivo.trim()
     if (texto.length < 5) {
       setErroMotivo(
@@ -432,11 +429,11 @@ export function AlterarDialog({
     setErroMotivo('')
     setTrocando(true)
     try {
-      const res: any = await hdTrocarTipo(ingresso.id, outroTipo as 'GOLD' | 'PLATINUM', texto)
+      const res: any = await hdTrocarTipo(ingresso.id, novoTipo, texto)
       setAvisos(avisosDe(res))
-      setTipoAtual(outroTipo)
+      setTipoAtual(novoTipo)
       setMotivoAberto(false)
-      setOk(`Ingresso alterado para ${outroTipo}. Motivo registrado: "${texto}"`)
+      setOk(`Ingresso alterado para ${novoTipo}. Motivo registrado: "${texto}"`)
       onDone()
     } catch (e: any) {
       setErroMotivo(e.message)
@@ -467,14 +464,20 @@ export function AlterarDialog({
               <p className="text-base text-slate-600">
                 Hoje este ingresso é <b>{tipoAtual}</b>.
               </p>
-              <Button
-                variant="outline"
-                size="lg"
-                className="w-full h-14 text-base gap-2"
-                onClick={abrirMotivo}
-              >
-                <ArrowRightLeft className="w-5 h-5" /> Mudar para {outroTipo}
-              </Button>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {outrosTipos.map((t) => (
+                  <Button
+                    key={t}
+                    variant="outline"
+                    size="lg"
+                    className="h-14 text-base gap-2"
+                    onClick={() => abrirMotivo(t)}
+                  >
+                    <ArrowRightLeft className="w-5 h-5 shrink-0" />
+                    <span className="truncate">{t}</span>
+                  </Button>
+                ))}
+              </div>
             </div>
 
             {/* 2. Dados da pessoa */}
@@ -534,7 +537,7 @@ export function AlterarDialog({
           <div className="space-y-5">
             <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 text-base text-amber-900">
               O ingresso <b>{ingresso?.pedido_id}</b> vai mudar de <b>{tipoAtual}</b> para{' '}
-              <b>{outroTipo}</b>. A credencial da pessoa é atualizada na hora.
+              <b>{novoTipo}</b>. A credencial da pessoa é atualizada na hora.
             </div>
 
             <div className="space-y-2">
@@ -601,7 +604,7 @@ export function AlterarDialog({
                     <Loader2 className="w-5 h-5 animate-spin" /> Alterando...
                   </>
                 ) : (
-                  <>Confirmar mudança para {outroTipo}</>
+                  <>Confirmar mudança para {novoTipo}</>
                 )}
               </Button>
             </div>

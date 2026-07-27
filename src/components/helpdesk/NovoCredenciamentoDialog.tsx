@@ -8,6 +8,7 @@ import PessoaForm from '@/components/helpdesk/PessoaForm'
 import QrGrande from '@/components/helpdesk/QrGrande'
 import { Avisos, Erro } from '@/components/helpdesk/AcoesDialogs'
 import { avisosDe, hdNovoCredenciamento, type HDPessoaForm } from '@/lib/helpdesk'
+import { TIPOS_INGRESSO } from '@/lib/ticket-types'
 
 const VAZIO: HDPessoaForm = {
   nome_completo: '',
@@ -34,7 +35,7 @@ export default function NovoCredenciamentoDialog({
   onClose: () => void
   onDone: () => void
 }) {
-  const [tipo, setTipo] = useState<'GOLD' | 'PLATINUM' | ''>('')
+  const [tipo, setTipo] = useState<string>('')
   const [form, setForm] = useState<HDPessoaForm>(VAZIO)
   const [motivo, setMotivo] = useState('')
   const [erro, setErro] = useState('')
@@ -59,8 +60,8 @@ export default function NovoCredenciamentoDialog({
 
   const criar = async () => {
     setErro('')
-    if (tipo !== 'GOLD' && tipo !== 'PLATINUM') {
-      setErro('Escolha primeiro o tipo do ingresso: GOLD ou PLATINUM.')
+    if (!tipo) {
+      setErro('Escolha primeiro o tipo do ingresso.')
       return
     }
     if (!form.nome_completo.trim() || !form.email.trim()) {
@@ -90,11 +91,12 @@ export default function NovoCredenciamentoDialog({
     }
   }
 
-  const botaoTipo = (t: 'GOLD' | 'PLATINUM') => (
+  const botaoTipo = (t: string) => (
     <Button
+      key={t}
       type="button"
       variant={tipo === t ? 'default' : 'outline'}
-      className="h-16 text-lg font-bold flex-1"
+      className="h-16 text-base font-bold"
       disabled={salvando}
       onClick={() => {
         setTipo(t)
@@ -143,10 +145,7 @@ export default function NovoCredenciamentoDialog({
 
             <div className="rounded-xl border-2 p-5 space-y-3">
               <h3 className="text-lg font-bold text-slate-900">1. Tipo do ingresso</h3>
-              <div className="flex gap-3">
-                {botaoTipo('GOLD')}
-                {botaoTipo('PLATINUM')}
-              </div>
+              <div className="grid grid-cols-2 gap-3">{TIPOS_INGRESSO.map(botaoTipo)}</div>
             </div>
 
             <div className="rounded-xl border-2 p-5 space-y-4">

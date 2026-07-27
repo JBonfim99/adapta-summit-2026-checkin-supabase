@@ -63,8 +63,8 @@ routerAdd(
       let pedidoId = (body.pedido_id || '').toString().trim()
 
       if (!compradorId) return e.badRequestError('comprador_id é obrigatório')
-      if (tipo !== 'GOLD' && tipo !== 'PLATINUM') {
-        return e.badRequestError('tipo_ingresso deve ser GOLD ou PLATINUM')
+      if (['GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON'].indexOf(tipo) === -1) {
+        return e.badRequestError('tipo_ingresso deve ser GOLD, PLATINUM, PALESTRANTES ou HACKATHON')
       }
 
       let comprador
@@ -287,7 +287,8 @@ routerAdd(
         let tel = onlyDigits(body.telefone)
         if (tel && tel.length <= 11) tel = '55' + tel
         const categoria = ingresso.getString('tipo_ingresso')
-        const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
+        const categoryId =
+          { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[categoria] || 6123
         const payload = {
           event_id: 375,
           category_id: categoryId,
@@ -825,7 +826,8 @@ routerAdd(
         let tel = onlyDigits(telefone)
         if (tel && tel.length <= 11) tel = '55' + tel
         const categoria = ingresso.getString('tipo_ingresso')
-        const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
+        const categoryId =
+          { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[categoria] || 6123
         const payload = {
           id: parseInt(inacId, 10) || inacId,
           event_id: 375,
@@ -965,8 +967,8 @@ routerAdd(
       if (!ticketId) return e.badRequestError('id é obrigatório')
       const body = e.requestInfo().body || {}
       const tipo = (body.tipo || '').toString().trim().toUpperCase()
-      if (tipo !== 'GOLD' && tipo !== 'PLATINUM') {
-        return e.badRequestError('tipo deve ser GOLD ou PLATINUM')
+      if (['GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON'].indexOf(tipo) === -1) {
+        return e.badRequestError('tipo deve ser GOLD, PLATINUM, PALESTRANTES ou HACKATHON')
       }
 
       let ingresso
@@ -1014,7 +1016,8 @@ routerAdd(
         }
         let tel = onlyDigits(part.getString('telefone'))
         if (tel && tel.length <= 11) tel = '55' + tel
-        const categoryId = tipo === 'PLATINUM' ? 6125 : 6123
+        const categoryId =
+          { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[tipo] || 6123
         const payload = {
           id: parseInt(inacId, 10) || inacId,
           event_id: 375,

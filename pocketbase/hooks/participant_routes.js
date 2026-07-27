@@ -259,7 +259,8 @@ routerAdd('POST', '/backend/v1/participant/submit', (e) => {
       let tel = onlyDigits(body.telefone)
       if (tel && tel.length <= 11) tel = '55' + tel
       const categoria = ingresso.getString('tipo_ingresso')
-      const categoryId = categoria === 'PLATINUM' ? 6125 : 6123
+      const categoryId =
+        { GOLD: 6123, PLATINUM: 6125, PALESTRANTES: 7863, HACKATHON: 7864 }[categoria] || 6123
       const payload = {
         event_id: 375,
         category_id: categoryId,
