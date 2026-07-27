@@ -144,11 +144,15 @@ routerAdd(
             telefone: row.telefone || '',
             qtd_gold: 0,
             qtd_platinum: 0,
+            qtd_palestrantes: 0,
+            qtd_hackathon: 0,
           }
         }
         if (!groups[email].documento && doc) groups[email].documento = doc
         groups[email].qtd_gold += parseInt(row.qtd_gold || '0', 10) || 0
         groups[email].qtd_platinum += parseInt(row.qtd_platinum || '0', 10) || 0
+        groups[email].qtd_palestrantes += parseInt(row.qtd_palestrantes || '0', 10) || 0
+        groups[email].qtd_hackathon += parseInt(row.qtd_hackathon || '0', 10) || 0
       }
 
       for (const email of Object.keys(groups)) {
@@ -185,44 +189,34 @@ routerAdd(
           queued++
         }
 
-        for (let i = 0; i < data.qtd_gold; i++) {
-          const ingresso = new Record(ingressosCollection)
-          ingresso.set('comprador_id', comprador.id)
-          ingresso.set('pedido_id', genPedidoId())
-          ingresso.set('tipo_ingresso', 'GOLD')
-          ingresso.set('status', 'Pendente')
-          ingresso.set('status_webhook', 'pendente')
-          txApp.save(ingresso)
-          imported++
+        // Um laço por tipo: para criar um tipo novo, basta somar aqui.
+        const porTipo = [
+          { tipo: 'GOLD', qtd: data.qtd_gold },
+          { tipo: 'PLATINUM', qtd: data.qtd_platinum },
+          { tipo: 'PALESTRANTES', qtd: data.qtd_palestrantes },
+          { tipo: 'HACKATHON', qtd: data.qtd_hackathon },
+        ]
 
-          const link = new Record(linksCollection)
-          link.set('ingresso_id', ingresso.id)
-          link.set('token', $security.randomString(32))
-          link.set('usado', false)
-          const exp = new Date()
-          exp.setFullYear(exp.getFullYear() + 1)
-          link.set('expira_em', exp.toISOString())
-          txApp.save(link)
-        }
+        for (let t = 0; t < porTipo.length; t++) {
+          for (let i = 0; i < porTipo[t].qtd; i++) {
+            const ingresso = new Record(ingressosCollection)
+            ingresso.set('comprador_id', comprador.id)
+            ingresso.set('pedido_id', genPedidoId())
+            ingresso.set('tipo_ingresso', porTipo[t].tipo)
+            ingresso.set('status', 'Pendente')
+            ingresso.set('status_webhook', 'pendente')
+            txApp.save(ingresso)
+            imported++
 
-        for (let i = 0; i < data.qtd_platinum; i++) {
-          const ingresso = new Record(ingressosCollection)
-          ingresso.set('comprador_id', comprador.id)
-          ingresso.set('pedido_id', genPedidoId())
-          ingresso.set('tipo_ingresso', 'PLATINUM')
-          ingresso.set('status', 'Pendente')
-          ingresso.set('status_webhook', 'pendente')
-          txApp.save(ingresso)
-          imported++
-
-          const link = new Record(linksCollection)
-          link.set('ingresso_id', ingresso.id)
-          link.set('token', $security.randomString(32))
-          link.set('usado', false)
-          const exp = new Date()
-          exp.setFullYear(exp.getFullYear() + 1)
-          link.set('expira_em', exp.toISOString())
-          txApp.save(link)
+            const link = new Record(linksCollection)
+            link.set('ingresso_id', ingresso.id)
+            link.set('token', $security.randomString(32))
+            link.set('usado', false)
+            const exp = new Date()
+            exp.setFullYear(exp.getFullYear() + 1)
+            link.set('expira_em', exp.toISOString())
+            txApp.save(link)
+          }
         }
       }
     })

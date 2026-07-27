@@ -42,6 +42,8 @@ export default function AdminImport() {
     telefone: '',
     qtd_gold: '',
     qtd_platinum: '',
+    qtd_palestrantes: '',
+    qtd_hackathon: '',
   })
 
   const [summary, setSummary] = useState({
@@ -49,6 +51,8 @@ export default function AdminImport() {
     uniqueBuyers: 0,
     goldTickets: 0,
     platinumTickets: 0,
+    palestrantesTickets: 0,
+    hackathonTickets: 0,
     payloadRows: [] as any[],
     skippedNoEmail: 0,
   })
@@ -115,6 +119,8 @@ export default function AdminImport() {
       autoMap.telefone = findIndex(['telefone', 'celular', 'phone'])
       autoMap.qtd_gold = findIndex(['gold', 'qtd gold'])
       autoMap.qtd_platinum = findIndex(['platinum', 'qtd platinum'])
+      autoMap.qtd_palestrantes = findIndex(['palestrantes', 'palestrante', 'qtd palestrantes'])
+      autoMap.qtd_hackathon = findIndex(['hackathon', 'qtd hackathon'])
 
       setMapping(autoMap)
       setStep('mapping')
@@ -143,11 +149,15 @@ export default function AdminImport() {
     const telIdx = headers.indexOf(mapping.telefone)
     const goldIdx = headers.indexOf(mapping.qtd_gold)
     const platIdx = headers.indexOf(mapping.qtd_platinum)
+    const palIdx = headers.indexOf(mapping.qtd_palestrantes)
+    const hackIdx = headers.indexOf(mapping.qtd_hackathon)
 
     const payloadRows = []
     const buyersSet = new Set()
     let goldTickets = 0
     let platinumTickets = 0
+    let palestrantesTickets = 0
+    let hackathonTickets = 0
     let skippedNoEmail = 0
 
     for (const line of lines) {
@@ -165,9 +175,13 @@ export default function AdminImport() {
       buyersSet.add(email.toLowerCase())
       const g = goldIdx !== -1 ? parseInt(cols[goldIdx] || '0', 10) || 0 : 0
       const p = platIdx !== -1 ? parseInt(cols[platIdx] || '0', 10) || 0 : 0
+      const pal = palIdx !== -1 ? parseInt(cols[palIdx] || '0', 10) || 0 : 0
+      const hack = hackIdx !== -1 ? parseInt(cols[hackIdx] || '0', 10) || 0 : 0
 
       goldTickets += g
       platinumTickets += p
+      palestrantesTickets += pal
+      hackathonTickets += hack
 
       payloadRows.push({
         documento: doc,
@@ -178,6 +192,8 @@ export default function AdminImport() {
         telefone: telIdx !== -1 ? cols[telIdx]?.trim() : '',
         qtd_gold: g,
         qtd_platinum: p,
+        qtd_palestrantes: pal,
+        qtd_hackathon: hack,
       })
     }
 
@@ -186,6 +202,8 @@ export default function AdminImport() {
       uniqueBuyers: buyersSet.size,
       goldTickets,
       platinumTickets,
+      palestrantesTickets,
+      hackathonTickets,
       payloadRows,
       skippedNoEmail,
     })
@@ -379,6 +397,20 @@ export default function AdminImport() {
                 <div>
                   <div className="text-xs text-muted-foreground">Ingressos PLATINUM</div>
                   <div className="font-bold text-lg text-slate-600">{summary.platinumTickets}</div>
+                </div>
+              </li>
+              <li className="flex items-center gap-2 p-3 bg-slate-50 rounded border">
+                <div>
+                  <div className="text-xs text-muted-foreground">Ingressos PALESTRANTES</div>
+                  <div className="font-bold text-lg text-rose-600">
+                    {summary.palestrantesTickets}
+                  </div>
+                </div>
+              </li>
+              <li className="flex items-center gap-2 p-3 bg-slate-50 rounded border">
+                <div>
+                  <div className="text-xs text-muted-foreground">Ingressos HACKATHON</div>
+                  <div className="font-bold text-lg text-teal-600">{summary.hackathonTickets}</div>
                 </div>
               </li>
             </ul>
