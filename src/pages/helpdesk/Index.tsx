@@ -12,6 +12,7 @@ import {
   Pencil,
   QrCode,
   Search,
+  Send,
   Ticket,
   UserPlus,
   Users,
@@ -29,6 +30,7 @@ import {
 } from '@/lib/helpdesk'
 import { AlterarDialog, CredenciarDialog, QrDialog } from '@/components/helpdesk/AcoesDialogs'
 import NovoCredenciamentoDialog from '@/components/helpdesk/NovoCredenciamentoDialog'
+import ReenviarDialog, { type AlvoReenvio } from '@/components/helpdesk/ReenviarDialog'
 
 // ------------------------------------------------------------------ login
 
@@ -134,60 +136,79 @@ function CardComprador({
   comp,
   ativo,
   onSelecionar,
+  onReenviar,
 }: {
   comp: HDComprador
   ativo: boolean
   onSelecionar: () => void
+  onReenviar: () => void
 }) {
   const comCredencial = comp.ingressos.filter((i) => i.credenciado && i.tem_qr).length
   const semCredencial = comp.total_ingressos - comCredencial
   const parcial = !comp.match_comprador && comp.ingressos_encontrados < comp.total_ingressos
 
   return (
-    <button
-      type="button"
-      onClick={onSelecionar}
-      aria-pressed={ativo}
+    <div
       className={cn(
-        'w-full text-left rounded-xl border-2 bg-white p-4 space-y-2 transition-colors',
+        'rounded-xl border-2 bg-white transition-colors',
         ativo
           ? 'border-primary ring-2 ring-primary/25 bg-primary/5'
-          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50',
+          : 'border-slate-200 hover:border-slate-300',
       )}
     >
-      <div className="text-lg font-bold text-slate-900 leading-tight">{comp.nome}</div>
-      <div className="text-sm text-slate-600 break-all">{comp.email}</div>
-      {(comp.documento || comp.telefone) && (
-        <div className="text-sm text-slate-600">
-          {[comp.documento, comp.telefone].filter(Boolean).join(' · ')}
+      <button
+        type="button"
+        onClick={onSelecionar}
+        aria-pressed={ativo}
+        className="w-full text-left p-4 space-y-2"
+      >
+        <div className="text-lg font-bold text-slate-900 leading-tight">{comp.nome}</div>
+        <div className="text-sm text-slate-600 break-all">{comp.email}</div>
+        {(comp.documento || comp.telefone) && (
+          <div className="text-sm text-slate-600">
+            {[comp.documento, comp.telefone].filter(Boolean).join(' · ')}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 pt-1">
+          <Badge variant="outline" className="text-sm border-slate-300 bg-slate-50 text-slate-700">
+            {comp.total_ingressos} ingresso{comp.total_ingressos === 1 ? '' : 's'}
+          </Badge>
+          {comCredencial > 0 && (
+            <Badge
+              variant="outline"
+              className="text-sm border-emerald-200 bg-emerald-50 text-emerald-700"
+            >
+              {comCredencial} com credencial
+            </Badge>
+          )}
+          {semCredencial > 0 && (
+            <Badge variant="outline" className="text-sm border-rose-200 bg-rose-50 text-rose-700">
+              {semCredencial} sem credencial
+            </Badge>
+          )}
         </div>
-      )}
 
-      <div className="flex flex-wrap gap-2 pt-1">
-        <Badge variant="outline" className="text-sm border-slate-300 bg-slate-50 text-slate-700">
-          {comp.total_ingressos} ingresso{comp.total_ingressos === 1 ? '' : 's'}
-        </Badge>
-        {comCredencial > 0 && (
-          <Badge
-            variant="outline"
-            className="text-sm border-emerald-200 bg-emerald-50 text-emerald-700"
-          >
-            {comCredencial} com credencial
-          </Badge>
+        {parcial && (
+          <p className="text-sm text-slate-500">
+            {comp.ingressos_encontrados} de {comp.total_ingressos} combinam com a busca
+          </p>
         )}
-        {semCredencial > 0 && (
-          <Badge variant="outline" className="text-sm border-rose-200 bg-rose-50 text-rose-700">
-            {semCredencial} sem credencial
-          </Badge>
-        )}
+      </button>
+
+      <div className="px-4 pb-4">
+        <Button
+          variant="outline"
+          size="lg"
+          className="w-full h-12 text-sm gap-2"
+          disabled={!comp.email}
+          onClick={onReenviar}
+        >
+          <Send className="w-4 h-4" />
+          {comp.email ? 'Reenviar e-mail de acesso' : 'Sem e-mail cadastrado'}
+        </Button>
       </div>
-
-      {parcial && (
-        <p className="text-sm text-slate-500">
-          {comp.ingressos_encontrados} de {comp.total_ingressos} combinam com a busca
-        </p>
-      )}
-    </button>
+    </div>
   )
 }
 
@@ -197,12 +218,14 @@ function CardIngresso({
   onCredenciar,
   onQr,
   onAlterar,
+  onReenviar,
 }: {
   ing: HDIngresso
   comp: HDComprador
   onCredenciar: () => void
   onQr: () => void
   onAlterar: () => void
+  onReenviar: () => void
 }) {
   const semPessoa = !ing.participante
   const pronto = ing.credenciado && ing.tem_qr
@@ -249,27 +272,36 @@ function CardIngresso({
         {comp.email ? <span className="break-all"> · {comp.email}</span> : null}
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        {semPessoa ? (
-          <Button size="lg" className="h-14 text-base gap-2 sm:flex-1" onClick={onCredenciar}>
-            <UserPlus className="w-5 h-5" /> Credenciar
-          </Button>
-        ) : (
-          <Button size="lg" className="h-14 text-base gap-2 sm:flex-1" onClick={onQr}>
+      {semPessoa ? (
+        <Button size="lg" className="w-full h-14 text-base gap-2" onClick={onCredenciar}>
+          <UserPlus className="w-5 h-5" /> Credenciar
+        </Button>
+      ) : (
+        <div className="space-y-3">
+          <Button size="lg" className="w-full h-14 text-base gap-2" onClick={onQr}>
             <QrCode className="w-5 h-5" /> {pronto ? 'Ver QR Code' : 'Gerar credencial'}
           </Button>
-        )}
-        {!semPessoa && (
-          <Button
-            variant="outline"
-            size="lg"
-            className="h-14 text-base gap-2 sm:flex-1"
-            onClick={onAlterar}
-          >
-            <Pencil className="w-5 h-5" /> Alterar ingresso
-          </Button>
-        )}
-      </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Button
+              variant="outline"
+              size="lg"
+              className="h-14 text-base gap-2"
+              onClick={onAlterar}
+            >
+              <Pencil className="w-5 h-5" /> Alterar ingresso
+            </Button>
+            <Button
+              variant="outline"
+              size="lg"
+              className="h-14 text-base gap-2"
+              disabled={!ing.participante?.email}
+              onClick={onReenviar}
+            >
+              <Send className="w-5 h-5" /> Reenviar ingresso
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -292,6 +324,7 @@ export default function Helpdesk() {
   const [qrDe, setQrDe] = useState<HDIngresso | null>(null)
   const [alterar, setAlterar] = useState<HDIngresso | null>(null)
   const [novoAberto, setNovoAberto] = useState(false)
+  const [reenvio, setReenvio] = useState<AlvoReenvio | null>(null)
 
   const inputRef = useRef<HTMLInputElement>(null)
   const painelRef = useRef<HTMLDivElement>(null)
@@ -525,6 +558,17 @@ export default function Helpdesk() {
                     comp={c}
                     ativo={selecionado === c.id}
                     onSelecionar={() => selecionarComprador(c.id)}
+                    onReenviar={() =>
+                      setReenvio({
+                        tipo: 'comprador',
+                        id: c.id,
+                        nome: c.nome,
+                        email: c.email,
+                        contexto: `${c.total_ingressos} ingresso${
+                          c.total_ingressos === 1 ? '' : 's'
+                        } neste cadastro`,
+                      })
+                    }
                   />
                 ))}
                 {resultados.length > 1 && (
@@ -594,6 +638,15 @@ export default function Helpdesk() {
                       onCredenciar={() => setCredenciar({ ing, comp })}
                       onQr={() => setQrDe(ing)}
                       onAlterar={() => setAlterar(ing)}
+                      onReenviar={() =>
+                        setReenvio({
+                          tipo: 'participante',
+                          id: ing.id,
+                          nome: ing.participante?.nome_completo || '',
+                          email: ing.participante?.email || '',
+                          contexto: `Pedido ${ing.pedido_id} · ${ing.tipo_ingresso}`,
+                        })
+                      }
                     />
                   ))}
                 </div>
@@ -616,6 +669,7 @@ export default function Helpdesk() {
         onClose={() => setNovoAberto(false)}
         onDone={recarregar}
       />
+      <ReenviarDialog alvo={reenvio} onClose={() => setReenvio(null)} onDone={() => {}} />
     </div>
   )
 }

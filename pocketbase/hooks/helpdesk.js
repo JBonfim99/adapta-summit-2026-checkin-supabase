@@ -1930,3 +1930,491 @@ routerAdd('POST', '/backend/v1/helpdesk/novo-credenciamento', (e) => {
     log_ok: logOk,
   })
 })
+
+// --- Reenvio do e-mail do COMPRADOR (template Email02: link de acesso para
+//     ele preencher os participantes). Mesmo disparo já usado fora do balcão.
+routerAdd('POST', '/backend/v1/helpdesk/comprador/{id}/reenviar', (e) => {
+  const secret = (n) => {
+    let v = ''
+    try {
+      v = $os.getenv(n) || ''
+    } catch (_) {}
+    if (!v) {
+      try {
+        if (typeof $secrets !== 'undefined' && $secrets && $secrets.get) v = $secrets.get(n) || ''
+      } catch (_) {}
+    }
+    return v
+  }
+  const readH = (n) => {
+    try {
+      const v = e.request.header.get(n)
+      if (v) return v.toString()
+    } catch (_) {}
+    try {
+      const h = e.requestInfo().headers || {}
+      const k = n.toLowerCase().replace(/-/g, '_')
+      if (h[k]) return h[k].toString()
+    } catch (_) {}
+    return ''
+  }
+  // O TextDecoder do JSVM erra acentos: decodifica UTF-8 na mão.
+  const decodeBody = (b) => {
+    if (b == null) return ''
+    if (typeof b === 'string') return b
+    let bytes
+    try {
+      bytes = new Uint8Array(b)
+    } catch (_) {
+      bytes = b
+    }
+    let out = ''
+    let i = 0
+    const len = bytes.length
+    while (i < len) {
+      const b1 = bytes[i++]
+      if (b1 < 0x80) {
+        out += String.fromCharCode(b1)
+      } else if ((b1 & 0xe0) === 0xc0 && i < len) {
+        const b2 = bytes[i++]
+        out += String.fromCharCode(((b1 & 0x1f) << 6) | (b2 & 0x3f))
+      } else if ((b1 & 0xf0) === 0xe0 && i + 1 < len) {
+        const b2 = bytes[i++]
+        const b3 = bytes[i++]
+        out += String.fromCharCode(((b1 & 0x0f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f))
+      } else if ((b1 & 0xf8) === 0xf0 && i + 2 < len) {
+        const b2 = bytes[i++]
+        const b3 = bytes[i++]
+        const b4 = bytes[i++]
+        let cp = ((b1 & 0x07) << 18) | ((b2 & 0x3f) << 12) | ((b3 & 0x3f) << 6) | (b4 & 0x3f)
+        cp -= 0x10000
+        out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))
+      }
+    }
+    return out
+  }
+
+  const body = e.requestInfo().body || {}
+  const expected = secret('HELPDESK_PASSWORD')
+  if (!expected) return e.json(503, { message: 'Área de help desk não configurada.' })
+  let sent = readH('X-Helpdesk-Key')
+  if (!sent && body._key) sent = String(body._key)
+  if (sent !== expected) return e.json(401, { message: 'Senha incorreta.' })
+
+  const operador = (body.operador || '').toString().replace(/\s+/g, ' ').trim()
+  const quem = operador || 'não identificado'
+  const compradorId = e.request.pathValue('id')
+
+  let comprador
+  try {
+    comprador = $app.findRecordById('compradores', compradorId)
+  } catch (_) {
+    return e.json(404, { message: 'Comprador não encontrado.' })
+  }
+
+  const email = comprador.getString('email')
+  const nome = comprador.getString('nome')
+  if (!email) {
+    return e.json(400, {
+      message: 'Este comprador não tem e-mail cadastrado, então não há para onde reenviar.',
+    })
+  }
+
+  const sg = secret('SENDGRID_API_KEY')
+  if (!sg) {
+    return e.json(500, {
+      message:
+        'O envio de e-mails não está configurado no servidor (SENDGRID_API_KEY). Avise o suporte.',
+    })
+  }
+
+  const templateNome = 'Skip-Summit26-Send-Comprador-Email02'
+  let templateId = ''
+  try {
+    const res = $http.send({
+      url: 'https://api.sendgrid.com/v3/templates?generations=dynamic&page_size=200',
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + sg },
+      timeout: 20,
+    })
+    const parsed = JSON.parse(decodeBody(res.body))
+    const list = parsed.result || parsed.templates || []
+    for (let i = 0; i < list.length; i++) {
+      if (list[i] && list[i].name === templateNome && list[i].id) {
+        templateId = list[i].id
+        break
+      }
+    }
+  } catch (err) {
+    return e.json(502, {
+      message:
+        'Não foi possível falar com o serviço de e-mail: ' +
+        ((err && err.message) || 'erro desconhecido') +
+        '. Nada foi enviado.',
+    })
+  }
+  if (!templateId) {
+    return e.json(502, {
+      message: 'O modelo de e-mail "' + templateNome + '" não foi encontrado. Nada foi enviado.',
+    })
+  }
+
+  let token = ''
+  try {
+    const tokenColl = $app.findCollectionByNameOrId('tokens_acesso')
+    token = $security.randomString(40)
+    const tr = new Record(tokenColl)
+    tr.set('comprador_id', comprador.id)
+    tr.set('token', token)
+    tr.set('usado', false)
+    const exp = new Date()
+    exp.setDate(exp.getDate() + 60)
+    tr.set('expira_em', exp.toISOString())
+    $app.save(tr)
+  } catch (err) {
+    return e.json(500, {
+      message:
+        'Falha ao gerar o link de acesso: ' +
+        ((err && err.message) || 'erro desconhecido') +
+        '. Nada foi enviado.',
+    })
+  }
+
+  let enviado = false
+  let erro = ''
+  try {
+    const res = $http.send({
+      url: 'https://api.sendgrid.com/v3/mail/send',
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + sg, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: { email: 'duvidas@adapta.org', name: 'Adapta Summit 2026' },
+        template_id: templateId,
+        personalizations: [
+          {
+            to: [{ email: email, name: nome }],
+            dynamic_template_data: {
+              firstname: (nome.split(' ')[0] || nome || '').trim(),
+              token: token,
+            },
+          },
+        ],
+      }),
+      timeout: 20,
+    })
+    enviado = res.statusCode >= 200 && res.statusCode < 300
+    if (!enviado) erro = 'o serviço de e-mail recusou (HTTP ' + res.statusCode + ')'
+  } catch (err) {
+    erro = (err && err.message) || 'falha de rede'
+  }
+
+  const avisos = []
+  let logOk = true
+  try {
+    const collA = $app.findCollectionByNameOrId('webhooks_log')
+    const recA = new Record(collA)
+    recA.set('evento', 'helpdesk_reenvio_comprador')
+    recA.set('method', 'HELPDESK')
+    recA.set('status', enviado ? 200 : 0)
+    recA.set(
+      'detalhe',
+      'Help desk (' +
+        quem +
+        ') — reenviou o e-mail do comprador (' +
+        templateNome +
+        ') para ' +
+        (nome || email) +
+        ' (' +
+        email +
+        ') — ' +
+        (enviado ? 'enviado' : 'FALHOU: ' + erro),
+    )
+    recA.set(
+      'payload',
+      JSON.stringify({
+        origem: 'helpdesk',
+        acao: 'reenvio_comprador',
+        operador: quem,
+        comprador_id: comprador.id,
+        email: email,
+        template: templateNome,
+      }),
+    )
+    recA.set('response', enviado ? 'OK' : erro)
+    $app.save(recA)
+  } catch (errL) {
+    logOk = false
+    avisos.push(
+      'O e-mail foi processado, mas o registro no histórico falhou: ' +
+        ((errL && errL.message) || 'erro desconhecido') +
+        '. Avise o suporte.',
+    )
+  }
+
+  if (!enviado) {
+    return e.json(502, {
+      message:
+        'O e-mail NÃO foi enviado para ' +
+        email +
+        '. Motivo: ' +
+        erro +
+        '. Tente de novo em alguns segundos; se repetir, chame o suporte.',
+    })
+  }
+
+  return e.json(200, { ok: true, email: email, avisos: avisos, log_ok: logOk })
+})
+
+// --- Reenvio do INGRESSO para o participante (template Send-Participante:
+//     link do ingresso/credencial da própria pessoa).
+routerAdd('POST', '/backend/v1/helpdesk/ticket/{id}/reenviar', (e) => {
+  const secret = (n) => {
+    let v = ''
+    try {
+      v = $os.getenv(n) || ''
+    } catch (_) {}
+    if (!v) {
+      try {
+        if (typeof $secrets !== 'undefined' && $secrets && $secrets.get) v = $secrets.get(n) || ''
+      } catch (_) {}
+    }
+    return v
+  }
+  const readH = (n) => {
+    try {
+      const v = e.request.header.get(n)
+      if (v) return v.toString()
+    } catch (_) {}
+    try {
+      const h = e.requestInfo().headers || {}
+      const k = n.toLowerCase().replace(/-/g, '_')
+      if (h[k]) return h[k].toString()
+    } catch (_) {}
+    return ''
+  }
+  const decodeBody = (b) => {
+    if (b == null) return ''
+    if (typeof b === 'string') return b
+    let bytes
+    try {
+      bytes = new Uint8Array(b)
+    } catch (_) {
+      bytes = b
+    }
+    let out = ''
+    let i = 0
+    const len = bytes.length
+    while (i < len) {
+      const b1 = bytes[i++]
+      if (b1 < 0x80) {
+        out += String.fromCharCode(b1)
+      } else if ((b1 & 0xe0) === 0xc0 && i < len) {
+        const b2 = bytes[i++]
+        out += String.fromCharCode(((b1 & 0x1f) << 6) | (b2 & 0x3f))
+      } else if ((b1 & 0xf0) === 0xe0 && i + 1 < len) {
+        const b2 = bytes[i++]
+        const b3 = bytes[i++]
+        out += String.fromCharCode(((b1 & 0x0f) << 12) | ((b2 & 0x3f) << 6) | (b3 & 0x3f))
+      } else if ((b1 & 0xf8) === 0xf0 && i + 2 < len) {
+        const b2 = bytes[i++]
+        const b3 = bytes[i++]
+        const b4 = bytes[i++]
+        let cp = ((b1 & 0x07) << 18) | ((b2 & 0x3f) << 12) | ((b3 & 0x3f) << 6) | (b4 & 0x3f)
+        cp -= 0x10000
+        out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))
+      }
+    }
+    return out
+  }
+
+  const body = e.requestInfo().body || {}
+  const expected = secret('HELPDESK_PASSWORD')
+  if (!expected) return e.json(503, { message: 'Área de help desk não configurada.' })
+  let sent = readH('X-Helpdesk-Key')
+  if (!sent && body._key) sent = String(body._key)
+  if (sent !== expected) return e.json(401, { message: 'Senha incorreta.' })
+
+  const operador = (body.operador || '').toString().replace(/\s+/g, ' ').trim()
+  const quem = operador || 'não identificado'
+  const ticketId = e.request.pathValue('id')
+
+  let ingresso
+  try {
+    ingresso = $app.findRecordById('ingressos', ticketId)
+  } catch (_) {
+    return e.json(404, { message: 'Ingresso não encontrado.' })
+  }
+  const partId = ingresso.getString('participante_id')
+  if (!partId) {
+    return e.json(400, {
+      message:
+        'Este ingresso ainda não tem participante. Reenvie o e-mail do COMPRADOR (botão no card dele) ou credencie a pessoa aqui mesmo.',
+    })
+  }
+  let part
+  try {
+    part = $app.findRecordById('participantes', partId)
+  } catch (_) {
+    return e.json(400, { message: 'Participante não encontrado para este ingresso.' })
+  }
+
+  const email = part.getString('email')
+  const nome = part.getString('nome_completo')
+  if (!email) return e.json(400, { message: 'Este participante não tem e-mail cadastrado.' })
+
+  const sg = secret('SENDGRID_API_KEY')
+  if (!sg) {
+    return e.json(500, {
+      message:
+        'O envio de e-mails não está configurado no servidor (SENDGRID_API_KEY). Avise o suporte.',
+    })
+  }
+
+  const templateNome = 'Skip-Summit26-Send-Participante'
+  let templateId = ''
+  try {
+    const res = $http.send({
+      url: 'https://api.sendgrid.com/v3/templates?generations=dynamic&page_size=200',
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + sg },
+      timeout: 20,
+    })
+    const parsed = JSON.parse(decodeBody(res.body))
+    const list = parsed.result || parsed.templates || []
+    for (let i = 0; i < list.length; i++) {
+      if (list[i] && list[i].name === templateNome && list[i].id) {
+        templateId = list[i].id
+        break
+      }
+    }
+  } catch (err) {
+    return e.json(502, {
+      message:
+        'Não foi possível falar com o serviço de e-mail: ' +
+        ((err && err.message) || 'erro desconhecido') +
+        '. Nada foi enviado.',
+    })
+  }
+  if (!templateId) {
+    return e.json(502, {
+      message: 'O modelo de e-mail "' + templateNome + '" não foi encontrado. Nada foi enviado.',
+    })
+  }
+
+  // token do ingresso: reaproveita o existente ou cria um novo de 60 dias
+  let token = ''
+  try {
+    try {
+      const link = $app.findFirstRecordByFilter('links_participante', 'ingresso_id = {:iid}', {
+        iid: ticketId,
+      })
+      token = link.getString('token')
+    } catch (_) {
+      const linksColl = $app.findCollectionByNameOrId('links_participante')
+      token = $security.randomString(40)
+      const lr = new Record(linksColl)
+      lr.set('ingresso_id', ticketId)
+      lr.set('token', token)
+      lr.set('usado', false)
+      const exp = new Date()
+      exp.setDate(exp.getDate() + 60)
+      lr.set('expira_em', exp.toISOString())
+      $app.save(lr)
+    }
+  } catch (err) {
+    return e.json(500, {
+      message:
+        'Falha ao gerar o link do ingresso: ' +
+        ((err && err.message) || 'erro desconhecido') +
+        '. Nada foi enviado.',
+    })
+  }
+
+  let enviado = false
+  let erro = ''
+  try {
+    const res = $http.send({
+      url: 'https://api.sendgrid.com/v3/mail/send',
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + sg, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: { email: 'duvidas@adapta.org', name: 'Adapta Summit 2026' },
+        template_id: templateId,
+        personalizations: [
+          {
+            to: [{ email: email, name: nome }],
+            dynamic_template_data: {
+              firstname: (nome.split(' ')[0] || nome || '').trim(),
+              token: token,
+            },
+          },
+        ],
+      }),
+      timeout: 20,
+    })
+    enviado = res.statusCode >= 200 && res.statusCode < 300
+    if (!enviado) erro = 'o serviço de e-mail recusou (HTTP ' + res.statusCode + ')'
+  } catch (err) {
+    erro = (err && err.message) || 'falha de rede'
+  }
+
+  const avisos = []
+  let logOk = true
+  try {
+    const collA = $app.findCollectionByNameOrId('webhooks_log')
+    const recA = new Record(collA)
+    recA.set('ingresso_id', ticketId)
+    recA.set('evento', 'helpdesk_reenvio_participante')
+    recA.set('method', 'HELPDESK')
+    recA.set('status', enviado ? 200 : 0)
+    recA.set(
+      'detalhe',
+      'Help desk (' +
+        quem +
+        ') — reenviou o ingresso ' +
+        ingresso.getString('pedido_id') +
+        ' (' +
+        templateNome +
+        ') para ' +
+        (nome || email) +
+        ' (' +
+        email +
+        ') — ' +
+        (enviado ? 'enviado' : 'FALHOU: ' + erro),
+    )
+    recA.set(
+      'payload',
+      JSON.stringify({
+        origem: 'helpdesk',
+        acao: 'reenvio_participante',
+        operador: quem,
+        pedido_id: ingresso.getString('pedido_id'),
+        participante_id: part.id,
+        email: email,
+        template: templateNome,
+      }),
+    )
+    recA.set('response', enviado ? 'OK' : erro)
+    $app.save(recA)
+  } catch (errL) {
+    logOk = false
+    avisos.push(
+      'O e-mail foi processado, mas o registro no histórico falhou: ' +
+        ((errL && errL.message) || 'erro desconhecido') +
+        '. Avise o suporte.',
+    )
+  }
+
+  if (!enviado) {
+    return e.json(502, {
+      message:
+        'O e-mail NÃO foi enviado para ' +
+        email +
+        '. Motivo: ' +
+        erro +
+        '. Tente de novo em alguns segundos; se repetir, chame o suporte.',
+    })
+  }
+
+  return e.json(200, { ok: true, email: email, avisos: avisos, log_ok: logOk })
+})

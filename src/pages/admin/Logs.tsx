@@ -74,6 +74,14 @@ const MANUAL_EVENTOS: Record<string, { label: string; cls: string }> = {
     label: 'Help desk: gerou QR',
     cls: 'border-teal-200 bg-teal-50 text-teal-700',
   },
+  helpdesk_reenvio_comprador: {
+    label: 'Help desk: reenviou (comprador)',
+    cls: 'border-sky-200 bg-sky-50 text-sky-700',
+  },
+  helpdesk_reenvio_participante: {
+    label: 'Help desk: reenviou ingresso',
+    cls: 'border-sky-200 bg-sky-50 text-sky-700',
+  },
   helpdesk_erro: {
     label: 'Help desk: falha',
     cls: 'border-rose-200 bg-rose-50 text-rose-700',

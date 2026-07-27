@@ -28,7 +28,8 @@ routerAdd(
         "'excluido_manual','comprador_excluido','editado_manual','tipo_alterado'," +
         "'api_criacao_comprador','api_credenciamento','api_reenvio_comprador','api_reenvio_participante'," +
         "'helpdesk_credenciamento','helpdesk_edicao','helpdesk_tipo_alterado','helpdesk_qr'," +
-        "'helpdesk_qr_gerado','helpdesk_erro','helpdesk_novo_credenciamento'"
+        "'helpdesk_qr_gerado','helpdesk_erro','helpdesk_novo_credenciamento'," +
+        "'helpdesk_reenvio_comprador','helpdesk_reenvio_participante'"
 
       // CTE com as linhas "representativas": último log por ingresso vivo +
       // eventos manuais órfãos (ingresso não existe mais).

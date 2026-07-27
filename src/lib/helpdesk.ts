@@ -206,6 +206,20 @@ export async function hdNovoCredenciamento(dados: HDNovoCredenciamento) {
   })
 }
 
+export async function hdReenviarComprador(compradorId: string) {
+  return request(`/backend/v1/helpdesk/comprador/${compradorId}/reenviar`, {
+    method: 'POST',
+    body: JSON.stringify({ operador: getOperador() }),
+  })
+}
+
+export async function hdReenviarParticipante(ingressoId: string) {
+  return request(`/backend/v1/helpdesk/ticket/${ingressoId}/reenviar`, {
+    method: 'POST',
+    body: JSON.stringify({ operador: getOperador() }),
+  })
+}
+
 export async function hdVerQr(ingressoId: string) {
   const params = new URLSearchParams({ operador: getOperador() })
   return request(`/backend/v1/helpdesk/ticket/${ingressoId}/qr?${params.toString()}`)
