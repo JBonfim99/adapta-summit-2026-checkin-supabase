@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/card'
 import {
   AlertCircle,
   CheckCircle2,
+  History,
   Loader2,
   LogOut,
   Pencil,
@@ -267,9 +268,17 @@ function CardIngresso({
         </div>
       )}
 
-      <div className="rounded-lg bg-slate-50 border px-3 py-2 text-sm text-slate-600">
-        Comprado por <span className="font-semibold text-slate-800">{comp.nome}</span>
-        {comp.email ? <span className="break-all"> · {comp.email}</span> : null}
+      <div className="rounded-lg bg-slate-50 border px-3 py-2 text-sm text-slate-600 space-y-1">
+        <div>
+          Comprado por <span className="font-semibold text-slate-800">{comp.nome}</span>
+          {comp.email ? <span className="break-all"> · {comp.email}</span> : null}
+        </div>
+        {ing.origem_info && (
+          <div className="flex items-start gap-1.5 text-slate-700">
+            <History className="w-4 h-4 shrink-0 mt-0.5 text-slate-400" />
+            <span>{ing.origem_info}</span>
+          </div>
+        )}
       </div>
 
       {semPessoa ? (
@@ -330,7 +339,9 @@ export default function Helpdesk() {
   const painelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (logado) inputRef.current?.focus()
+    if (!logado) return
+    inputRef.current?.focus()
+    console.log('[helpdesk] senha do balcão:', getKey())
   }, [logado])
 
   const sair = () => {

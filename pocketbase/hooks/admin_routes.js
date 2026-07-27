@@ -231,6 +231,24 @@ routerAdd(
       return e.badRequestError(m)
     }
 
+    // Marca que este check-in foi feito à mão no admin (e não pela própria
+    // pessoa no formulário). É o que permite distinguir a origem depois.
+    try {
+      const mColl = $app.findCollectionByNameOrId('webhooks_log')
+      const mLog = new Record(mColl)
+      mLog.set('ingresso_id', ingressoId)
+      mLog.set('evento', 'checkin_manual_admin')
+      mLog.set('method', 'ADMIN')
+      mLog.set('status', 200)
+      mLog.set(
+        'detalhe',
+        'Check-in feito manualmente no admin para ' + (body.nome_completo || body.email || ''),
+      )
+      mLog.set('payload', JSON.stringify({ acao: 'checkin_manual_admin', email: body.email || '' }))
+      mLog.set('response', 'OK')
+      $app.save(mLog)
+    } catch (_) {}
+
     // Pós-commit: chama a INAC /add (síncrono), persiste inac_id/inac_qr e
     // devolve o qrcode. Idempotente: só chama se ainda não houver inac_id.
     let qrcode = ''

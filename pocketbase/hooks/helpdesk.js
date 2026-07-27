@@ -236,6 +236,56 @@ routerAdd('GET', '/backend/v1/helpdesk/search', (e) => {
       )
       .all(rows)
 
+    // De onde veio cada check-in: balcão (com o nome do atendente), admin
+    // manual, API externa — ou preenchimento da própria pessoa.
+    const origemPorIngresso = {}
+    const idsSeguros = []
+    for (let i = 0; i < rows.length; i++) {
+      const s = String(rows[i].id).replace(/[^a-zA-Z0-9]/g, '')
+      if (s) idsSeguros.push(s)
+    }
+    if (idsSeguros.length > 0) {
+      const marcos = arrayOf(
+        new DynamicModel({ ingresso_id: '', evento: '', payload: '', created: '' }),
+      )
+      $app
+        .db()
+        .newQuery(
+          "SELECT ingresso_id, evento, COALESCE(payload,'') as payload, created " +
+            "FROM webhooks_log WHERE ingresso_id IN ('" +
+            idsSeguros.join("','") +
+            "') AND evento IN ('helpdesk_novo_credenciamento','helpdesk_credenciamento'," +
+            "'checkin_manual_admin','api_credenciamento') ORDER BY created ASC",
+        )
+        .all(marcos)
+      for (let i = 0; i < marcos.length; i++) {
+        const m = marcos[i]
+        if (origemPorIngresso[m.ingresso_id]) continue
+        let operador = ''
+        try {
+          const p = JSON.parse(m.payload || '{}')
+          operador = (p && p.operador) || ''
+        } catch (_) {}
+        let txt = ''
+        if (m.evento === 'helpdesk_novo_credenciamento') txt = 'Criado do zero no balcão'
+        else if (m.evento === 'helpdesk_credenciamento') txt = 'Check-in feito no balcão'
+        else if (m.evento === 'checkin_manual_admin') txt = 'Check-in feito à mão no admin'
+        else if (m.evento === 'api_credenciamento') txt = 'Check-in feito pela API externa'
+        if (txt && operador) txt += ' por ' + operador
+        origemPorIngresso[m.ingresso_id] = txt
+      }
+    }
+
+    const origemDoIngresso = (r) => {
+      if (origemPorIngresso[r.id]) return origemPorIngresso[r.id]
+      if (r.origem === 'cortesia') return 'Ingresso de cortesia'
+      if (r.origem === 'reconciliacao') return 'Ingresso criado na reconciliação'
+      if (r.origem === 'api-externa') return 'Ingresso criado pela API externa'
+      if (r.origem === 'helpdesk') return 'Ingresso criado no balcão'
+      if (r.part_id) return 'Preenchido pela própria pessoa'
+      return ''
+    }
+
     const porComprador = {}
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i]
@@ -251,6 +301,7 @@ routerAdd('GET', '/backend/v1/helpdesk/search', (e) => {
         origem: r.origem,
         // true = este ingresso é resposta direta da busca
         match: !!matchComprador[r.comprador_id] || !!matchIngresso[r.id],
+        origem_info: origemDoIngresso(r),
         participante: r.part_id
           ? {
               id: r.part_id,

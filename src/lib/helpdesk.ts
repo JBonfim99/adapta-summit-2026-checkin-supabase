@@ -27,6 +27,8 @@ export interface HDIngresso {
   origem: string
   /** true quando este ingresso é resposta direta da busca */
   match: boolean
+  /** quem criou/fez o check-in: balcão (com atendente), admin, API, a própria pessoa */
+  origem_info: string
   participante: HDParticipante | null
 }
 
