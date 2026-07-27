@@ -87,7 +87,7 @@ export default function ParticipantTicket() {
               alt="Adapta Summit 2026"
               className="h-12 w-auto object-contain mx-auto mb-4"
             />
-            <CardTitle className="text-2xl text-primary">Pré-credenciamento pendente</CardTitle>
+            <CardTitle className="text-2xl text-primary">Check-in pendente</CardTitle>
             <CardDescription className="text-base mt-2">
               Este ingresso ({data.tipo_ingresso}) ainda não foi preenchido. Complete seus dados
               para gerar sua credencial.
@@ -119,7 +119,7 @@ export default function ParticipantTicket() {
           <div>
             <CardTitle className="text-2xl text-primary">Seu ingresso está confirmado</CardTitle>
             <CardDescription className="text-base mt-1">
-              Estes são os dados do seu pré-credenciamento para o Adapta Summit 2026.
+              Estes são os dados do seu check-in para o Adapta Summit 2026.
             </CardDescription>
           </div>
         </CardHeader>

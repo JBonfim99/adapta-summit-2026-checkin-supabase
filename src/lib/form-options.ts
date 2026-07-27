@@ -1,4 +1,4 @@
-// Opções dos selects do formulário de pré-credenciamento (público e interno).
+// Opções dos selects do formulário de check-in (público e interno).
 export const ROLES = [
   'Empreendedor, Sócio ou CEO',
   'C-level, Diretor ou Head',

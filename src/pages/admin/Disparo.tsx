@@ -270,7 +270,7 @@ export default function AdminDispatch() {
           <div className="space-y-2">
             <label className="text-sm font-medium">Nome do disparo (opcional)</label>
             <Input
-              placeholder="Ex: Lembrete pré-credenciamento"
+              placeholder="Ex: Lembrete check-in"
               value={nome}
               onChange={(e) => setNome(e.target.value)}
             />

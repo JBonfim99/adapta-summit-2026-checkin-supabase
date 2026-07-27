@@ -18,6 +18,7 @@ import {
   Download,
   Loader2,
   Send,
+  KeyRound,
 } from 'lucide-react'
 import ReenviarRapido, { type AlvoReenvio } from '@/components/admin/ReenviarRapido'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -396,7 +397,7 @@ export default function AdminCompradores() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos os Compradores</SelectItem>
-            <SelectItem value="all_pre_credenciados">Todos Pré-Credenciados</SelectItem>
+            <SelectItem value="all_pre_credenciados">Todos com Check-in feito</SelectItem>
             <SelectItem value="pending">Com Ingressos Pendentes</SelectItem>
           </SelectContent>
         </Select>
@@ -460,6 +461,46 @@ export default function AdminCompradores() {
                         onClick={() => setSelectedBuyer(row)}
                       >
                         <TicketIcon className="w-4 h-4 text-indigo-500" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Copiar link de acesso (entra como este comprador)"
+                        onClick={async () => {
+                          try {
+                            const res: any = await pb.send(
+                              `/backend/v1/admin/buyers/${row.id}/access-link`,
+                              { method: 'POST' },
+                            )
+                            const url = `${window.location.origin}/acesso?token=${res.token}`
+                            try {
+                              await navigator.clipboard.writeText(url)
+                              toast({
+                                title: 'Link de acesso copiado!',
+                                description: `${row.email} • vale 60 dias`,
+                              })
+                            } catch {
+                              window.prompt('Copie o link de acesso:', url)
+                            }
+                          } catch (err: any) {
+                            if (err?.status === 401) {
+                              toast({
+                                title: 'Sessão expirada',
+                                description: 'Faça login de novo — nenhum link foi gerado.',
+                                variant: 'destructive',
+                              })
+                              window.location.href = '/admin/login'
+                              return
+                            }
+                            toast({
+                              title: 'Erro ao gerar o link',
+                              description: err?.message || 'erro desconhecido',
+                              variant: 'destructive',
+                            })
+                          }
+                        }}
+                      >
+                        <KeyRound className="w-4 h-4 text-amber-600" />
                       </Button>
                       <Button
                         variant="ghost"

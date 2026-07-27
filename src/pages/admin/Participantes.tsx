@@ -224,7 +224,7 @@ export default function AdminParticipants() {
         >
           <option value="all">Todos os Status</option>
           <option value="Pendente">Pendente</option>
-          <option value="Pré-Credenciado">Pré-Credenciado</option>
+          <option value="Pré-Credenciado">Check-in feito</option>
         </select>
         <select
           className="h-10 px-3 py-2 rounded-md border bg-white text-sm outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -329,7 +329,7 @@ export default function AdminParticipants() {
                                   )
                                   const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${res.token}`
                                   await navigator.clipboard.writeText(url)
-                                  toast({ title: 'Link de pré-credenciamento copiado!' })
+                                  toast({ title: 'Link de check-in copiado!' })
                                 } catch (e: any) {
                                   if (e?.status === 401) {
                                     toast({

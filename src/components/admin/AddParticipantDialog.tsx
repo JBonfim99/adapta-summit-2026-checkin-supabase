@@ -175,7 +175,7 @@ export function AddParticipantDialog({
         <DialogHeader className="p-6 border-b pb-4 bg-slate-50/50 space-y-1">
           <DialogTitle>Adicionar Participante</DialogTitle>
           <DialogDescription>
-            Pré-credenciamento manual do ingresso{' '}
+            Check-in manual do ingresso{' '}
             <span className="font-mono font-semibold text-foreground">{ticket?.pedido_id}</span> (
             {ticket?.tipo_ingresso}).
           </DialogDescription>

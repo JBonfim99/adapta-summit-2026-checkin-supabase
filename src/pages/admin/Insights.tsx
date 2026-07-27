@@ -8,7 +8,7 @@ export default function AdminInsights() {
       <div>
         <h2 className="text-2xl font-bold">Insights</h2>
         <p className="text-muted-foreground">
-          Resumo agregado e respostas individuais do pré-credenciamento.
+          Resumo agregado e respostas individuais do check-in.
         </p>
       </div>
 

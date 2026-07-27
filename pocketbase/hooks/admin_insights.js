@@ -1,4 +1,4 @@
-// Insights agregados do pré-credenciamento. Retorna SOMENTE contagens/médias
+// Insights agregados do check-in. Retorna SOMENTE contagens/médias
 // (nenhum dado pessoal). Carrega participantes + ingressos e agrega em memória,
 // no mesmo padrão de /admin/stats. Gated por auth de admin.
 routerAdd(

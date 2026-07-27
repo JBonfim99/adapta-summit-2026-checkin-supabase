@@ -2,7 +2,7 @@
 // (ver admin_import_buyers.js). A antiga /admin/import foi removida por ser
 // código morto e divergente (não criava links de participante).
 
-// Gera (ou reaproveita) o link de pré-credenciamento de um ingresso.
+// Gera (ou reaproveita) o link de check-in de um ingresso.
 // Roda no backend com auth de admin porque a collection links_participante
 // tem API rules = null (acesso direto só por superuser).
 routerAdd(
@@ -133,7 +133,7 @@ routerAdd(
   $apis.requireAuth(),
 )
 
-// Pré-credenciamento manual pelo admin: cria o participante e atrela a um
+// Check-in manual pelo admin: cria o participante e atrela a um
 // ingresso PENDENTE. A criação do participante dispara o hook de webhook+log
 // (ver webhook_inac.js), e o ingresso passa a Pré-Credenciado.
 routerAdd(
@@ -1261,6 +1261,74 @@ routerAdd(
       })
 
       return e.json(200, { success: true, removed_ingressos: removedIngressos })
+    } catch (err) {
+      return e.badRequestError(err.message)
+    }
+  },
+  $apis.requireAuth(),
+)
+
+// Gera um link de acesso (magic link) para entrar como o comprador — o mesmo
+// que ele recebe por e-mail, só que sem precisar disparar nada. Devolve só o
+// token: quem monta a URL é o front, com a origem atual (preview ou produção).
+routerAdd(
+  'POST',
+  '/backend/v1/admin/buyers/{buyerId}/access-link',
+  (e) => {
+    try {
+      const buyerId = e.request.pathValue('buyerId')
+
+      let comprador
+      try {
+        comprador = $app.findRecordById('compradores', buyerId)
+      } catch (_) {
+        return e.notFoundError('Comprador não encontrado')
+      }
+
+      const tokenStr = $security.randomString(40)
+      const col = $app.findCollectionByNameOrId('tokens_acesso')
+      const rec = new Record(col)
+      rec.set('comprador_id', comprador.id)
+      rec.set('token', tokenStr)
+      rec.set('usado', false)
+      const expira = new Date()
+      expira.setDate(expira.getDate() + 60)
+      rec.set('expira_em', expira.toISOString())
+      $app.save(rec)
+
+      // Fica registrado quem entrou como quem.
+      try {
+        const logColl = $app.findCollectionByNameOrId('webhooks_log')
+        const log = new Record(logColl)
+        log.set('evento', 'admin_link_acesso')
+        log.set('method', 'ADMIN')
+        log.set('status', 200)
+        log.set(
+          'detalhe',
+          'Link de acesso gerado no admin para ' +
+            (comprador.getString('nome') || '') +
+            ' (' +
+            comprador.getString('email') +
+            ')',
+        )
+        log.set(
+          'payload',
+          JSON.stringify({
+            acao: 'link_acesso',
+            comprador_id: comprador.id,
+            expira_em: expira.toISOString(),
+          }),
+        )
+        log.set('response', 'OK')
+        $app.save(log)
+      } catch (_) {}
+
+      return e.json(200, {
+        token: tokenStr,
+        email: comprador.getString('email'),
+        nome: comprador.getString('nome'),
+        expira_em: expira.toISOString(),
+      })
     } catch (err) {
       return e.badRequestError(err.message)
     }

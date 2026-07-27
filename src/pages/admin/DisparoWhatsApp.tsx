@@ -442,7 +442,7 @@ export default function AdminDisparoWhatsApp() {
                   <div>
                     <span className="text-muted-foreground">Fluxo: </span>
                     <span className="font-medium text-foreground">
-                      {isPre ? 'Pré-credenciamento (padrão)' : selectedFlowNome || flow}
+                      {isPre ? 'Check-in (padrão)' : selectedFlowNome || flow}
                     </span>
                   </div>
                   {!isPre && validMapping.length > 0 && (

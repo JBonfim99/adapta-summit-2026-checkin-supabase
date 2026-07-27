@@ -19,8 +19,8 @@ export default function PrivacyPolicy() {
 
         <p>
           <strong>
-            Ao utilizar esta plataforma e realizar o seu pré-credenciamento para o Adapta Summit
-            2026, você declara ter lido e concordar integralmente com todos os termos desta página
+            Ao utilizar esta plataforma e realizar o seu check-in para o Adapta Summit 2026, você
+            declara ter lido e concordar integralmente com todos os termos desta página
           </strong>
           , incluindo a autorização de uso de imagem, voz e dados descrita no item 4.
         </p>

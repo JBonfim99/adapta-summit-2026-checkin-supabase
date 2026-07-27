@@ -248,7 +248,7 @@ export default function ParticipantForm() {
           height="64"
           className="h-12 md:h-16 w-auto min-w-[180px] object-contain mb-4"
         />
-        <h1 className="text-3xl font-bold">Pré-Credenciamento</h1>
+        <h1 className="text-3xl font-bold">Check-in</h1>
         <p className="text-muted-foreground">
           Ingresso:{' '}
           <span className="font-mono text-foreground font-semibold">

@@ -365,7 +365,7 @@ export default function InsightsResumo() {
       {/* Evolução por dia */}
       <Card className="border-none shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg">Pré-credenciamentos por dia</CardTitle>
+          <CardTitle className="text-lg">Check-ins por dia</CardTitle>
         </CardHeader>
         <CardContent>
           {dias.length === 0 ? (

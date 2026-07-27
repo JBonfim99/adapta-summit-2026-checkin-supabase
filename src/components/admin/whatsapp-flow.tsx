@@ -11,7 +11,7 @@ import {
 import { Plus, Trash2 } from 'lucide-react'
 import pb from '@/lib/pocketbase/client'
 
-// Valor do fluxo padrão (pré-credenciamento via catch webhook).
+// Valor do fluxo padrão (check-in via catch webhook).
 export const PRE = 'PRE'
 
 export interface BcFlow {
@@ -72,7 +72,7 @@ export function useFlowsAndFields() {
   return { flows, flowsErr, fields }
 }
 
-// Dropdown de fluxo (padrão = pré-credenciamento).
+// Dropdown de fluxo (padrão = check-in).
 export function FlowSelect({
   flow,
   onChange,
@@ -93,7 +93,7 @@ export function FlowSelect({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={PRE}>Pré-credenciamento (padrão)</SelectItem>
+          <SelectItem value={PRE}>Check-in (padrão)</SelectItem>
           {flows.map((f) => (
             <SelectItem key={String(f.id)} value={String(f.id)}>
               {f.name}

@@ -19,7 +19,7 @@ export function StatusBadge({ status }: { status: string }) {
           variant="secondary"
           className="whitespace-nowrap bg-emerald-100 text-emerald-800 hover:bg-emerald-100 border-emerald-200"
         >
-          Pré-Credenciado
+          Check-in feito
         </Badge>
       )
     case 'enviado':

@@ -212,7 +212,7 @@ export default function AdminDashboard() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Taxa geral de pré-credenciamento</CardTitle>
+          <CardTitle className="text-sm font-medium">Taxa geral de check-in</CardTitle>
           <CheckCircle className="h-4 w-4 text-emerald-500" />
         </CardHeader>
         <CardContent>
@@ -242,7 +242,7 @@ export default function AdminDashboard() {
             </p>
             <div className="mt-3 space-y-1">
               <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Taxa de pré-credenciamento</span>
+                <span className="text-muted-foreground">Taxa de check-in</span>
                 <span className="font-semibold text-slate-800">
                   {pct(stats.platinum?.preenchidos || 0, stats.platinum?.total || 0)}%
                 </span>
@@ -264,7 +264,7 @@ export default function AdminDashboard() {
             </p>
             <div className="mt-3 space-y-1">
               <div className="flex justify-between text-xs">
-                <span className="text-muted-foreground">Taxa de pré-credenciamento</span>
+                <span className="text-muted-foreground">Taxa de check-in</span>
                 <span className="font-semibold text-amber-600">
                   {pct(stats.gold?.preenchidos || 0, stats.gold?.total || 0)}%
                 </span>

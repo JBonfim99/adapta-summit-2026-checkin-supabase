@@ -3,7 +3,7 @@
 // ----------------------------------------------------------------------------
 // DOIS MODOS (definidos por disparos_wa.flow):
 //
-//  (A) flow vazio = PRÉ-CREDENCIAMENTO (padrão). 1 POST por pessoa pro catch
+//  (A) flow vazio = CHECK-IN (padrão). 1 POST por pessoa pro catch
 //      webhook de automação, payload { full_name, email, phone, token }.
 //
 //  (B) flow = id de um fluxo BotConversa. Por contato:
@@ -48,7 +48,7 @@ routerAdd(
       })
       if (res.statusCode === 200) {
         const arr = JSON.parse(decodeBody(res.body)) || []
-        // Remove o fluxo de pré-credenciamento (já é a opção padrão do dropdown).
+        // Remove o fluxo de check-in (já é a opção padrão do dropdown).
         const filtered = []
         for (let i = 0; i < arr.length; i++) {
           const nm = (arr[i] && arr[i].name ? String(arr[i].name) : '').toLowerCase().trim()
@@ -144,7 +144,7 @@ routerAdd(
       const cluster = body.cluster || 'todos'
       const nomeCampanha = (body.nome || '').toString().trim()
 
-      // Fluxo: '' ou 'PRE' = pré-credenciamento (catch). Senão, id do fluxo.
+      // Fluxo: '' ou 'PRE' = check-in (catch). Senão, id do fluxo.
       let flow = (body.flow == null ? '' : body.flow).toString().trim()
       if (flow === 'PRE') flow = ''
       const flowNome = (body.flow_nome || '').toString().trim()
@@ -348,7 +348,7 @@ routerAdd(
       let erroMsg = ''
 
       if (!flowMode) {
-        // ---- MODO A: pré-credenciamento (catch webhook) ----
+        // ---- MODO A: check-in (catch webhook) ----
         if (!email) return e.json(200, { success: false, error: 'Comprador sem e-mail' })
         let token = ''
         try {
@@ -731,7 +731,7 @@ for (let w = 0; w < 5; w++) {
         let erroMsg = ''
 
         if (!flowMode) {
-          // ---- MODO A: pré-credenciamento (catch webhook) ----
+          // ---- MODO A: check-in (catch webhook) ----
           const email = c.getString('email')
           if (!email) {
             c.set('wa_status', 'erro')
