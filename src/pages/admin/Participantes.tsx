@@ -17,7 +17,9 @@ import {
   Link as LinkIcon,
   UserPlus,
   Pencil,
+  Send,
 } from 'lucide-react'
+import ReenviarRapido, { type AlvoReenvio } from '@/components/admin/ReenviarRapido'
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
 import { Skeleton } from '@/components/ui/skeleton'
 import pb from '@/lib/pocketbase/client'
@@ -51,6 +53,7 @@ export default function AdminParticipants() {
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
   const [participantTicket, setParticipantTicket] = useState<any | null>(null)
   const [editTicket, setEditTicket] = useState<any | null>(null)
+  const [reenvio, setReenvio] = useState<AlvoReenvio | null>(null)
 
   const buildParams = (pg: number, pp: number) => {
     const params = new URLSearchParams({ page: String(pg), perPage: String(pp) })
@@ -371,6 +374,42 @@ export default function AdminParticipants() {
                             Ver Detalhes
                           </Button>
                         )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1 text-emerald-700"
+                          disabled={
+                            !row.expand?.participante_id?.email && !row.expand?.comprador_id?.email
+                          }
+                          title={
+                            row.expand?.participante_id
+                              ? 'Reenviar o ingresso para o participante'
+                              : 'Reenviar o link de credenciamento para o comprador'
+                          }
+                          onClick={() => {
+                            const p = row.expand?.participante_id
+                            const c = row.expand?.comprador_id
+                            if (p?.email) {
+                              setReenvio({
+                                audience: 'participantes',
+                                id: p.id,
+                                nome: p.nome_completo,
+                                email: p.email,
+                                contexto: `Pedido ${row.pedido_id} · ${row.tipo_ingresso}`,
+                              })
+                            } else if (c?.email) {
+                              setReenvio({
+                                audience: 'compradores',
+                                id: c.id,
+                                nome: c.nome,
+                                email: c.email,
+                                contexto: `Pedido ${row.pedido_id} · ainda sem participante`,
+                              })
+                            }
+                          }}
+                        >
+                          <Send className="w-3.5 h-3.5" /> Reenviar
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -545,6 +584,8 @@ export default function AdminParticipants() {
           </ScrollArea>
         </DialogContent>
       </Dialog>
+
+      <ReenviarRapido alvo={reenvio} onClose={() => setReenvio(null)} />
 
       <AddParticipantDialog
         ticket={participantTicket}

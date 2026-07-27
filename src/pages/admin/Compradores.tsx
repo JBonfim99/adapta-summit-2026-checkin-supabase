@@ -9,7 +9,17 @@ import {
 } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Search, Plus, Pencil, Trash2, Ticket as TicketIcon, Download, Loader2 } from 'lucide-react'
+import {
+  Search,
+  Plus,
+  Pencil,
+  Trash2,
+  Ticket as TicketIcon,
+  Download,
+  Loader2,
+  Send,
+} from 'lucide-react'
+import ReenviarRapido, { type AlvoReenvio } from '@/components/admin/ReenviarRapido'
 import { Skeleton } from '@/components/ui/skeleton'
 import pb from '@/lib/pocketbase/client'
 import { useRealtime } from '@/hooks/use-realtime'
@@ -89,6 +99,7 @@ export default function AdminCompradores() {
 
   const [ingressosCount, setIngressosCount] = useState<Record<string, number>>({})
   const [selectedBuyer, setSelectedBuyer] = useState<any | null>(null)
+  const [reenvio, setReenvio] = useState<AlvoReenvio | null>(null)
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -450,6 +461,27 @@ export default function AdminCompradores() {
                       >
                         <TicketIcon className="w-4 h-4 text-indigo-500" />
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={
+                          row.email
+                            ? 'Reenviar e-mail de acesso'
+                            : 'Sem e-mail cadastrado — não há para onde reenviar'
+                        }
+                        disabled={!row.email}
+                        onClick={() =>
+                          setReenvio({
+                            audience: 'compradores',
+                            id: row.id,
+                            nome: row.nome,
+                            email: row.email,
+                            contexto: `${ingressosCount[row.id] || 0} ingresso(s)`,
+                          })
+                        }
+                      >
+                        <Send className="w-4 h-4 text-emerald-600" />
+                      </Button>
                       <Button variant="ghost" size="icon" onClick={() => handleOpenEdit(row)}>
                         <Pencil className="w-4 h-4 text-slate-500" />
                       </Button>
@@ -601,6 +633,8 @@ export default function AdminCompradores() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ReenviarRapido alvo={reenvio} onClose={() => setReenvio(null)} />
 
       <BuyerTicketsSheet
         buyer={selectedBuyer}
