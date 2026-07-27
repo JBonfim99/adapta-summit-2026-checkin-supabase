@@ -55,7 +55,7 @@ export default function Layout() {
             evento têm capacidade limitada por normas de segurança. Ao fazer o check-in no evento,
             você aceita as{' '}
             <a
-              href="https://mc.sendgrid.com/dynamic-templates/d-f922dfd71a4942308f7898f681a5fe34/version/c663f1cc-dc83-4d16-8288-5a84d572bb01/editor/modules?moduleId=91d84d03-74c9-43c7-85c6-e1069c698dd4.1.1.1.1"
+              href="https://adapta.org/adapta-summit-termos"
               target="_blank"
               rel="noreferrer"
               className="underline hover:text-foreground"
