@@ -51,6 +51,19 @@ export default function Layout() {
       <footer className="border-t bg-white py-6 mt-auto">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground max-w-7xl space-y-1">
           <p>
+            Seu ingresso garante acesso ao evento nos dois dias. Todos os ambientes de entrada ao
+            evento têm capacidade limitada por normas de segurança. Ao fazer o check-in no evento,
+            você aceita as{' '}
+            <a
+              href="https://mc.sendgrid.com/dynamic-templates/d-f922dfd71a4942308f7898f681a5fe34/version/c663f1cc-dc83-4d16-8288-5a84d572bb01/editor/modules?moduleId=91d84d03-74c9-43c7-85c6-e1069c698dd4.1.1.1.1"
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-foreground"
+            >
+              Condições de Acesso e Lotação.
+            </a>
+          </p>
+          <p>
             Seus dados são tratados conforme nossa{' '}
             <Link to="/politica-de-privacidade" className="underline hover:text-foreground">
               Política de Privacidade
