@@ -41,6 +41,7 @@ routerAdd(
         'i.id as id, i.pedido_id as pedido_id, i.tipo_ingresso as tipo_ingresso, i.status as status, ' +
         "COALESCE(i.inac_id,'') as inac_id, " +
         "COALESCE(c.email,'') as comprador_email, " +
+        "COALESCE(i.comprador_id,'') as comprador_id, COALESCE(c.nome,'') as comprador_nome, " +
         "COALESCE(p.id,'') as part_id, COALESCE(p.nome_completo,'') as nome_completo, COALESCE(p.email,'') as email, COALESCE(p.cpf,'') as cpf, COALESCE(p.telefone,'') as telefone, " +
         "COALESCE(p.tem_empresa,0) as tem_empresa, COALESCE(p.nome_empresa,'') as nome_empresa, COALESCE(p.cargo,'') as cargo, COALESCE(p.profissao,'') as profissao, COALESCE(p.nicho,'') as nicho, " +
         "COALESCE(p.num_funcionarios,'') as num_funcionarios, COALESCE(p.faturamento_anual,'') as faturamento_anual, " +
@@ -55,6 +56,8 @@ routerAdd(
           status: '',
           inac_id: '',
           comprador_email: '',
+          comprador_id: '',
+          comprador_nome: '',
           part_id: '',
           nome_completo: '',
           email: '',
@@ -82,9 +85,14 @@ routerAdd(
           status: r.status,
           inac_id: r.inac_id,
           expand: {
-            comprador_id: r.comprador_email ? { email: r.comprador_email } : undefined,
+            // id/nome vão junto: telas de ação (reenvio) precisam do id real,
+            // não só do e-mail para exibir.
+            comprador_id: r.comprador_email
+              ? { id: r.comprador_id, nome: r.comprador_nome, email: r.comprador_email }
+              : undefined,
             participante_id: hasPart
               ? {
+                  id: r.part_id,
                   nome_completo: r.nome_completo,
                   email: r.email,
                   cpf: r.cpf,

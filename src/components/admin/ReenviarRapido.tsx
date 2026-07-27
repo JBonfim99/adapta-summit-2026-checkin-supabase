@@ -117,6 +117,12 @@ export default function ReenviarRapido({
       setErro('Este destinatário não tem e-mail cadastrado, então não há para onde enviar.')
       return
     }
+    if (!alvo.id) {
+      setErro(
+        'Não consegui identificar o cadastro deste destinatário (id ausente na listagem). Recarregue a página e tente de novo; se repetir, avise o suporte.',
+      )
+      return
+    }
     setEnviando(true)
     try {
       const templateNome = templates.find((t) => t.id === templateId)?.name || templateId
