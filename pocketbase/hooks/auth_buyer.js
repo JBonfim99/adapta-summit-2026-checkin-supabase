@@ -21,27 +21,74 @@ routerAdd('POST', '/backend/v1/auth/magic-link', (e) => {
   const email = body.email
   if (!email) return e.badRequestError('E-mail é obrigatório')
 
-  let comprador
+  // 1) Comprador. 2) Se não for, participante (quem já fez check-in recebe de
+  //    volta o link do próprio ingresso). 3) Ninguém: erro explicando os dois.
+  let comprador = null
+  let participante = null
   try {
     comprador = $app.findFirstRecordByData('compradores', 'email', email)
   } catch (_) {
-    return e.badRequestError('E-mail não encontrado na lista de compradores.')
+    try {
+      participante = $app.findFirstRecordByData('participantes', 'email', email)
+    } catch (_) {
+      return e.badRequestError(
+        'Não encontramos este e-mail nem na base de compradores nem na base de participantes. ' +
+          'Se você recebeu o ingresso de outra pessoa, peça para quem comprou reenviar o seu link. ' +
+          'Em caso de dúvida, fale com duvidas@adapta.org.',
+      )
+    }
   }
 
   const apiKey = $os.getenv('SENDGRID_API_KEY')
   if (!apiKey) return e.badRequestError('Envio de e-mail indisponível no momento.')
 
-  // Cria o token (60 dias).
-  const tokenStr = $security.randomString(40)
-  const col = $app.findCollectionByNameOrId('tokens_acesso')
-  const tokenRecord = new Record(col)
-  tokenRecord.set('comprador_id', comprador.id)
-  tokenRecord.set('token', tokenStr)
-  tokenRecord.set('usado', false)
   const expira = new Date()
   expira.setDate(expira.getDate() + 60)
-  tokenRecord.set('expira_em', expira.toISOString())
-  $app.save(tokenRecord)
+
+  const destinoEmail = comprador ? comprador.getString('email') : participante.getString('email')
+  const destinoNome = comprador
+    ? comprador.getString('nome')
+    : participante.getString('nome_completo')
+  const templateNome = comprador
+    ? 'Skip-Summit26-Magiclink-acesso'
+    : 'Skip-Summit26-Send-Participante'
+
+  // Token: comprador -> acesso à plataforma (tokens_acesso).
+  //        participante -> token do ingresso dele (links_participante).
+  let tokenStr = ''
+  if (comprador) {
+    tokenStr = $security.randomString(40)
+    const col = $app.findCollectionByNameOrId('tokens_acesso')
+    const tokenRecord = new Record(col)
+    tokenRecord.set('comprador_id', comprador.id)
+    tokenRecord.set('token', tokenStr)
+    tokenRecord.set('usado', false)
+    tokenRecord.set('expira_em', expira.toISOString())
+    $app.save(tokenRecord)
+  } else {
+    const ingressoId = participante.getString('ingresso_id')
+    if (!ingressoId) {
+      return e.badRequestError(
+        'Encontramos o seu cadastro, mas ele não está ligado a nenhum ingresso. ' +
+          'Fale com duvidas@adapta.org.',
+      )
+    }
+    try {
+      const link = $app.findFirstRecordByFilter('links_participante', 'ingresso_id = {:iid}', {
+        iid: ingressoId,
+      })
+      tokenStr = link.getString('token')
+    } catch (_) {
+      tokenStr = $security.randomString(40)
+      const linkColl = $app.findCollectionByNameOrId('links_participante')
+      const lr = new Record(linkColl)
+      lr.set('ingresso_id', ingressoId)
+      lr.set('token', tokenStr)
+      lr.set('usado', false)
+      lr.set('expira_em', expira.toISOString())
+      $app.save(lr)
+    }
+  }
 
   // Resolve o ID do template pelo nome.
   let templateId = ''
@@ -58,7 +105,7 @@ routerAdd('POST', '/backend/v1/auth/magic-link', (e) => {
     } catch (_) {}
     const list = parsed.result || parsed.templates || []
     for (const t of list) {
-      if (t && t.name && t.name.trim() === 'Skip-Summit26-Magiclink-acesso') {
+      if (t && t.name && t.name.trim() === templateNome) {
         templateId = t.id
         break
       }
@@ -83,8 +130,11 @@ routerAdd('POST', '/backend/v1/auth/magic-link', (e) => {
         template_id: templateId,
         personalizations: [
           {
-            to: [{ email: comprador.getString('email'), name: comprador.getString('nome') }],
-            dynamic_template_data: { token: tokenStr },
+            to: [{ email: destinoEmail, name: destinoNome }],
+            dynamic_template_data: {
+              token: tokenStr,
+              firstname: (destinoNome.split(' ')[0] || destinoNome || '').trim(),
+            },
           },
         ],
       }),
