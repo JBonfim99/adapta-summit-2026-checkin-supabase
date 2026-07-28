@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Loader2, Search } from 'lucide-react'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 
 const PER_PAGE = 15
 

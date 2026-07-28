@@ -64,7 +64,7 @@ export default function Layout() {
             </a>{' '}
             Seus dados são tratados conforme nossa{' '}
             <a
-              href="https://summit2026.goskip.app/politica-de-privacidade"
+              href="/politica-de-privacidade"
               target="_blank"
               rel="noreferrer"
               className="underline hover:text-foreground"

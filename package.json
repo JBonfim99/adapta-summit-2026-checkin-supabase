@@ -1,6 +1,6 @@
 {
-  "name": "skip-react-template",
-  "description": "A frontend React Vite TypeScript Shadcn UI template for Skip projects",
+  "name": "adapta-summit-2026-checkin-fallback",
+  "description": "Supabase hot-standby for the Adapta Summit 2026 check-in",
   "private": true,
   "version": "0.0.201",
   "type": "module",
@@ -11,11 +11,23 @@
     "build:dev": "vite build --mode development",
     "lint": "oxlint src",
     "lint:fix": "oxlint src --fix",
+    "typecheck": "tsc -b",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "preview": "vite preview",
-    "test": "echo \"there are no tests for this project\" && exit 0",
-    "test:watch": "echo \"there are no tests for this project\" && exit 0"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset",
+    "supabase:test": "supabase test db supabase/tests/database --local",
+    "supabase:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts",
+    "supabase:functions": "supabase functions serve --env-file supabase/.env.local",
+    "import:pocketbase": "node scripts/import-pocketbase.mjs",
+    "reconcile:pocketbase": "node scripts/reconcile-pocketbase.mjs",
+    "test:contracts": "node scripts/contract-compare.mjs",
+    "test:load": "node scripts/load-test.mjs",
+    "test:load:cleanup": "node scripts/cleanup-load-test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
@@ -46,6 +58,7 @@
     "@radix-ui/react-toggle": "^1.1.12",
     "@radix-ui/react-toggle-group": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.10",
+    "@supabase/supabase-js": "2.111.0",
     "@tailwindcss/aspect-ratio": "^0.4.2",
     "caniuse-lite": "^1.0.30001799",
     "class-variance-authority": "^0.7.1",
@@ -56,7 +69,6 @@
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "next-themes": "^0.4.6",
-    "pocketbase": "~0.26.9",
     "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-day-picker": "^9.14.0",
@@ -85,8 +97,10 @@
     "oxfmt": "^0.56.0",
     "oxlint": "^1.71.0",
     "postcss": "^8.5.15",
+    "supabase": "2.110.0",
     "tailwindcss": "^3.4.19",
     "typescript": "^6.0.3",
-    "vite": "8.0.16"
+    "vite": "8.0.16",
+    "vitest": "4.1.10"
   }
 }

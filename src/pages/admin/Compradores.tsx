@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import ReenviarRapido, { type AlvoReenvio } from '@/components/admin/ReenviarRapido'
 import { Skeleton } from '@/components/ui/skeleton'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 import { useRealtime } from '@/hooks/use-realtime'
 import { BuyerTicketsSheet } from '@/components/admin/BuyerTicketsSheet'
 import { useToast } from '@/hooks/use-toast'
@@ -71,7 +71,7 @@ import {
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { extractFieldErrors } from '@/lib/pocketbase/errors'
+import { extractFieldErrors } from '@/lib/backend/errors'
 
 const formSchema = z.object({
   nome: z.string().min(1, 'Nome é obrigatório'),

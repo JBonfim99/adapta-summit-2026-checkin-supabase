@@ -12,7 +12,7 @@ import {
   Clock,
 } from 'lucide-react'
 import { Progress } from '@/components/ui/progress'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0)
 

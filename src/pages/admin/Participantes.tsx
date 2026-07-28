@@ -22,7 +22,7 @@ import {
 import ReenviarRapido, { type AlvoReenvio } from '@/components/admin/ReenviarRapido'
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge'
 import { Skeleton } from '@/components/ui/skeleton'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 import {
   Pagination,
   PaginationContent,
@@ -329,7 +329,7 @@ export default function AdminParticipants() {
                                     `/backend/v1/admin/ticket/${row.id}/invite-link`,
                                     { method: 'POST' },
                                   )
-                                  const url = `https://adapta-summit-2026-d2d58.goskip.app/credenciamento?token=${res.token}`
+                                  const url = `${window.location.origin}/credenciamento?token=${res.token}`
                                   await navigator.clipboard.writeText(url)
                                   toast({ title: 'Link de check-in copiado!' })
                                 } catch (e: any) {

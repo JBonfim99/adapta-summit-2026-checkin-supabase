@@ -4,7 +4,7 @@ import { Mail, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 import { useToast } from '@/hooks/use-toast'
 import { useApp } from '@/contexts/app-context'
 

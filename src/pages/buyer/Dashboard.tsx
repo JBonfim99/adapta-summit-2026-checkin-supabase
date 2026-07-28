@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Ticket } from '@/types'
 import { useToast } from '@/hooks/use-toast'
 import { Copy, MessageCircle } from 'lucide-react'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 
 export default function BuyerDashboard() {
   const { buyer, logoutBuyer } = useApp()
@@ -47,7 +47,7 @@ export default function BuyerDashboard() {
         }
       })
       setTickets(formatted)
-    } catch (err) {
+    } catch {
       logoutBuyer()
     }
   }, [buyer, logoutBuyer])
@@ -113,7 +113,7 @@ export default function BuyerDashboard() {
       const token = ticket.pendingLink || (await getInviteToken(ticket.id))
       setInviteTicket({
         t: ticket,
-        link: `https://summit2026.goskip.app/credenciamento?token=${token}`,
+        link: `${window.location.origin}/credenciamento?token=${token}`,
       })
       if (!ticket.pendingLink) loadTickets()
     } catch (e: any) {

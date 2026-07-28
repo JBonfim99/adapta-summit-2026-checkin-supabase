@@ -17,8 +17,8 @@ import { FormInput } from '@/components/FormInput'
 import { LinearScale } from '@/components/LinearScale'
 import { CheckCircle2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import pb from '@/lib/pocketbase/client'
-import { getErrorMessage } from '@/lib/pocketbase/errors'
+import pb from '@/lib/backend/client'
+import { getErrorMessage } from '@/lib/backend/errors'
 import { ROLES, REVENUE, EMPLOYEES, NICHES } from '@/lib/form-options'
 import { isValidCPF } from '@/lib/cpf'
 
@@ -32,11 +32,11 @@ const formSchema = z
       .refine((v) => isValidCPF(v), 'CPF inválido — confira os dígitos'),
     telefone: z.string().min(14, 'Telefone inválido'),
     tem_empresa: z.boolean(),
-    nome_empresa: z.string().optional().default(''),
-    cargo: z.string().optional().default(''),
-    profissao: z.string().optional().default(''),
-    faturamento_anual: z.string().optional().default(''),
-    num_funcionarios: z.string().optional().default(''),
+    nome_empresa: z.string().optional(),
+    cargo: z.string().optional(),
+    profissao: z.string().optional(),
+    faturamento_anual: z.string().optional(),
+    num_funcionarios: z.string().optional(),
     nicho: z.string().min(1, 'Selecione o segmento'),
     ia_uso_diario: z.number().min(1, 'Selecione uma opção').max(5),
     ia_profundidade: z.number().min(1, 'Selecione uma opção').max(5),

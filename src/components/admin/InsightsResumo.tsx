@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Loader2, RefreshCcw, Users, Building2, Sparkles, TrendingUp } from 'lucide-react'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 import { ROLES, REVENUE, EMPLOYEES } from '@/lib/form-options'
 
 interface Insights {

@@ -36,6 +36,7 @@ dev-dist-ssr
 *.njsproj
 *.sln
 *.sw?
+*.tsbuildinfo
 
 # Evaluation screenshots
 screenshot.png
@@ -44,7 +45,13 @@ screenshot.png
 
 # Environment variables
 .env*
-!.env
+!.env.example
+!supabase/.env.example
+
+# Vercel and Supabase local state
+.vercel
+supabase/.temp
+supabase/.branches
 
 # Linux kernel core dumps (e.g. when oxfmt or pnpm crash)
 core.[0-9]*

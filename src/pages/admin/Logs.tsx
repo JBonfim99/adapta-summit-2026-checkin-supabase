@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { RotateCw, CheckCircle2, XCircle, Loader2, Eye } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 import { useToast } from '@/hooks/use-toast'
 
 // Formata JSON pra leitura; se não for JSON válido, devolve o texto cru.

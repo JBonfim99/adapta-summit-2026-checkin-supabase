@@ -1,131 +1,97 @@
-# Projeto Criado com o Skip
+# Adapta Summit 2026 Check-in Fallback
 
-Este projeto foi criado de ponta a ponta com o [Skip](https://goskip.dev).
+Hot standby do check-in do Adapta Summit 2026. O frontend preserva as rotas e
+a experiencia do sistema original, mas todo o runtime deste repositorio usa
+Supabase.
 
-## 🚀 Stack Tecnológica
+## Escopo do v1
 
-- **React 19** - Biblioteca JavaScript para construção de interfaces
-- **Vite** - Build tool extremamente rápida
-- **TypeScript** - Superset tipado do JavaScript
-- **Shadcn UI** - Componentes reutilizáveis e acessíveis
-- **Tailwind CSS** - Framework CSS utility-first
-- **React Router** - Roteamento para aplicações React
-- **React Hook Form** - Gerenciamento de formulários performático
-- **Zod** - Validação de schemas TypeScript-first
-- **Recharts** - Biblioteca de gráficos para React
+- Login do comprador por magic link e token proprio.
+- Listagem, convite e visualizacao de ingressos.
+- Formulario do participante, QR code e integracao INAC.
+- Helpdesk com chave compartilhada e operador auditado.
+- Supabase Auth para administradores.
+- Dashboard, compradores, participantes, logs e operacoes essenciais.
+- Importacao inicial, outbox HMAC, reconciliacao e ativacao de failover.
 
-## 📋 Pré-requisitos
+Campanhas, Guru, API externa, cortesias, importacao operacional e reconciliacao
+de pedidos nao fazem parte do v1.
 
-- Node.js 18+
-- npm
+## Arquitetura
 
-## 🔧 Instalação
+```mermaid
+flowchart LR
+  Browser["React na Vercel"] --> Functions["Supabase Edge Functions"]
+  Functions --> Database["Postgres + RLS"]
+  Functions --> Inac["INAC"]
+  Functions --> SendGrid["SendGrid"]
+  PocketBase["PocketBase primario"] --> Outbox["sync_outbox"]
+  Outbox --> Ingest["sync-ingest com HMAC"]
+  Ingest --> Database
+```
+
+O navegador nao recebe `service_role` e nao acessa tabelas diretamente. Todas
+as operacoes passam por `public-api`, `buyer-api`, `helpdesk-api` ou
+`admin-api`.
+
+## Desenvolvimento local
+
+Requisitos: Node.js 24, pnpm 10 e Docker Desktop.
 
 ```bash
-npm install
+pnpm install --frozen-lockfile
+pnpm supabase:start
+pnpm supabase:types
+pnpm dev
 ```
 
-## 💻 Scripts Disponíveis
+Crie `.env.local` a partir de `.env.example` e use os valores de
+`supabase status -o env`. Para Functions, crie `supabase/.env.local` a partir
+de `supabase/.env.example`.
 
-### Desenvolvimento
+## Validacao
 
 ```bash
-# Iniciar servidor de desenvolvimento
-npm start
-# ou
-npm run dev
+pnpm build
+pnpm lint
+pnpm test
+pnpm supabase:test
+node --env-file=.env.load-full.local scripts/load-test.mjs
 ```
 
-Abre a aplicação em modo de desenvolvimento em [http://localhost:5173](http://localhost:5173).
+Os schemas declarativos em `supabase/schemas` sao a fonte de verdade. Depois de
+alterar um schema, gere a migration com `supabase db diff -f <nome>` e valide
+com `supabase db reset`.
 
-### Build
+## Deploy
+
+Projeto Supabase: `idiagqbfmvyoywyjfufe`.
 
 ```bash
-# Build para produção
-npm run build
-
-# Build para desenvolvimento
-npm run build:dev
+supabase login
+supabase link --project-ref idiagqbfmvyoywyjfufe
+supabase db push
+supabase functions deploy public-api
+supabase functions deploy buyer-api
+supabase functions deploy helpdesk-api
+supabase functions deploy admin-api
+supabase functions deploy sync-ingest
 ```
 
-Gera os arquivos otimizados para produção na pasta `dist/`.
+Configure os secrets listados em `supabase/.env.example` com
+`supabase secrets set`. Na Vercel, configure apenas
+`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` e `VITE_APP_URL`.
 
-### Preview
+Crie o usuario administrativo no Supabase Auth e associe-o sem senha padrao:
 
-```bash
-# Visualizar build de produção localmente
-npm run preview
+```sql
+insert into public.admin_profiles (user_id, display_name, role)
+values ('<auth-user-id>', '<nome>', 'admin');
 ```
 
-Permite visualizar a build de produção localmente antes do deploy.
+## Operacao
 
-### Linting e Formatação
-
-```bash
-# Executar linter
-npm run lint
-
-# Executar linter e corrigir problemas automaticamente
-npm run lint:fix
-
-# Formatar código com Oxfmt
-npm run format
-```
-
-## 📁 Estrutura do Projeto
-
-```
-.
-├── src/              # Código fonte da aplicação
-├── public/           # Arquivos estáticos
-├── dist/             # Build de produção (gerado)
-├── node_modules/     # Dependências (gerado)
-└── package.json      # Configurações e dependências do projeto
-```
-
-## 🎨 Componentes UI
-
-Este template inclui uma biblioteca completa de componentes Shadcn UI baseados em Radix UI:
-
-- Accordion
-- Alert Dialog
-- Avatar
-- Button
-- Checkbox
-- Dialog
-- Dropdown Menu
-- Form
-- Input
-- Label
-- Select
-- Switch
-- Tabs
-- Toast
-- Tooltip
-- E muito mais...
-
-## 📝 Ferramentas de Qualidade de Código
-
-- **TypeScript**: Tipagem estática
-- **Oxlint**: Linter extremamente rápido
-- **Oxfmt**: Formatação automática de código
-
-## 🔄 Workflow de Desenvolvimento
-
-1. Instale as dependências: `npm install`
-2. Inicie o servidor de desenvolvimento: `npm start`
-3. Faça suas alterações
-4. Verifique o código: `npm run lint`
-5. Formate o código: `npm run format`
-6. Crie a build: `npm run build`
-7. Visualize a build: `npm run preview`
-
-## 📦 Build e Deploy
-
-Para criar uma build otimizada para produção:
-
-```bash
-npm run build
-```
-
-Os arquivos otimizados serão gerados na pasta `dist/` e estarão prontos para deploy.
+- [Arquitetura e seguranca](docs/architecture.md)
+- [Runbook de failover](docs/failover-runbook.md)
+- [Relatorio de testes](docs/test-report-2026-07-28.md)
+- [Pacote do PocketBase primario](integrations/pocketbase-primary/README.md)

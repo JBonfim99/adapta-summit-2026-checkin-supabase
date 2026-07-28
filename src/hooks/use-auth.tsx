@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
-import pb from '@/lib/pocketbase/client'
+import { supabase } from '@/lib/supabase/client'
 
 interface AuthContextType {
   user: any
@@ -18,32 +18,31 @@ export const useAuth = () => {
 }
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<any>(pb.authStore.isValid ? pb.authStore.record : null)
-  const [isAuthenticated, setIsAuthenticated] = useState(pb.authStore.isValid)
+  const [user, setUser] = useState<any>(null)
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsubscribe = pb.authStore.onChange((_token, record) => {
-      setUser(pb.authStore.isValid ? record : null)
-      setIsAuthenticated(pb.authStore.isValid)
-    })
-    if (pb.authStore.isValid) {
-      pb.collection('users')
-        .authRefresh()
-        .catch(() => pb.authStore.clear())
-        .finally(() => setLoading(false))
-    } else {
-      if (pb.authStore.record) pb.authStore.clear()
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null)
+      setIsAuthenticated(Boolean(data.session))
       setLoading(false)
-    }
+    })
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+      setIsAuthenticated(Boolean(session))
+      setLoading(false)
+    })
     return () => {
-      unsubscribe()
+      listener.subscription.unsubscribe()
     }
   }, [])
 
   const signIn = async (email: string, password: string) => {
     try {
-      await pb.collection('users').authWithPassword(email, password)
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) throw error
       return { error: null }
     } catch (error) {
       return { error }
@@ -51,7 +50,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }
 
   const signOut = () => {
-    pb.authStore.clear()
+    void supabase.auth.signOut()
   }
 
   return (

@@ -1,21 +1,12 @@
 import { useEffect, useRef } from 'react'
-import type { RecordModel, RecordSubscription } from 'pocketbase'
-
-import pb from '@/lib/pocketbase/client'
 
 /**
- * Hook for real-time subscriptions to a PocketBase collection.
- * ALWAYS use this hook instead of subscribing inline.
- * Uses the per-listener UnsubscribeFunc so multiple components
- * can safely subscribe to the same collection without conflicts.
- *
- * Generic over the record type: pass your collection's interface as
- * `useRealtime<MyRecord>(...)` to get a typed subscription payload
- * instead of `unknown`.
+ * Refreshes Edge Function-backed screens without granting browser access
+ * to the underlying tables.
  */
-export function useRealtime<TRecord extends RecordModel = RecordModel>(
-  collectionName: string,
-  callback: (data: RecordSubscription<TRecord>) => void,
+export function useRealtime<TRecord = Record<string, unknown>>(
+  _collectionName: string,
+  callback: (data: { action: 'refresh'; record?: TRecord }) => void,
   enabled: boolean = true,
 ) {
   const callbackRef = useRef(callback)
@@ -24,29 +15,15 @@ export function useRealtime<TRecord extends RecordModel = RecordModel>(
   useEffect(() => {
     if (!enabled) return
 
-    let unsubscribeFn: (() => Promise<void>) | undefined
-    let cancelled = false
-
-    pb.collection<TRecord>(collectionName)
-      .subscribe('*', (e) => {
-        callbackRef.current(e)
-      })
-      .then((fn) => {
-        if (cancelled) {
-          fn().catch(() => {})
-        } else {
-          unsubscribeFn = fn
-        }
-      })
-      .catch(() => {})
+    const refresh = () => callbackRef.current({ action: 'refresh' })
+    const timer = window.setInterval(refresh, 15_000)
+    window.addEventListener('focus', refresh)
 
     return () => {
-      cancelled = true
-      if (unsubscribeFn) {
-        unsubscribeFn().catch(() => {})
-      }
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refresh)
     }
-  }, [collectionName, enabled])
+  }, [enabled])
 }
 
 export default useRealtime

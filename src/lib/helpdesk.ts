@@ -1,8 +1,6 @@
-// Cliente da área /helpdesk. Não usa o PocketBase SDK porque a área não tem
-// login de usuário: a autenticação é uma senha única enviada no header
-// X-Helpdesk-Key, guardada no navegador junto com o nome do atendente.
-
-const BASE = import.meta.env.VITE_POCKETBASE_URL
+// Cliente da area /helpdesk. A autenticacao usa uma senha compartilhada,
+// enviada somente para a Edge Function e auditada junto com o operador.
+import { backendPublicHeaders, backendUrl } from '@/lib/backend/client'
 
 const KEY_STORAGE = 'helpdesk_key'
 const OP_STORAGE = 'helpdesk_operador'
@@ -103,11 +101,12 @@ async function request(path: string, init: RequestInit = {}, key?: string): Prom
 
   let res: Response
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(backendUrl(path), {
       ...init,
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
+        ...backendPublicHeaders(),
         'X-Helpdesk-Key': key ?? getKey(),
         ...(init.headers || {}),
       },

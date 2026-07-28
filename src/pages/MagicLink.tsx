@@ -2,8 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useApp } from '@/contexts/app-context'
-import pb from '@/lib/pocketbase/client'
-import { useToast } from '@/hooks/use-toast'
+import pb from '@/lib/backend/client'
 
 export default function MagicLink() {
   const [searchParams] = useSearchParams()

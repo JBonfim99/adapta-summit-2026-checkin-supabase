@@ -33,9 +33,13 @@ export default class ErrorBoundary extends Component<Props, State> {
         html.classList.contains('translated-rtl') ||
         document.querySelector('font[_msttexthash], font[style*="vertical-align"]') !== null
 
-      fetch(`${import.meta.env.VITE_POCKETBASE_URL}/backend/v1/client-error`, {
+      const base = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/$/, '')
+      fetch(`${base}/functions/v1/public-api/backend/v1/client-error`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '',
+        },
         body: JSON.stringify({
           message: erro?.message || String(erro),
           stack: `${erro?.stack || ''}\n--- componentes ---${info?.componentStack || ''}`,

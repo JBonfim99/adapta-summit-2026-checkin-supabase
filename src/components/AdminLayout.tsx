@@ -3,17 +3,11 @@ import { useAuth } from '@/hooks/use-auth'
 import {
   LayoutDashboard,
   Users,
-  Upload,
   Send,
   LogOut,
   ShoppingBag,
-  Mail,
   BarChart3,
-  Gift,
-  Scale,
-  Webhook,
 } from 'lucide-react'
-import { WhatsAppIcon } from '@/components/WhatsAppIcon'
 import { cn } from '@/lib/utils'
 
 export function AdminLayout() {
@@ -25,15 +19,9 @@ export function AdminLayout() {
 
   const navItems = [
     { name: 'Dashboard', path: '/admin', icon: LayoutDashboard },
-    { name: 'Importar', path: '/admin/importar', icon: Upload },
     { name: 'Compradores', path: '/admin/compradores', icon: ShoppingBag },
     { name: 'Participantes', path: '/admin/participantes', icon: Users },
-    { name: 'Cortesias', path: '/admin/cortesias', icon: Gift },
-    { name: 'Reconciliar', path: '/admin/reconciliar', icon: Scale },
-    { name: 'API', path: '/admin/api', icon: Webhook },
     { name: 'Insights', path: '/admin/insights', icon: BarChart3 },
-    { name: 'Disparo', path: '/admin/disparo', icon: Mail },
-    { name: 'Disparo WhatsApp', path: '/admin/disparo-whatsapp', icon: WhatsAppIcon },
     { name: 'Logs', path: '/admin/logs', icon: Send },
   ]
 

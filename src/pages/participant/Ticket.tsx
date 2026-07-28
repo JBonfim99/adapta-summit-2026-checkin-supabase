@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Loader2, AlertCircle, Ticket as TicketIcon, CheckCircle2, Mail } from 'lucide-react'
-import pb from '@/lib/pocketbase/client'
+import pb from '@/lib/backend/client'
 import QrCredential from '@/components/QrCredential'
 
 interface TicketData {
