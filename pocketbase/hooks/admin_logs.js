@@ -16,7 +16,9 @@ routerAdd(
       }
 
       let filter = readQ('filter')
-      if (['erros', 'todos', 'ok', 'manuais', 'helpdesk'].indexOf(filter) === -1) filter = 'erros'
+      if (['erros', 'todos', 'ok', 'manuais', 'helpdesk', 'navegador'].indexOf(filter) === -1) {
+        filter = 'erros'
+      }
       let page = parseInt(readQ('page'), 10)
       if (isNaN(page) || page < 1) page = 1
       let perPage = parseInt(readQ('perPage'), 10)
@@ -71,6 +73,71 @@ routerAdd(
 
       // Filtro "Help desk": trilha de auditoria COMPLETA da área /helpdesk —
       // todas as ações, não só o evento mais recente de cada ingresso.
+      // Quantos erros de JavaScript do navegador estão registrados — serve de
+      // contador no botão do filtro, para dar para ver de relance se voltou.
+      let navegadorCount = 0
+      try {
+        const cn = new DynamicModel({ c: 0 })
+        $app
+          .db()
+          .newQuery("SELECT COUNT(*) as c FROM webhooks_log WHERE evento = 'erro_navegador'")
+          .one(cn)
+        navegadorCount = cn.c
+      } catch (_) {}
+
+      // Filtro "Erros de navegador": exceções de JavaScript capturadas no
+      // cliente. Não têm ingresso associado, então é consulta direta.
+      if (filter === 'navegador') {
+        const linhas = arrayOf(
+          new DynamicModel({
+            id: '',
+            evento: '',
+            detalhe: '',
+            status: 0,
+            method: '',
+            response: '',
+            payload: '',
+            created: '',
+          }),
+        )
+        $app
+          .db()
+          .newQuery(
+            'SELECT id, evento, detalhe, status, method, response, payload, created ' +
+              "FROM webhooks_log WHERE evento = 'erro_navegador' " +
+              'ORDER BY created DESC LIMIT {:limit} OFFSET {:offset}',
+          )
+          .bind({ limit: perPage, offset: offset })
+          .all(linhas)
+
+        const navItems = []
+        for (let i = 0; i < linhas.length; i++) {
+          const r = linhas[i]
+          navItems.push({
+            id: r.id,
+            ingresso_id: '',
+            evento: r.evento,
+            detalhe: r.detalhe,
+            status: r.status,
+            method: r.method,
+            response: r.response,
+            payload: r.payload,
+            created: r.created,
+            expand: {},
+          })
+        }
+
+        return e.json(200, {
+          items: navItems,
+          page: page,
+          perPage: perPage,
+          totalItems: navegadorCount,
+          totalPages: Math.max(1, Math.ceil(navegadorCount / perPage)),
+          errorCount: errorCount,
+          navegadorCount: navegadorCount,
+        })
+      }
+
       if (filter === 'helpdesk') {
         const HDFROM =
           'FROM webhooks_log wl LEFT JOIN ingressos i ON i.id = wl.ingresso_id ' +
@@ -147,6 +214,7 @@ routerAdd(
           totalItems: hdTotal,
           totalPages: Math.max(1, Math.ceil(hdTotal / perPage)),
           errorCount: errorCount,
+          navegadorCount: navegadorCount,
         })
       }
 
@@ -222,6 +290,7 @@ routerAdd(
         totalItems: totalItems,
         totalPages: totalPages,
         errorCount: errorCount,
+        navegadorCount: navegadorCount,
       })
     } catch (err) {
       return e.badRequestError(err.message)

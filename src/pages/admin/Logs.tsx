@@ -88,13 +88,21 @@ const MANUAL_EVENTOS: Record<string, { label: string; cls: string }> = {
   },
 }
 
-type LogFilter = 'erros' | 'todos' | 'ok' | 'manuais' | 'helpdesk'
+type LogFilter = 'erros' | 'todos' | 'ok' | 'manuais' | 'helpdesk' | 'navegador'
 
 // Pedido do log: usa o ingresso expandido; se ele foi excluído, cai no payload.
 const pedidoDoLog = (log: any) => {
   if (log?.expand?.ingresso_id?.pedido_id) return log.expand.ingresso_id.pedido_id
   try {
     const p = JSON.parse(log?.payload || '{}')
+    // Erro de navegador não tem ingresso: mostra a página onde quebrou.
+    if (log?.evento === 'erro_navegador' && p?.url) {
+      try {
+        return new URL(p.url).pathname
+      } catch {
+        return p.url
+      }
+    }
     return p?.pedido_id || '-'
   } catch {
     return '-'
@@ -115,6 +123,7 @@ export default function AdminLogs() {
   const [totalPages, setTotalPages] = useState(1)
   const [totalItems, setTotalItems] = useState(0)
   const [errorCount, setErrorCount] = useState(0)
+  const [navegadorCount, setNavegadorCount] = useState(0)
   const { toast } = useToast()
 
   const loadData = () => {
@@ -130,6 +139,7 @@ export default function AdminLogs() {
         setTotalPages(res.totalPages || 1)
         setTotalItems(res.totalItems || 0)
         setErrorCount(res.errorCount || 0)
+        setNavegadorCount(res.navegadorCount || 0)
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -223,6 +233,7 @@ export default function AdminLogs() {
     ['ok', 'Somente OK'],
     ['manuais', 'Ações manuais'],
     ['helpdesk', 'Help desk'],
+    ['navegador', `Erros de navegador${navegadorCount > 0 ? ` (${navegadorCount})` : ''}`],
   ]
 
   return (
@@ -233,7 +244,9 @@ export default function AdminLogs() {
           <p className="text-muted-foreground">
             {filter === 'helpdesk'
               ? 'Histórico completo das ações feitas na área /helpdesk (todas as ações, com o nome do atendente).'
-              : 'Um registro por ingresso (pedido), com o status mais recente do envio ao INAC.'}
+              : filter === 'navegador'
+                ? 'Erros de JavaScript que derrubaram a tela de algum visitante. A coluna do meio mostra a página onde quebrou; abra Detalhes para ver o erro, o navegador e se a página estava traduzida.'
+                : 'Um registro por ingresso (pedido), com o status mais recente do envio ao INAC.'}
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
