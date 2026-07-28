@@ -37,9 +37,7 @@ function applyFilter(query: any, filter = '') {
   }
   if (fuzzy.length > 0) {
     query = query.or(
-      fuzzy
-        .map((match) => `${match[1]}.ilike.%${match[3].replaceAll(',', ' ')}%`)
-        .join(','),
+      fuzzy.map((match) => `${match[1]}.ilike.%${match[3].replaceAll(',', ' ')}%`).join(','),
     )
   }
   return query
@@ -58,9 +56,7 @@ async function addExpansions(collection: string, rows: Array<Record<string, any>
   if (collection === 'ingressos' && expand.includes('participante_id')) {
     const ids = rows.map((row) => row.participante_id).filter(Boolean)
     const { data } =
-      ids.length > 0
-        ? await db.from('participantes').select('*').in('id', ids)
-        : { data: [] }
+      ids.length > 0 ? await db.from('participantes').select('*').in('id', ids) : { data: [] }
     const byId = new Map((data ?? []).map((item) => [item.id, withCompatibilityFields(item)]))
     rows.forEach((row) => {
       row.expand = { ...(row.expand ?? {}), participante_id: byId.get(row.participante_id) }
@@ -69,9 +65,7 @@ async function addExpansions(collection: string, rows: Array<Record<string, any>
   if (collection === 'ingressos' && expand.includes('comprador_id')) {
     const ids = [...new Set(rows.map((row) => row.comprador_id).filter(Boolean))]
     const { data } =
-      ids.length > 0
-        ? await db.from('compradores').select('*').in('id', ids)
-        : { data: [] }
+      ids.length > 0 ? await db.from('compradores').select('*').in('id', ids) : { data: [] }
     const byId = new Map((data ?? []).map((item) => [item.id, withCompatibilityFields(item)]))
     rows.forEach((row) => {
       row.expand = { ...(row.expand ?? {}), comprador_id: byId.get(row.comprador_id) }
@@ -113,7 +107,11 @@ async function collectionApi(req: Request, collection: string) {
   const db = adminDb()
 
   if (action === 'create') {
-    const { data, error } = await db.from(collection).insert(input.data ?? {}).select().single()
+    const { data, error } = await db
+      .from(collection)
+      .insert(input.data ?? {})
+      .select()
+      .single()
     if (error) throw new ApiError(400, error.message, error)
     return json(withCompatibilityFields(data))
   }
@@ -172,7 +170,10 @@ async function stats() {
   ] = await Promise.all([
     db.from('compradores').select('*', { count: 'exact', head: true }),
     db.from('ingressos').select('*', { count: 'exact', head: true }),
-    db.from('ingressos').select('*', { count: 'exact', head: true }).eq('status', 'Pré-Credenciado'),
+    db
+      .from('ingressos')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'Pré-Credenciado'),
     db.from('ingressos').select('*', { count: 'exact', head: true }).eq('status', 'Pendente'),
     db.from('ingressos').select('*', { count: 'exact', head: true }).eq('status_webhook', 'erro'),
     db.from('ingressos').select('*', { count: 'exact', head: true }).eq('tipo_ingresso', 'GOLD'),
@@ -181,7 +182,10 @@ async function stats() {
       .select('*', { count: 'exact', head: true })
       .eq('tipo_ingresso', 'GOLD')
       .eq('status', 'Pré-Credenciado'),
-    db.from('ingressos').select('*', { count: 'exact', head: true }).eq('tipo_ingresso', 'PLATINUM'),
+    db
+      .from('ingressos')
+      .select('*', { count: 'exact', head: true })
+      .eq('tipo_ingresso', 'PLATINUM'),
     db
       .from('ingressos')
       .select('*', { count: 'exact', head: true })
@@ -264,7 +268,11 @@ async function participantsSearch(req: Request) {
         participant.cpf,
         buyer.nome,
         buyer.email,
-      ].some((value) => String(value ?? '').toLowerCase().includes(term))
+      ].some((value) =>
+        String(value ?? '')
+          .toLowerCase()
+          .includes(term),
+      )
     })
   }
   const totalItems = search ? rows.length : (count ?? rows.length)
@@ -302,7 +310,10 @@ async function logs(req: Request) {
       .from('webhooks_log')
       .select('*', { count: 'exact', head: true })
       .or('status.lt.200,status.gte.300'),
-    db.from('webhooks_log').select('*', { count: 'exact', head: true }).eq('evento', 'client_error'),
+    db
+      .from('webhooks_log')
+      .select('*', { count: 'exact', head: true })
+      .eq('evento', 'client_error'),
   ])
   const totalItems = count ?? rows.length
   return json({
@@ -359,8 +370,7 @@ async function createTicket(req: Request) {
     .insert({
       comprador_id: input.comprador_id,
       tipo_ingresso: input.tipo_ingresso,
-      pedido_id:
-        input.pedido_id || `ADMIN-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
+      pedido_id: input.pedido_id || `ADMIN-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
       origem: 'admin',
     })
     .select()
@@ -411,11 +421,7 @@ async function inviteLink(ticketId: string) {
 
 async function buyerAccessLink(buyerId: string) {
   const db = adminDb()
-  const { data: buyer } = await db
-    .from('compradores')
-    .select('id')
-    .eq('id', buyerId)
-    .maybeSingle()
+  const { data: buyer } = await db.from('compradores').select('id').eq('id', buyerId).maybeSingle()
   if (!buyer) throw new ApiError(404, 'BUYER_NOT_FOUND')
   const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
   const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
@@ -504,36 +510,213 @@ async function deleteBuyer(buyerId: string) {
 
 async function insights() {
   const db = adminDb()
-  const { data: participants } = await db
-    .from('participantes')
-    .select('tem_empresa,nicho,ia_uso_diario,ia_profundidade')
-    .limit(1000)
-  const rows = participants ?? []
+  const [participantsResult, ticketsResult] = await Promise.all([
+    db
+      .from('participantes')
+      .select(
+        'id,tem_empresa,cargo,nicho,faturamento_anual,num_funcionarios,ia_uso_diario,ia_profundidade,ia_ferramentas,ia_desafio',
+      )
+      .limit(10000),
+    db
+      .from('ingressos')
+      .select('participante_id,tipo_ingresso,preenchido_em,created_at')
+      .not('participante_id', 'is', null)
+      .limit(10000),
+  ])
+  if (participantsResult.error) throw participantsResult.error
+  if (ticketsResult.error) throw ticketsResult.error
+
+  const participants = participantsResult.data ?? []
+  const tickets = ticketsResult.data ?? []
+  const ticketByParticipant = new Map(
+    tickets.map((ticket) => [
+      ticket.participante_id,
+      {
+        type: ticket.tipo_ingresso,
+        filledAt: ticket.preenchido_em || ticket.created_at,
+      },
+    ]),
+  )
+  const increment = (target: Record<string, number>, key: string | null | undefined) => {
+    if (key) target[key] = (target[key] ?? 0) + 1
+  }
+  const tools: Array<[string, string[]]> = [
+    ['Adapta', ['adapta one', 'adapta']],
+    ['ChatGPT', ['chatgpt', 'chat gpt', 'gpt-', 'gpt ', 'openai']],
+    ['Claude', ['claude']],
+    ['Gemini', ['gemini', 'bard']],
+    ['Copilot', ['copilot']],
+    ['Perplexity', ['perplexity']],
+    ['Midjourney', ['midjourney']],
+    ['n8n', ['n8n']],
+    ['Make', ['make.com', 'integromat']],
+    ['Zapier', ['zapier']],
+    ['Notion AI', ['notion']],
+    ['Canva', ['canva']],
+    ['DALL-E', ['dall-e', 'dalle', 'dall e']],
+    ['Sora', ['sora']],
+    ['ElevenLabs', ['elevenlabs', 'eleven labs']],
+    ['HeyGen', ['heygen']],
+    ['Runway', ['runway']],
+    ['Suno', ['suno']],
+    ['Cursor', ['cursor']],
+    ['Grok', ['grok']],
+    ['Llama', ['llama']],
+    ['Manus', ['manus']],
+    ['Lovable', ['lovable']],
+    ['Gamma', ['gamma']],
+  ]
+  const themes: Array<[string, string[]]> = [
+    [
+      'Conhecimento / capacitação',
+      ['conheci', 'conhecer', 'capacit', 'aprend', 'saber', 'treina', 'educa', 'formaç'],
+    ],
+    ['Equipe / cultura', ['equipe', 'time', 'pessoas', 'colaborad', 'cultura', 'engaj', 'resist']],
+    ['Custo / investimento', ['custo', 'caro', 'investim', 'orçament', 'orcament', 'budget']],
+    ['Tempo / prioridade', ['tempo', 'priorid', 'rotina', 'agenda', 'foco']],
+    ['Dados', ['dados', ' data', 'informaç', 'base de', 'qualidade dos dados']],
+    ['Integração / tecnologia', ['integr', 'sistema', 'tecnolog', 'implement', 'infra', 'api']],
+    ['Confiança / segurança', ['seguranç', 'seguranc', 'privacid', 'confia', 'risco', 'lgpd']],
+    [
+      'Por onde começar / aplicação',
+      ['começar', 'comecar', 'por onde', 'aplicar', 'caso de uso', 'onde usar', 'estratég'],
+    ],
+  ]
+
+  const profile = { empresa: 0, profissional: 0 }
+  const byTicketType = { GOLD: 0, PLATINUM: 0 }
+  const roles: Record<string, number> = {}
+  const segments: Record<string, number> = {}
+  const revenue: Record<string, number> = {}
+  const employees: Record<string, number> = {}
+  const toolCounts: Record<string, number> = {}
+  const challengeCounts: Record<string, number> = {}
+  const byDay: Record<string, number> = {}
+  const usageDistribution = [0, 0, 0, 0, 0]
+  const depthDistribution = [0, 0, 0, 0, 0]
+  const matrix = Array.from({ length: 5 }, () => [0, 0, 0, 0, 0])
+  const byType = {
+    GOLD: { usageSum: 0, usageCount: 0, depthSum: 0, depthCount: 0 },
+    PLATINUM: { usageSum: 0, usageCount: 0, depthSum: 0, depthCount: 0 },
+  }
+  let usageSum = 0
+  let usageCount = 0
+  let depthSum = 0
+  let depthCount = 0
+  let withoutTool = 0
+
+  for (const participant of participants) {
+    const hasCompany = participant.tem_empresa === true
+    profile[hasCompany ? 'empresa' : 'profissional'] += 1
+    if (hasCompany) {
+      increment(roles, participant.cargo)
+      increment(revenue, participant.faturamento_anual)
+      increment(employees, participant.num_funcionarios)
+    }
+    increment(segments, participant.nicho)
+
+    const ticket = ticketByParticipant.get(participant.id)
+    const type = ticket?.type
+    if (type === 'GOLD' || type === 'PLATINUM') byTicketType[type] += 1
+    if (ticket?.filledAt) increment(byDay, String(ticket.filledAt).slice(0, 10))
+
+    const usage = Number(participant.ia_uso_diario) || 0
+    const depth = Number(participant.ia_profundidade) || 0
+    if (usage >= 1 && usage <= 5) {
+      usageDistribution[usage - 1] += 1
+      usageSum += usage
+      usageCount += 1
+    }
+    if (depth >= 1 && depth <= 5) {
+      depthDistribution[depth - 1] += 1
+      depthSum += depth
+      depthCount += 1
+    }
+    if (usage >= 1 && usage <= 5 && depth >= 1 && depth <= 5) {
+      matrix[usage - 1][depth - 1] += 1
+    }
+    if (type === 'GOLD' || type === 'PLATINUM') {
+      const group = byType[type]
+      if (usage >= 1 && usage <= 5) {
+        group.usageSum += usage
+        group.usageCount += 1
+      }
+      if (depth >= 1 && depth <= 5) {
+        group.depthSum += depth
+        group.depthCount += 1
+      }
+    }
+
+    const toolText = (participant.ia_ferramentas || '').toLowerCase()
+    if (!toolText.trim()) {
+      withoutTool += 1
+    } else {
+      let matched = false
+      for (const [name, keywords] of tools) {
+        if (keywords.some((keyword) => toolText.includes(keyword))) {
+          increment(toolCounts, name)
+          matched = true
+        }
+      }
+      if (!matched) increment(toolCounts, 'Outros')
+    }
+
+    const challengeText = (participant.ia_desafio || '').toLowerCase()
+    for (const [name, keywords] of themes) {
+      if (keywords.some((keyword) => challengeText.includes(keyword))) {
+        increment(challengeCounts, name)
+      }
+    }
+  }
+
   return json({
-    total: rows.length,
-    com_empresa: rows.filter((row) => row.tem_empresa).length,
-    sem_empresa: rows.filter((row) => row.tem_empresa === false).length,
-    nichos: Object.entries(
-      rows.reduce<Record<string, number>>((acc, row) => {
-        const key = row.nicho || 'Nao informado'
-        acc[key] = (acc[key] ?? 0) + 1
-        return acc
-      }, {}),
-    ).map(([nome, total]) => ({ nome, total })),
+    total: participants.length,
+    perfil: profile,
+    por_tipo: byTicketType,
+    cargo: roles,
+    segmento: segments,
+    faturamento: revenue,
+    funcionarios: employees,
+    ia: {
+      uso_dist: usageDistribution,
+      prof_dist: depthDistribution,
+      uso_avg: usageCount ? usageSum / usageCount : 0,
+      prof_avg: depthCount ? depthSum / depthCount : 0,
+      matriz: matrix,
+      por_tipo: {
+        GOLD: {
+          uso_avg: byType.GOLD.usageCount ? byType.GOLD.usageSum / byType.GOLD.usageCount : 0,
+          prof_avg: byType.GOLD.depthCount ? byType.GOLD.depthSum / byType.GOLD.depthCount : 0,
+        },
+        PLATINUM: {
+          uso_avg: byType.PLATINUM.usageCount
+            ? byType.PLATINUM.usageSum / byType.PLATINUM.usageCount
+            : 0,
+          prof_avg: byType.PLATINUM.depthCount
+            ? byType.PLATINUM.depthSum / byType.PLATINUM.depthCount
+            : 0,
+        },
+      },
+    },
+    ferramentas: toolCounts,
+    sem_ferramenta: withoutTool,
+    desafios: challengeCounts,
+    por_dia: byDay,
   })
 }
 
 async function systemHealth() {
   const db = adminDb()
-  const [{ data: health, error }, buyers, tickets, participants, tokens, links] =
-    await Promise.all([
+  const [{ data: health, error }, buyers, tickets, participants, tokens, links] = await Promise.all(
+    [
       db.from('sync_health').select('*').single(),
       db.from('compradores').select('*', { count: 'exact', head: true }),
       db.from('ingressos').select('*', { count: 'exact', head: true }),
       db.from('participantes').select('*', { count: 'exact', head: true }),
       db.from('tokens_acesso').select('*', { count: 'exact', head: true }),
       db.from('links_participante').select('*', { count: 'exact', head: true }),
-    ])
+    ],
+  )
   if (error) throw error
   return json({
     ...health,

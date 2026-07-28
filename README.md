@@ -59,6 +59,10 @@ pnpm supabase:test
 node --env-file=.env.load-full.local scripts/load-test.mjs
 ```
 
+Para preparar comprador, ingressos, helpdesk e administrador locais com INAC
+e SendGrid em modo mock, consulte o
+[roteiro E2E local](docs/local-e2e.md).
+
 Os schemas declarativos em `supabase/schemas` sao a fonte de verdade. Depois de
 alterar um schema, gere a migration com `supabase db diff -f <nome>` e valide
 com `supabase db reset`.
