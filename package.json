@@ -30,7 +30,8 @@
     "test:load": "node scripts/load-test.mjs",
     "test:load:cleanup": "node scripts/cleanup-load-test.mjs",
     "e2e:local:setup": "node scripts/setup-local-e2e.mjs",
-    "e2e:local:verify": "node scripts/verify-local-e2e.mjs"
+    "e2e:local:verify": "node scripts/verify-local-e2e.mjs",
+    "smoke:remote": "node scripts/verify-remote-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

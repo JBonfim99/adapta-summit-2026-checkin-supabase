@@ -253,5 +253,41 @@ select is(
   'Guru reuses one queue and one access delivery per buyer'
 );
 
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.create_helpdesk_credential(jsonb,text,text,text)',
+    'EXECUTE'
+  ),
+  'anonymous users cannot execute the helpdesk credential RPC directly'
+);
+
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.helpdesk_search(text)',
+    'EXECUTE'
+  ),
+  'authenticated users cannot execute the helpdesk search RPC directly'
+);
+
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.process_guru_order(text,text,jsonb,jsonb,jsonb,text,text)',
+    'EXECUTE'
+  ),
+  'anonymous users cannot execute the Guru RPC directly'
+);
+
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.delete_pending_ticket(text,text)',
+    'EXECUTE'
+  ),
+  'the service role can execute internal ticket RPCs'
+);
+
 select * from finish();
 rollback;
