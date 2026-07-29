@@ -74,11 +74,12 @@ com `supabase db reset`.
 
 ## Deploy
 
-Projeto Supabase: `idiagqbfmvyoywyjfufe`.
+Use o identificador do projeto fornecido por um administrador. Nao registre
+IDs, URLs ou credenciais dos ambientes remotos neste repositorio.
 
 ```bash
 supabase login
-supabase link --project-ref idiagqbfmvyoywyjfufe
+supabase link --project-ref <supabase-project-ref>
 supabase db push
 supabase functions deploy public-api
 supabase functions deploy buyer-api
@@ -95,7 +96,7 @@ Configure os secrets listados em `supabase/.env.example` com
 O agendamento do worker le tres valores do Vault. Cadastre-os depois do deploy:
 
 ```sql
-select vault.create_secret('https://idiagqbfmvyoywyjfufe.supabase.co', 'project_url');
+select vault.create_secret('<supabase-project-url>', 'project_url');
 select vault.create_secret('<publishable-key>', 'publishable_key');
 select vault.create_secret('<mesmo DISPATCH_WORKER_SECRET>', 'dispatch_worker_secret');
 ```
