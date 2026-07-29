@@ -83,7 +83,7 @@ export default function BuyerDashboard() {
     try {
       setLoadingTicketId(ticket.id)
       const token = await getInviteToken(ticket.id, true)
-      navigate(`/credenciamento?token=${token}`)
+      navigate(`/credenciamento?token=${token}&prefill=buyer`)
     } catch (e: any) {
       toast({ title: 'Erro', description: e.message, variant: 'destructive' })
     } finally {

@@ -42,3 +42,16 @@ export function participantBuyerPrefill(
     telefone: formatPhone(buyer?.telefone),
   }
 }
+
+export function canPrefillBuyerIdentity(
+  prefillSource?: string | null,
+  sessionBuyerId?: string | null,
+  ticketBuyerId?: string | null,
+) {
+  return (
+    prefillSource === 'buyer' &&
+    !!sessionBuyerId &&
+    !!ticketBuyerId &&
+    sessionBuyerId === ticketBuyerId
+  )
+}

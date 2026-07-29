@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { formatCpf, formatPhone, participantBuyerPrefill } from './participant-prefill'
+import {
+  canPrefillBuyerIdentity,
+  formatCpf,
+  formatPhone,
+  participantBuyerPrefill,
+} from './participant-prefill'
 
 describe('participant buyer prefill', () => {
   it('formats all buyer fields for the participant form', () => {
@@ -32,5 +37,12 @@ describe('participant buyer prefill', () => {
   it('limits masks to their supported digit counts', () => {
     expect(formatCpf('12345678900123')).toBe('123.456.789-00')
     expect(formatPhone('55119999999999')).toBe('(55) 11999-9999')
+  })
+
+  it('only allows buyer data for the buyer own fill flow', () => {
+    expect(canPrefillBuyerIdentity('buyer', 'buyer-id', 'buyer-id')).toBe(true)
+    expect(canPrefillBuyerIdentity(null, 'buyer-id', 'buyer-id')).toBe(false)
+    expect(canPrefillBuyerIdentity('buyer', null, 'buyer-id')).toBe(false)
+    expect(canPrefillBuyerIdentity('buyer', 'other-buyer', 'buyer-id')).toBe(false)
   })
 })

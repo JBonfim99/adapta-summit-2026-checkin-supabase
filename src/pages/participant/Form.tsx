@@ -11,11 +11,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { ArrowRight, ArrowLeft, CheckCircle2, Loader2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { useApp } from '@/contexts/app-context'
 import pb from '@/lib/backend/client'
 import { getErrorMessage } from '@/lib/backend/errors'
 import { ROLES, REVENUE, EMPLOYEES, NICHES } from '@/lib/form-options'
 import { isValidCPF } from '@/lib/cpf'
-import { participantBuyerPrefill } from '@/lib/participant-prefill'
+import {
+  canPrefillBuyerIdentity,
+  participantBuyerPrefill,
+} from '@/lib/participant-prefill'
 
 const formSchema = z
   .object({
@@ -81,6 +85,7 @@ export default function ParticipantForm() {
   const token = searchParams.get('token')
   const navigate = useNavigate()
   const { toast } = useToast()
+  const { buyer } = useApp()
 
   const [step, setStep] = useState(1)
   const [ticketInfo, setTicketInfo] = useState<any>(null)
@@ -123,19 +128,26 @@ export default function ParticipantForm() {
           return
         }
         setTicketInfo(data)
+        const canPrefill = canPrefillBuyerIdentity(
+          searchParams.get('prefill'),
+          buyer?.id,
+          data.comprador?.id,
+        )
         methods.reset({
           ...methods.getValues(),
-          ...participantBuyerPrefill(data.comprador, {
-            nome: searchParams.get('nome'),
-            email: searchParams.get('email'),
-          }),
+          ...(canPrefill
+            ? participantBuyerPrefill(data.comprador, {
+                nome: searchParams.get('nome'),
+                email: searchParams.get('email'),
+              })
+            : participantBuyerPrefill(null)),
         })
         setLoading(false)
       })
       .catch(() => {
         navigate('/participante/expirado')
       })
-  }, [methods, navigate, searchParams, token])
+  }, [buyer?.id, methods, navigate, searchParams, token])
 
   const temEmpresa = methods.watch('tem_empresa')
 
