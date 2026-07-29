@@ -8,6 +8,11 @@ const SYNCED_COLLECTIONS = [
   'tokens_acesso',
   'links_participante',
   'webhooks_log',
+  'disparos',
+  'envios',
+  'pedidos_guru',
+  'disparos_wa',
+  'cortesias',
 ]
 
 const syncControl = () => {

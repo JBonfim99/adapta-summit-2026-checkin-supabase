@@ -12,6 +12,10 @@ It is intentionally separate from the Supabase fallback runtime.
 6. Keep `sync_control.block_writes=false` and
    `sync_control.delivery_paused=false` while PocketBase is primary.
 
+The hook replicates buyers, tickets, participants, tokens, links, logs,
+email/WhatsApp dispatches, deliveries, Guru orders and courtesies.
+`cron_health` is intentionally local to each backend and is never replicated.
+
 During failover, drain the outbox, verify lag below 60 seconds, set
 `sync_control.block_writes=true`, activate Supabase, and only then change the
 public domain.

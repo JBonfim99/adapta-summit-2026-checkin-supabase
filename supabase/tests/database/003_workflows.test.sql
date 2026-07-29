@@ -35,6 +35,14 @@ select is(
   64,
   'the generated participant token has 32 random bytes'
 );
+select ok(
+  (
+    select expira_em between now() + interval '23 hours' and now() + interval '25 hours'
+      from public.links_participante
+     where ingresso_id = 'ticket_workflow_3'
+  ),
+  'buyer invitations expire in 24 hours'
+);
 
 select lives_ok(
   $$

@@ -71,7 +71,7 @@ begin
         'inac_qr', i.inac_qr,
         'pendingLink', active_link.token
       )
-      order by i.created_at, i.id
+      order by i.created_at desc, i.id desc
     ),
     '[]'::jsonb
   )
@@ -100,7 +100,7 @@ $$;
 create or replace function public.create_participant_link(
   p_buyer_token text,
   p_ticket_id text,
-  p_expires_at timestamptz default (now() + interval '7 days')
+  p_expires_at timestamptz default (now() + interval '1 day')
 )
 returns jsonb
 language plpgsql
@@ -128,21 +128,9 @@ begin
     raise exception using errcode = 'P0001', message = 'TICKET_ALREADY_CREDENTIALLED';
   end if;
 
-  select *
-    into link
-    from public.links_participante
-   where ingresso_id = ticket.id
-     and usado = false
-     and expira_em > now()
-   order by created_at desc
-   limit 1
-   for update;
-
-  if link.id is null then
-    insert into public.links_participante (ingresso_id, token, expira_em)
-    values (ticket.id, encode(extensions.gen_random_bytes(32), 'hex'), p_expires_at)
-    returning * into link;
-  end if;
+  insert into public.links_participante (ingresso_id, token, expira_em)
+  values (ticket.id, encode(extensions.gen_random_bytes(32), 'hex'), p_expires_at)
+  returning * into link;
 
   return jsonb_build_object(
     'token', link.token,

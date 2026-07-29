@@ -18,13 +18,20 @@ import ParticipantForm from '@/pages/participant/Form'
 import ParticipantSuccess from '@/pages/participant/Success'
 import ParticipantExpired from '@/pages/participant/Expired'
 import ParticipantTicket from '@/pages/participant/Ticket'
+import Cortesia from '@/pages/participant/Cortesia'
 
 import AdminLogin from '@/pages/admin/Login'
 import AdminDashboard from '@/pages/admin/Dashboard'
+import AdminImport from '@/pages/admin/Importar'
 import AdminCompradores from '@/pages/admin/Compradores'
 import AdminParticipants from '@/pages/admin/Participantes'
 import AdminLogs from '@/pages/admin/Logs'
 import AdminInsights from '@/pages/admin/Insights'
+import AdminCortesias from '@/pages/admin/Cortesias'
+import AdminReconciliar from '@/pages/admin/Reconciliar'
+import AdminApi from '@/pages/admin/Api'
+import AdminDispatch from '@/pages/admin/Disparo'
+import AdminDispatchWhatsApp from '@/pages/admin/DisparoWhatsApp'
 import Helpdesk from '@/pages/helpdesk/Index'
 
 function PreCredenciamentoRedirect() {
@@ -99,6 +106,7 @@ const App = () => (
               <Route path="/participante/expirado" element={<ParticipantExpired />} />
               <Route path="/ingresso" element={<ParticipantTicket />} />
               <Route path="/politica-de-privacidade" element={<PrivacyPolicy />} />
+              <Route path="/cortesia" element={<Cortesia />} />
               <Route path="/participante" element={<ParticipantForm />} />
               <Route path="/pre-credenciamento/:token" element={<PreCredenciamentoRedirect />} />
               <Route path="/credenciamento" element={<CredenciamentoRedirect />} />
@@ -109,9 +117,15 @@ const App = () => (
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
+              <Route path="importar" element={<AdminImport />} />
               <Route path="compradores" element={<AdminCompradores />} />
               <Route path="participantes" element={<AdminParticipants />} />
+              <Route path="cortesias" element={<AdminCortesias />} />
+              <Route path="reconciliar" element={<AdminReconciliar />} />
+              <Route path="api" element={<AdminApi />} />
               <Route path="insights" element={<AdminInsights />} />
+              <Route path="disparo" element={<AdminDispatch />} />
+              <Route path="disparo-whatsapp" element={<AdminDispatchWhatsApp />} />
               <Route path="logs" element={<AdminLogs />} />
               <Route path="envios" element={<Navigate to="/admin/logs" replace />} />
             </Route>

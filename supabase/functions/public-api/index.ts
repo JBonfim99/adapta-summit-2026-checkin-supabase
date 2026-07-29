@@ -2,6 +2,11 @@ import { adminDb, rpc } from '../_shared/db.ts'
 import { ApiError, body, handler, json, routePath } from '../_shared/http.ts'
 import { callInac } from '../_shared/inac.ts'
 import { sendEmail } from '../_shared/sendgrid.ts'
+import {
+  createParticipantViewToken,
+  requireOperationalWrite,
+} from '../_shared/operations.ts'
+import { handlePublicParity } from '../_shared/public-parity.ts'
 
 interface ParticipantPayload extends Record<string, unknown> {
   token?: string
@@ -13,6 +18,7 @@ interface ParticipantPayload extends Record<string, unknown> {
 const appUrl = () => (Deno.env.get('APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '')
 
 async function magicLink(req: Request) {
+  await requireOperationalWrite()
   const input = await body<{ email?: string }>(req)
   const email = String(input.email ?? '').trim().toLowerCase()
   if (!email || !email.includes('@')) throw new ApiError(400, 'EMAIL_INVALIDO')
@@ -24,8 +30,36 @@ async function magicLink(req: Request) {
     .eq('email_normalized', email)
     .maybeSingle()
 
-  // Do not disclose which addresses are registered.
-  if (!buyer) return json({ success: true })
+  if (!buyer) {
+    const { data: participant } = await db
+      .from('participantes')
+      .select('id,ingresso_id,nome_completo,email')
+      .eq('email_normalized', email)
+      .maybeSingle()
+    // Do not disclose which addresses are registered.
+    if (!participant) return json({ success: true })
+
+    const { token: ticketToken } = await createParticipantViewToken(
+      db,
+      participant.ingresso_id,
+    )
+    const ticketUrl = `${appUrl()}/ingresso?token=${encodeURIComponent(ticketToken)}`
+    await sendEmail(db, {
+      to: participant.email,
+      templateId: Deno.env.get('SENDGRID_PARTICIPANT_TEMPLATE_ID') || undefined,
+      subject: 'Seu ingresso do Adapta Summit 2026',
+      html: `<p><a href="${ticketUrl}">Visualize seu ingresso</a>.</p>`,
+      dynamicData: {
+        nome: participant.nome_completo,
+        firstname: participant.nome_completo.split(' ')[0] || participant.nome_completo,
+        token: ticketToken,
+        ticket_url: ticketUrl,
+      },
+      idempotencyKey: `participant-access:${participant.id}:${ticketToken}`,
+      operation: 'participant_magic_link',
+    })
+    return json({ success: true, sent: true })
+  }
 
   const { data: existing } = await db
     .from('tokens_acesso')
@@ -60,7 +94,7 @@ async function magicLink(req: Request) {
     operation: 'buyer_magic_link',
   })
 
-  return json({ success: true })
+  return json({ success: true, sent: true })
 }
 
 async function consumeMagicLink(req: Request) {
@@ -106,10 +140,12 @@ async function participantTicket(token: string) {
   const db = adminDb()
   const { data: link } = await db
     .from('links_participante')
-    .select('ingresso_id')
+    .select('ingresso_id,expira_em')
     .eq('token', token)
     .maybeSingle()
-  if (!link) throw new ApiError(404, 'TICKET_NOT_FOUND')
+  if (!link || new Date(link.expira_em).getTime() <= Date.now()) {
+    throw new ApiError(404, 'TICKET_NOT_FOUND')
+  }
 
   const { data: ticket } = await db
     .from('ingressos')
@@ -122,7 +158,7 @@ async function participantTicket(token: string) {
 
   const { data: participant } = await db
     .from('participantes')
-    .select('nome_completo,email,cpf,telefone,nome_empresa,cargo')
+    .select('nome_completo,email,cpf,telefone,tem_empresa,nome_empresa,cargo,profissao,nicho')
     .eq('id', ticket.participante_id)
     .single()
 
@@ -156,6 +192,7 @@ async function availability(req: Request, field: 'email' | 'cpf') {
 }
 
 async function submitParticipant(req: Request) {
+  await requireOperationalWrite()
   const input = await body<ParticipantPayload>(req)
   const token = String(input.token ?? '')
   const payload = {
@@ -259,6 +296,9 @@ Deno.serve((req) =>
     if (req.method === 'GET' && ticketMatch) {
       return participantTicket(decodeURIComponent(ticketMatch[1]))
     }
+
+    const parityResponse = await handlePublicParity(req, path)
+    if (parityResponse) return parityResponse
 
     throw new ApiError(404, 'ROUTE_NOT_FOUND')
   }),

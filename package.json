@@ -26,6 +26,7 @@
     "import:pocketbase": "node scripts/import-pocketbase.mjs",
     "reconcile:pocketbase": "node scripts/reconcile-pocketbase.mjs",
     "test:contracts": "node scripts/contract-compare.mjs",
+    "test:routes": "node scripts/verify-route-parity.mjs",
     "test:load": "node scripts/load-test.mjs",
     "test:load:cleanup": "node scripts/cleanup-load-test.mjs",
     "e2e:local:setup": "node scripts/setup-local-e2e.mjs",

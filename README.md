@@ -4,7 +4,7 @@ Hot standby do check-in do Adapta Summit 2026. O frontend preserva as rotas e
 a experiencia do sistema original, mas todo o runtime deste repositorio usa
 Supabase.
 
-## Escopo do v1
+## Escopo 1:1
 
 - Login do comprador por magic link e token proprio.
 - Listagem, convite e visualizacao de ingressos.
@@ -12,10 +12,11 @@ Supabase.
 - Helpdesk com chave compartilhada e operador auditado.
 - Supabase Auth para administradores.
 - Dashboard, compradores, participantes, logs e operacoes essenciais.
+- Importacao CSV, reconciliacao e criacao controlada de faltantes.
+- Cortesias publicas com cota e credenciamento imediato.
+- Campanhas e filas com retry para SendGrid e BotConversa.
+- API externa por `X-Api-Key` e webhook idempotente da Guru.
 - Importacao inicial, outbox HMAC, reconciliacao e ativacao de failover.
-
-Campanhas, Guru, API externa, cortesias, importacao operacional e reconciliacao
-de pedidos nao fazem parte do v1.
 
 ## Arquitetura
 
@@ -25,6 +26,10 @@ flowchart LR
   Functions --> Database["Postgres + RLS"]
   Functions --> Inac["INAC"]
   Functions --> SendGrid["SendGrid"]
+  Functions --> BotConversa["BotConversa"]
+  Cron["pg_cron"] --> Worker["dispatch-worker"]
+  Worker --> SendGrid
+  Worker --> BotConversa
   PocketBase["PocketBase primario"] --> Outbox["sync_outbox"]
   Outbox --> Ingest["sync-ingest com HMAC"]
   Ingest --> Database
@@ -80,11 +85,20 @@ supabase functions deploy buyer-api
 supabase functions deploy helpdesk-api
 supabase functions deploy admin-api
 supabase functions deploy sync-ingest
+supabase functions deploy dispatch-worker
 ```
 
 Configure os secrets listados em `supabase/.env.example` com
 `supabase secrets set`. Na Vercel, configure apenas
 `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` e `VITE_APP_URL`.
+
+O agendamento do worker le tres valores do Vault. Cadastre-os depois do deploy:
+
+```sql
+select vault.create_secret('https://idiagqbfmvyoywyjfufe.supabase.co', 'project_url');
+select vault.create_secret('<publishable-key>', 'publishable_key');
+select vault.create_secret('<mesmo DISPATCH_WORKER_SECRET>', 'dispatch_worker_secret');
+```
 
 Crie o usuario administrativo no Supabase Auth e associe-o sem senha padrao:
 

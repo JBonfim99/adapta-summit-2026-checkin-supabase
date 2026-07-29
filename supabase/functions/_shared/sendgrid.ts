@@ -9,6 +9,7 @@ interface SendEmailInput {
   dynamicData?: Record<string, unknown>
   idempotencyKey: string
   operation: string
+  attempt?: number
 }
 
 export async function sendEmail(db: SupabaseClient, input: SendEmailInput) {
@@ -22,7 +23,7 @@ export async function sendEmail(db: SupabaseClient, input: SendEmailInput) {
       provider: 'sendgrid',
       operation: input.operation,
       idempotencyKey: input.idempotencyKey,
-      attempt: 1,
+      attempt: input.attempt ?? 1,
       requestPayload: { to: input.to, templateId: input.templateId, mock: true },
       responseStatus: 202,
       responsePayload: { mock: true },
@@ -57,7 +58,7 @@ export async function sendEmail(db: SupabaseClient, input: SendEmailInput) {
     provider: 'sendgrid',
     operation: input.operation,
     idempotencyKey: input.idempotencyKey,
-    attempt: 1,
+    attempt: input.attempt ?? 1,
     requestPayload: { to: input.to, templateId: input.templateId },
     responseStatus: response.status,
     responsePayload: { body: responseText.slice(0, 500) },

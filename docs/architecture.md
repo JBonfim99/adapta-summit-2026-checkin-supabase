@@ -9,6 +9,8 @@
 | Helpdesk | `X-Helpdesk-Key` + operador | `helpdesk-api` |
 | Admin | JWT do Supabase Auth + `admin_profiles` | `admin-api` |
 | Replicacao | HMAC SHA-256 + janela de 5 minutos | `sync-ingest` |
+| Worker | `X-Worker-Key`, chamado pelo `pg_cron` | `dispatch-worker` |
+| API externa | `X-Api-Key` rotacionada | `public-api` |
 
 Todas as tabelas possuem RLS. `anon` e `authenticated` nao recebem grants de
 tabela nem de RPC transacional. Apenas as Edge Functions usam `service_role`.
@@ -32,9 +34,14 @@ tabela nem de RPC transacional. Apenas as Edge Functions usam `service_role`.
 Cada tentativa registra payload, status, resposta, duracao e chave de
 idempotencia em `integration_attempts`.
 
-SendGrid opera com templates configurados por secret. Magic links e reenvios
-essenciais continuam disponiveis; campanhas em massa ficam fora deste
-repositorio.
+SendGrid e BotConversa operam com filas persistentes, claim atomico, no maximo
+cinco tentativas e auditoria por tentativa. O `pg_cron` chama
+`dispatch-worker` a cada minuto por `pg_net`. Guru e API externa passam pelas
+mesmas transacoes e pelo bloqueio de standby.
+
+No modo `standby`, mutacoes e efeitos externos sao recusados. Local e staging
+podem usar `ALLOW_STANDBY_WRITES=true`; esse override nao deve existir em
+producao.
 
 ## Segredos
 
@@ -43,6 +50,10 @@ Nunca configurar no frontend:
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `INAC_API_KEY`
 - `SENDGRID_API_KEY`
+- `BOTCONVERSA_API_KEY`
+- `BOTCONVERSA_CATCH_URL`
+- `EXTERNAL_API_KEY`
+- `DISPATCH_WORKER_SECRET`
 - `HELPDESK_KEY`
 - `SYNC_HMAC_SECRET`
 

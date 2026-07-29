@@ -5,6 +5,16 @@ import {
   mutateCredentialledTicket,
 } from '../_shared/ticket-operations.ts'
 import { sendEmail } from '../_shared/sendgrid.ts'
+import {
+  auditEvent,
+  cpfDigits,
+  createParticipantViewToken,
+  normalizeEmail,
+  requireOperationalWrite,
+  ticketTypes,
+  validCpf,
+  validPhone,
+} from '../_shared/operations.ts'
 
 interface PersonInput extends Record<string, unknown> {
   nome_completo?: string
@@ -17,6 +27,19 @@ interface PersonInput extends Record<string, unknown> {
 }
 
 const appUrl = () => (Deno.env.get('APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '')
+
+function validatePerson(input: PersonInput) {
+  const name = String(input.nome_completo ?? '').trim()
+  const email = normalizeEmail(input.email)
+  if (name.length < 3) throw new ApiError(400, 'Informe o nome completo.')
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    throw new ApiError(400, 'E-mail invalido.')
+  }
+  if (!validCpf(input.cpf)) throw new ApiError(400, 'CPF invalido.')
+  if (!validPhone(input.telefone)) {
+    throw new ApiError(400, 'Telefone invalido (informe com DDD).')
+  }
+}
 
 async function search(req: Request) {
   const query = (new URL(req.url).searchParams.get('q') ?? '').trim()
@@ -124,31 +147,59 @@ async function search(req: Request) {
 
 async function credential(req: Request) {
   const input = await body<PersonInput & { ingresso_id?: string }>(req)
+  validatePerson(input)
   const ticketId = String(input.ingresso_id ?? '')
   const actor = `helpdesk:${String(input.operador ?? 'unknown')}`
+  const db = adminDb()
+  await requireOperationalWrite(db)
   const result = await rpc<{ ticketId: string; participantId: string }>('credential_ticket', {
     p_ticket_id: ticketId,
     p_payload: input,
     p_actor: actor,
   })
-  const inac = await dispatchCredentialToInac(adminDb(), result.ticketId, result.participantId)
+  const inac = await dispatchCredentialToInac(db, result.ticketId, result.participantId)
+  await auditEvent(db, {
+    ingressoId: result.ticketId,
+    evento: 'helpdesk_credenciamento',
+    detalhe: `Credenciamento realizado no helpdesk por ${String(input.operador ?? 'nao identificado')}`,
+    status: inac.success ? 200 : inac.status,
+    payload: {
+      operador: input.operador,
+      participante_id: result.participantId,
+    },
+    response: inac.success ? 'INAC /add OK' : inac.error,
+  })
   return json({
+    ok: true,
     success: true,
     qrcode: inac.qrCode ?? '',
     inac_ok: inac.success,
     inac_msg: inac.error,
+    avisos: inac.success ? [] : [`A INAC nao confirmou a credencial: ${inac.error}`],
+    log_ok: true,
   })
 }
 
 async function newCredential(req: Request) {
   const input = await body<PersonInput & { tipo?: string; motivo?: string }>(req)
   const db = adminDb()
-  const email = String(input.email ?? '').trim().toLowerCase()
+  await requireOperationalWrite(db)
+  validatePerson(input)
+  const motivo = String(input.motivo ?? '').replace(/\s+/g, ' ').trim()
+  if (motivo.length < 5) {
+    throw new ApiError(400, 'Escreva o motivo deste novo credenciamento.')
+  }
+  const type = String(input.tipo ?? '').toUpperCase()
+  if (!ticketTypes.includes(type as (typeof ticketTypes)[number])) {
+    throw new ApiError(400, 'Escolha o tipo do ingresso.')
+  }
+  const email = normalizeEmail(input.email)
   let { data: buyer } = await db
     .from('compradores')
     .select('id,nome,email')
     .eq('email_normalized', email)
     .maybeSingle()
+  let buyerCreated = false
   if (!buyer) {
     const inserted = await db
       .from('compradores')
@@ -156,36 +207,77 @@ async function newCredential(req: Request) {
         nome: String(input.nome_completo ?? ''),
         email,
         telefone: String(input.telefone ?? ''),
-        documento: String(input.cpf ?? ''),
+        documento: cpfDigits(input.cpf),
       })
       .select('id,nome,email')
       .single()
     if (inserted.error) throw inserted.error
     buyer = inserted.data
+    buyerCreated = true
   }
+
+  let orderId = ''
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const candidate = `H${Math.floor(Math.random() * 1_000_000)
+      .toString()
+      .padStart(6, '0')}`
+    const { count } = await db
+      .from('ingressos')
+      .select('*', { count: 'exact', head: true })
+      .eq('pedido_id', candidate)
+    if ((count ?? 0) === 0) {
+      orderId = candidate
+      break
+    }
+  }
+  if (!orderId) throw new ApiError(500, 'Nao foi possivel gerar um numero de pedido.')
 
   const { data: ticket, error } = await db
     .from('ingressos')
     .insert({
       comprador_id: buyer.id,
-      pedido_id: `HELPDESK-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
-      tipo_ingresso: String(input.tipo ?? 'GOLD'),
-      origem: `helpdesk:${String(input.operador ?? 'unknown')}`,
+      pedido_id: orderId,
+      tipo_ingresso: type,
+      origem: 'helpdesk',
     })
     .select('id')
     .single()
   if (error) throw error
 
-  return credential(
+  const response = await credential(
     new Request(req.url, {
       method: 'POST',
       headers: req.headers,
       body: JSON.stringify({ ...input, ingresso_id: ticket.id }),
     }),
   )
+  const payload = await response.json()
+  await auditEvent(db, {
+    ingressoId: ticket.id,
+    evento: 'helpdesk_novo_credenciamento',
+    detalhe:
+      `Novo credenciamento criado por ${String(input.operador ?? 'nao identificado')} ` +
+      `- pedido ${orderId} - ${type} - motivo: ${motivo}`,
+    payload: {
+      operador: input.operador,
+      pedido_id: orderId,
+      tipo: type,
+      motivo,
+      comprador_criado: buyerCreated,
+      email,
+    },
+    response: payload.inac_ok ? 'INAC /add OK' : `INAC: ${payload.inac_msg ?? ''}`,
+  })
+  return json({
+    ...payload,
+    pedido_id: orderId,
+    tipo_ingresso: type,
+    comprador_criado: buyerCreated,
+    log_ok: true,
+  })
 }
 
-async function qr(ticketId: string, generate: boolean) {
+async function qr(ticketId: string, generate: boolean, operator: string) {
   const db = adminDb()
   const { data: ticket } = await db
     .from('ingressos')
@@ -194,15 +286,29 @@ async function qr(ticketId: string, generate: boolean) {
     .maybeSingle()
   if (!ticket?.participante_id) throw new ApiError(404, 'TICKET_NOT_CREDENTIALLED')
   if (generate && !ticket.inac_qr) {
+    await requireOperationalWrite(db)
     const inac = await dispatchCredentialToInac(db, ticket.id, ticket.participante_id)
     if (!inac.success) throw new ApiError(502, 'INAC_OPERATION_FAILED', inac)
-    return json({ success: true, qrcode: inac.qrCode })
+    await auditEvent(db, {
+      ingressoId: ticket.id,
+      evento: 'helpdesk_qr_gerado',
+      detalhe: `QR gerado no helpdesk por ${operator}`,
+      payload: { operador: operator },
+    })
+    return json({ success: true, qrcode: inac.qrCode, log_ok: true })
   }
-  return json({ success: true, qrcode: ticket.inac_qr })
+  await auditEvent(db, {
+    ingressoId: ticket.id,
+    evento: 'helpdesk_qr',
+    detalhe: `QR consultado no helpdesk por ${operator}`,
+    payload: { operador: operator },
+  })
+  return json({ success: true, qrcode: ticket.inac_qr, log_ok: true })
 }
 
-async function resendBuyer(buyerId: string) {
+async function resendBuyer(buyerId: string, operator: string) {
   const db = adminDb()
+  await requireOperationalWrite(db)
   const { data: buyer } = await db
     .from('compradores')
     .select('id,nome,email')
@@ -226,32 +332,29 @@ async function resendBuyer(buyerId: string) {
     idempotencyKey: `helpdesk-buyer:${buyer.id}:${token}`,
     operation: 'helpdesk_resend_buyer',
   })
-  return json({ success: true })
+  await auditEvent(db, {
+    evento: 'helpdesk_reenvio_comprador',
+    detalhe: `E-mail do comprador reenviado no helpdesk por ${operator}`,
+    payload: { operador: operator, comprador_id: buyer.id, email: buyer.email },
+  })
+  return json({ success: true, log_ok: true, avisos: [] })
 }
 
-async function resendParticipant(ticketId: string) {
+async function resendParticipant(ticketId: string, operator: string) {
   const db = adminDb()
+  await requireOperationalWrite(db)
   const { data: ticket } = await db
     .from('ingressos')
     .select('id,participante_id')
     .eq('id', ticketId)
     .maybeSingle()
   if (!ticket?.participante_id) throw new ApiError(404, 'TICKET_NOT_CREDENTIALLED')
-  const [{ data: participant }, { data: link }] = await Promise.all([
-    db
-      .from('participantes')
-      .select('id,nome_completo,email')
-      .eq('id', ticket.participante_id)
-      .single(),
-    db
-      .from('links_participante')
-      .select('token')
-      .eq('ingresso_id', ticket.id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ])
-  if (!link) throw new ApiError(404, 'PARTICIPANT_LINK_NOT_FOUND')
+  const { data: participant } = await db
+    .from('participantes')
+    .select('id,nome_completo,email')
+    .eq('id', ticket.participante_id)
+    .single()
+  const link = await createParticipantViewToken(db, ticket.id)
   const ticketUrl = `${appUrl()}/ingresso?token=${link.token}`
   await sendEmail(db, {
     to: participant.email,
@@ -262,7 +365,13 @@ async function resendParticipant(ticketId: string) {
     idempotencyKey: `helpdesk-participant:${participant.id}:${Date.now()}`,
     operation: 'helpdesk_resend_participant',
   })
-  return json({ success: true })
+  await auditEvent(db, {
+    ingressoId: ticket.id,
+    evento: 'helpdesk_reenvio_participante',
+    detalhe: `E-mail do participante reenviado no helpdesk por ${operator}`,
+    payload: { operador: operator, participante_id: participant.id, email: participant.email },
+  })
+  return json({ success: true, log_ok: true, avisos: [] })
 }
 
 Deno.serve((req) =>
@@ -283,44 +392,84 @@ Deno.serve((req) =>
     const edit = path.match(/^\/backend\/v1\/helpdesk\/ticket\/([^/]+)\/editar$/)
     if (req.method === 'POST' && edit) {
       const input = await body<PersonInput>(req)
-      return json(
-        await mutateCredentialledTicket(adminDb(), {
+      validatePerson(input)
+      const db = adminDb()
+      await requireOperationalWrite(db)
+      const result = await mutateCredentialledTicket(db, {
           ticketId: decodeURIComponent(edit[1]),
           operation: 'edit',
           actor: `helpdesk:${String(input.operador ?? 'unknown')}`,
           payload: input,
-        }),
-      )
+        })
+      await auditEvent(db, {
+        ingressoId: decodeURIComponent(edit[1]),
+        evento: 'helpdesk_edicao',
+        detalhe: `Dados editados no helpdesk por ${String(input.operador ?? 'nao identificado')}`,
+        payload: { operador: input.operador },
+      })
+      return json({ ...result, log_ok: true, avisos: [] })
     }
     const type = path.match(/^\/backend\/v1\/helpdesk\/ticket\/([^/]+)\/tipo$/)
     if (req.method === 'POST' && type) {
       const input = await body<Record<string, unknown>>(req)
-      return json(
-        await mutateCredentialledTicket(adminDb(), {
+      const motivo = String(input.motivo ?? '').replace(/\s+/g, ' ').trim()
+      if (motivo.length < 5) throw new ApiError(400, 'Informe o motivo da troca.')
+      const nextType = String(input.tipo ?? '').toUpperCase()
+      if (!ticketTypes.includes(nextType as (typeof ticketTypes)[number])) {
+        throw new ApiError(400, 'Escolha o tipo do ingresso.')
+      }
+      const db = adminDb()
+      await requireOperationalWrite(db)
+      const result = await mutateCredentialledTicket(db, {
           ticketId: decodeURIComponent(type[1]),
           operation: 'change_type',
           actor: `helpdesk:${String(input.operador ?? 'unknown')}`,
           payload: input,
-        }),
-      )
+        })
+      await auditEvent(db, {
+        ingressoId: decodeURIComponent(type[1]),
+        evento: 'helpdesk_tipo_alterado',
+        detalhe:
+          `Tipo alterado para ${nextType} no helpdesk por ` +
+          `${String(input.operador ?? 'nao identificado')} - motivo: ${motivo}`,
+        payload: { operador: input.operador, tipo: nextType, motivo },
+      })
+      return json({ ...result, log_ok: true, avisos: [] })
     }
     const qrView = path.match(/^\/backend\/v1\/helpdesk\/ticket\/([^/]+)\/qr$/)
-    if (req.method === 'GET' && qrView) return qr(decodeURIComponent(qrView[1]), false)
+    if (req.method === 'GET' && qrView) {
+      const operator =
+        new URL(req.url).searchParams.get('operador')?.trim() || 'nao identificado'
+      return qr(decodeURIComponent(qrView[1]), false, operator)
+    }
     const qrGenerate = path.match(/^\/backend\/v1\/helpdesk\/ticket\/([^/]+)\/gerar-qr$/)
     if (req.method === 'POST' && qrGenerate) {
-      return qr(decodeURIComponent(qrGenerate[1]), true)
+      const input = await body<{ operador?: string }>(req)
+      return qr(
+        decodeURIComponent(qrGenerate[1]),
+        true,
+        String(input.operador ?? 'nao identificado'),
+      )
     }
     const resendBuyerMatch = path.match(
       /^\/backend\/v1\/helpdesk\/comprador\/([^/]+)\/reenviar$/,
     )
     if (req.method === 'POST' && resendBuyerMatch) {
-      return resendBuyer(decodeURIComponent(resendBuyerMatch[1]))
+      const input = await body<{ operador?: string }>(req)
+      return resendBuyer(
+        decodeURIComponent(resendBuyerMatch[1]),
+        String(input.operador ?? 'nao identificado'),
+      )
     }
     const resendParticipantMatch = path.match(
       /^\/backend\/v1\/helpdesk\/ticket\/([^/]+)\/reenviar$/,
     )
     if (req.method === 'POST' && resendParticipantMatch) {
-      return resendParticipant(decodeURIComponent(resendParticipantMatch[1]))
+      const input = await body<{ operador?: string }>(req)
+      return resendParticipant(
+        decodeURIComponent(resendParticipantMatch[1]),
+        String(input.operador ?? 'nao identificado'),
+      )
     }
     throw new ApiError(404, 'ROUTE_NOT_FOUND')
   }),

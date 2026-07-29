@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -138,6 +138,246 @@ export type Database = {
           wa_tentativas?: number
         }
         Relationships: []
+      }
+      cortesias: {
+        Row: {
+          anfitriao: string
+          ativo: boolean
+          comprador_id: string | null
+          created_at: string
+          id: string
+          limite: number
+          tipo_ingresso: string
+          token: string
+          updated_at: string
+          usados: number
+        }
+        Insert: {
+          anfitriao: string
+          ativo?: boolean
+          comprador_id?: string | null
+          created_at?: string
+          id?: string
+          limite?: number
+          tipo_ingresso?: string
+          token: string
+          updated_at?: string
+          usados?: number
+        }
+        Update: {
+          anfitriao?: string
+          ativo?: boolean
+          comprador_id?: string | null
+          created_at?: string
+          id?: string
+          limite?: number
+          tipo_ingresso?: string
+          token?: string
+          updated_at?: string
+          usados?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cortesias_comprador_id_fkey"
+            columns: ["comprador_id"]
+            isOneToOne: false
+            referencedRelation: "compradores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cron_health: {
+        Row: {
+          created_at: string
+          email_last_run: string | null
+          id: string
+          last_run: string
+          metadata: Json
+          updated_at: string
+          whatsapp_last_run: string | null
+        }
+        Insert: {
+          created_at?: string
+          email_last_run?: string | null
+          id?: string
+          last_run?: string
+          metadata?: Json
+          updated_at?: string
+          whatsapp_last_run?: string | null
+        }
+        Update: {
+          created_at?: string
+          email_last_run?: string | null
+          id?: string
+          last_run?: string
+          metadata?: Json
+          updated_at?: string
+          whatsapp_last_run?: string | null
+        }
+        Relationships: []
+      }
+      disparos: {
+        Row: {
+          audience: string
+          cluster: string
+          created_at: string
+          enviados: number
+          erros: number
+          id: string
+          nome: string
+          status: string
+          template_id: string
+          template_nome: string
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          audience?: string
+          cluster: string
+          created_at?: string
+          enviados?: number
+          erros?: number
+          id?: string
+          nome?: string
+          status?: string
+          template_id: string
+          template_nome?: string
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          audience?: string
+          cluster?: string
+          created_at?: string
+          enviados?: number
+          erros?: number
+          id?: string
+          nome?: string
+          status?: string
+          template_id?: string
+          template_nome?: string
+          total?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      disparos_wa: {
+        Row: {
+          cluster: string
+          created_at: string
+          enviados: number
+          erros: number
+          flow: string
+          flow_nome: string
+          id: string
+          mapping: Json
+          nome: string
+          status: string
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          cluster: string
+          created_at?: string
+          enviados?: number
+          erros?: number
+          flow?: string
+          flow_nome?: string
+          id?: string
+          mapping?: Json
+          nome?: string
+          status?: string
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          cluster?: string
+          created_at?: string
+          enviados?: number
+          erros?: number
+          flow?: string
+          flow_nome?: string
+          id?: string
+          mapping?: Json
+          nome?: string
+          status?: string
+          total?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      envios: {
+        Row: {
+          claim: string | null
+          comprador_id: string | null
+          created_at: string
+          disparo_id: string
+          email: string
+          enviado_em: string | null
+          erro: string | null
+          id: string
+          nome: string
+          participante_id: string | null
+          proxima_tentativa_em: string | null
+          status: string
+          tentativas: number
+          updated_at: string
+        }
+        Insert: {
+          claim?: string | null
+          comprador_id?: string | null
+          created_at?: string
+          disparo_id: string
+          email: string
+          enviado_em?: string | null
+          erro?: string | null
+          id?: string
+          nome?: string
+          participante_id?: string | null
+          proxima_tentativa_em?: string | null
+          status?: string
+          tentativas?: number
+          updated_at?: string
+        }
+        Update: {
+          claim?: string | null
+          comprador_id?: string | null
+          created_at?: string
+          disparo_id?: string
+          email?: string
+          enviado_em?: string | null
+          erro?: string | null
+          id?: string
+          nome?: string
+          participante_id?: string | null
+          proxima_tentativa_em?: string | null
+          status?: string
+          tentativas?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "envios_comprador_id_fkey"
+            columns: ["comprador_id"]
+            isOneToOne: false
+            referencedRelation: "compradores"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "envios_disparo_id_fkey"
+            columns: ["disparo_id"]
+            isOneToOne: false
+            referencedRelation: "disparos"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "envios_participante_id_fkey"
+            columns: ["participante_id"]
+            isOneToOne: false
+            referencedRelation: "participantes"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ingressos: {
         Row: {
@@ -422,6 +662,53 @@ export type Database = {
           },
         ]
       }
+      pedidos_guru: {
+        Row: {
+          comprador_id: string | null
+          created_at: string
+          email: string
+          email_status: string
+          id: string
+          ingressos: number
+          payload: Json
+          status: string
+          transacao_id: string
+          updated_at: string
+        }
+        Insert: {
+          comprador_id?: string | null
+          created_at?: string
+          email?: string
+          email_status?: string
+          id?: string
+          ingressos?: number
+          payload?: Json
+          status: string
+          transacao_id: string
+          updated_at?: string
+        }
+        Update: {
+          comprador_id?: string | null
+          created_at?: string
+          email?: string
+          email_status?: string
+          id?: string
+          ingressos?: number
+          payload?: Json
+          status?: string
+          transacao_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pedidos_guru_comprador_id_fkey"
+            columns: ["comprador_id"]
+            isOneToOne: false
+            referencedRelation: "compradores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_events: {
         Row: {
           applied_at: string | null
@@ -683,7 +970,42 @@ export type Database = {
       }
     }
     Functions: {
+      admin_participants_search: {
+        Args: {
+          p_page?: number
+          p_per_page?: number
+          p_query?: string
+          p_status?: string
+          p_type?: string
+        }
+        Returns: Json
+      }
       apply_sync_event: { Args: { p_event: Json }; Returns: Json }
+      claim_email_dispatch_batch: {
+        Args: { p_limit?: number }
+        Returns: {
+          claim: string | null
+          comprador_id: string | null
+          created_at: string
+          disparo_id: string
+          email: string
+          enviado_em: string | null
+          erro: string | null
+          id: string
+          nome: string
+          participante_id: string | null
+          proxima_tentativa_em: string | null
+          status: string
+          tentativas: number
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "envios"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       claim_ticket_operation: {
         Args: {
           p_actor: string
@@ -693,6 +1015,24 @@ export type Database = {
         }
         Returns: Json
       }
+      claim_whatsapp_dispatch_batch: {
+        Args: { p_limit?: number }
+        Returns: {
+          attempt: number
+          buyer_id: string
+          dispatch_id: string
+          email: string
+          flow: string
+          mapping: Json
+          nome: string
+          telefone: string
+          token: string
+        }[]
+      }
+      complete_email_dispatch: {
+        Args: { p_delivery_id: string; p_error?: string; p_success: boolean }
+        Returns: undefined
+      }
       complete_ticket_operation: {
         Args: {
           p_claim_id: string
@@ -701,7 +1041,24 @@ export type Database = {
         }
         Returns: Json
       }
+      complete_whatsapp_dispatch: {
+        Args: { p_buyer_id: string; p_error?: string; p_success: boolean }
+        Returns: undefined
+      }
       consume_buyer_token: { Args: { p_token: string }; Returns: Json }
+      create_admin_ticket: {
+        Args: {
+          p_buyer_id: string
+          p_order_id?: string
+          p_origin?: string
+          p_ticket_type: string
+        }
+        Returns: Json
+      }
+      create_courtesy: {
+        Args: { p_host: string; p_limit: number; p_ticket_type: string }
+        Returns: Json
+      }
       create_participant_link: {
         Args: {
           p_buyer_token: string
@@ -716,6 +1073,21 @@ export type Database = {
       }
       get_buyer_tickets: { Args: { p_token: string }; Returns: Json }
       get_participant_link: { Args: { p_token: string }; Returns: Json }
+      import_buyers_batch: { Args: { p_rows: Json }; Returns: Json }
+      process_guru_order: {
+        Args: {
+          p_buyer: Json
+          p_email: string
+          p_items: Json
+          p_payload: Json
+          p_transaction_id: string
+        }
+        Returns: Json
+      }
+      register_courtesy: {
+        Args: { p_payload: Json; p_token: string }
+        Returns: Json
+      }
       set_system_mode: {
         Args: {
           p_mode: string

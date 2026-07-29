@@ -3,7 +3,7 @@ import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 export interface IntegrationAudit {
   ingressoId?: string | null
   participantId?: string | null
-  provider: 'inac' | 'sendgrid'
+  provider: 'inac' | 'sendgrid' | 'botconversa'
   operation: string
   idempotencyKey: string
   attempt: number

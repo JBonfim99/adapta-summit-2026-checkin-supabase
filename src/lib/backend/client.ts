@@ -129,6 +129,12 @@ function collection<T = any>(name: string) {
   }
 }
 
-const backend = { send, collection }
+function filter(template: string, params: Record<string, unknown>) {
+  return template.replace(/\{:(\w+)\}/g, (_match, key: string) =>
+    JSON.stringify(String(params[key] ?? '')),
+  )
+}
+
+const backend = { send, collection, filter }
 
 export default backend

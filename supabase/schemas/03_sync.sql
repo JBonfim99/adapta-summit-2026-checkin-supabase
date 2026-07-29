@@ -30,6 +30,7 @@ declare
     coalesce(nullif(p_event->>'source_updated_at', '')::timestamptz, now());
   v_current_updated_at timestamptz;
   v_inserted integer;
+  v_existing_state text;
 begin
   if (select mode from public.system_state where singleton) <> 'standby'
      or (select pocketbase_writes_blocked from public.system_state where singleton) then
@@ -44,7 +45,12 @@ begin
        'participantes',
        'tokens_acesso',
        'links_participante',
-       'webhooks_log'
+       'webhooks_log',
+       'disparos',
+       'envios',
+       'pedidos_guru',
+       'disparos_wa',
+       'cortesias'
      )
      or v_operation not in ('create', 'update', 'delete') then
     raise exception using errcode = 'P0001', message = 'INVALID_SYNC_EVENT';
@@ -69,7 +75,17 @@ begin
 
   get diagnostics v_inserted = row_count;
   if v_inserted = 0 then
-    return jsonb_build_object('eventId', v_event_id, 'state', 'duplicate');
+    select state into v_existing_state
+      from public.sync_events
+     where event_id = v_event_id;
+    if v_existing_state in ('applied', 'ignored') then
+      return jsonb_build_object('eventId', v_event_id, 'state', 'duplicate');
+    end if;
+    update public.sync_events
+       set state = 'received',
+           error = null,
+           received_at = now()
+     where event_id = v_event_id;
   end if;
 
   if exists (
@@ -101,9 +117,24 @@ begin
   elsif v_table = 'links_participante' then
     select updated_at into v_current_updated_at
       from public.links_participante where id = v_record_id;
-  else
+  elsif v_table = 'webhooks_log' then
     select updated_at into v_current_updated_at
       from public.webhooks_log where id = v_record_id;
+  elsif v_table = 'disparos' then
+    select updated_at into v_current_updated_at
+      from public.disparos where id = v_record_id;
+  elsif v_table = 'envios' then
+    select updated_at into v_current_updated_at
+      from public.envios where id = v_record_id;
+  elsif v_table = 'pedidos_guru' then
+    select updated_at into v_current_updated_at
+      from public.pedidos_guru where id = v_record_id;
+  elsif v_table = 'disparos_wa' then
+    select updated_at into v_current_updated_at
+      from public.disparos_wa where id = v_record_id;
+  else
+    select updated_at into v_current_updated_at
+      from public.cortesias where id = v_record_id;
   end if;
 
   if v_current_updated_at is not null and v_current_updated_at > v_source_updated_at then
@@ -133,7 +164,21 @@ begin
           event_id = excluded.event_id
       where excluded.source_updated_at > public.sync_tombstones.source_updated_at;
 
-    if v_table = 'webhooks_log' then
+    if v_table = 'cortesias' then
+      update public.ingressos set cortesia_id = null where cortesia_id = v_record_id;
+      delete from public.cortesias where id = v_record_id;
+    elsif v_table = 'disparos_wa' then
+      update public.compradores set wa_disparo_id = null where wa_disparo_id = v_record_id;
+      delete from public.disparos_wa where id = v_record_id;
+    elsif v_table = 'pedidos_guru' then
+      delete from public.pedidos_guru where id = v_record_id;
+    elsif v_table = 'envios' then
+      delete from public.envios where id = v_record_id;
+    elsif v_table = 'disparos' then
+      update public.compradores set acesso_disparo_id = null where acesso_disparo_id = v_record_id;
+      update public.participantes set acesso_disparo_id = null where acesso_disparo_id = v_record_id;
+      delete from public.disparos where id = v_record_id;
+    elsif v_table = 'webhooks_log' then
       delete from public.webhooks_log where id = v_record_id;
     elsif v_table = 'links_participante' then
       delete from public.links_participante where id = v_record_id;
@@ -421,6 +466,188 @@ begin
       token = excluded.token,
       usado = excluded.usado,
       expira_em = excluded.expira_em,
+      updated_at = excluded.updated_at;
+  elsif v_table = 'disparos' then
+    insert into public.disparos (
+      id,
+      template_id,
+      template_nome,
+      cluster,
+      nome,
+      audience,
+      total,
+      enviados,
+      erros,
+      status,
+      created_at,
+      updated_at
+    ) values (
+      v_record_id,
+      coalesce(v_payload->>'template_id', ''),
+      coalesce(v_payload->>'template_nome', ''),
+      coalesce(nullif(v_payload->>'cluster', ''), 'todos'),
+      coalesce(v_payload->>'nome', ''),
+      coalesce(nullif(v_payload->>'audience', ''), 'compradores'),
+      coalesce(nullif(v_payload->>'total', '')::integer, 0),
+      coalesce(nullif(v_payload->>'enviados', '')::integer, 0),
+      coalesce(nullif(v_payload->>'erros', '')::integer, 0),
+      coalesce(nullif(v_payload->>'status', ''), 'em_andamento'),
+      private.json_timestamp(v_payload, 'created_at', v_source_updated_at),
+      v_source_updated_at
+    )
+    on conflict (id) do update set
+      template_id = excluded.template_id,
+      template_nome = excluded.template_nome,
+      cluster = excluded.cluster,
+      nome = excluded.nome,
+      audience = excluded.audience,
+      total = excluded.total,
+      enviados = excluded.enviados,
+      erros = excluded.erros,
+      status = excluded.status,
+      updated_at = excluded.updated_at;
+  elsif v_table = 'envios' then
+    insert into public.envios (
+      id,
+      disparo_id,
+      comprador_id,
+      participante_id,
+      nome,
+      email,
+      status,
+      enviado_em,
+      created_at,
+      updated_at
+    ) values (
+      v_record_id,
+      v_payload->>'disparo_id',
+      nullif(v_payload->>'comprador_id', ''),
+      nullif(v_payload->>'participante_id', ''),
+      coalesce(v_payload->>'nome', ''),
+      coalesce(v_payload->>'email', ''),
+      coalesce(nullif(v_payload->>'status', ''), 'na_fila'),
+      nullif(v_payload->>'enviado_em', '')::timestamptz,
+      private.json_timestamp(v_payload, 'created_at', v_source_updated_at),
+      v_source_updated_at
+    )
+    on conflict (id) do update set
+      disparo_id = excluded.disparo_id,
+      comprador_id = excluded.comprador_id,
+      participante_id = excluded.participante_id,
+      nome = excluded.nome,
+      email = excluded.email,
+      status = excluded.status,
+      enviado_em = excluded.enviado_em,
+      updated_at = excluded.updated_at;
+  elsif v_table = 'pedidos_guru' then
+    insert into public.pedidos_guru (
+      id,
+      transacao_id,
+      status,
+      email,
+      comprador_id,
+      ingressos,
+      email_status,
+      payload,
+      created_at,
+      updated_at
+    ) values (
+      v_record_id,
+      v_payload->>'transacao_id',
+      coalesce(v_payload->>'status', ''),
+      coalesce(v_payload->>'email', ''),
+      nullif(v_payload->>'comprador_id', ''),
+      coalesce(nullif(v_payload->>'ingressos', '')::integer, 0),
+      coalesce(v_payload->>'email_status', ''),
+      coalesce(v_payload->'payload', '{}'::jsonb),
+      private.json_timestamp(v_payload, 'created_at', v_source_updated_at),
+      v_source_updated_at
+    )
+    on conflict (id) do update set
+      transacao_id = excluded.transacao_id,
+      status = excluded.status,
+      email = excluded.email,
+      comprador_id = excluded.comprador_id,
+      ingressos = excluded.ingressos,
+      email_status = excluded.email_status,
+      payload = excluded.payload,
+      updated_at = excluded.updated_at;
+  elsif v_table = 'disparos_wa' then
+    insert into public.disparos_wa (
+      id,
+      nome,
+      cluster,
+      total,
+      enviados,
+      erros,
+      status,
+      flow,
+      flow_nome,
+      mapping,
+      created_at,
+      updated_at
+    ) values (
+      v_record_id,
+      coalesce(v_payload->>'nome', ''),
+      coalesce(nullif(v_payload->>'cluster', ''), 'todos'),
+      coalesce(nullif(v_payload->>'total', '')::integer, 0),
+      coalesce(nullif(v_payload->>'enviados', '')::integer, 0),
+      coalesce(nullif(v_payload->>'erros', '')::integer, 0),
+      coalesce(nullif(v_payload->>'status', ''), 'em_andamento'),
+      coalesce(v_payload->>'flow', ''),
+      coalesce(v_payload->>'flow_nome', ''),
+      case
+        when jsonb_typeof(v_payload->'mapping') = 'array' then v_payload->'mapping'
+        when jsonb_typeof(v_payload->'mapping') = 'string'
+          then coalesce(nullif(v_payload->>'mapping', '')::jsonb, '[]'::jsonb)
+        else '[]'::jsonb
+      end,
+      private.json_timestamp(v_payload, 'created_at', v_source_updated_at),
+      v_source_updated_at
+    )
+    on conflict (id) do update set
+      nome = excluded.nome,
+      cluster = excluded.cluster,
+      total = excluded.total,
+      enviados = excluded.enviados,
+      erros = excluded.erros,
+      status = excluded.status,
+      flow = excluded.flow,
+      flow_nome = excluded.flow_nome,
+      mapping = excluded.mapping,
+      updated_at = excluded.updated_at;
+  elsif v_table = 'cortesias' then
+    insert into public.cortesias (
+      id,
+      anfitriao,
+      token,
+      tipo_ingresso,
+      limite,
+      usados,
+      ativo,
+      comprador_id,
+      created_at,
+      updated_at
+    ) values (
+      v_record_id,
+      v_payload->>'anfitriao',
+      v_payload->>'token',
+      coalesce(nullif(v_payload->>'tipo_ingresso', ''), 'GOLD'),
+      coalesce(nullif(v_payload->>'limite', '')::integer, 0),
+      coalesce(nullif(v_payload->>'usados', '')::integer, 0),
+      coalesce((v_payload->>'ativo')::boolean, true),
+      nullif(v_payload->>'comprador_id', ''),
+      private.json_timestamp(v_payload, 'created_at', v_source_updated_at),
+      v_source_updated_at
+    )
+    on conflict (id) do update set
+      anfitriao = excluded.anfitriao,
+      token = excluded.token,
+      tipo_ingresso = excluded.tipo_ingresso,
+      limite = excluded.limite,
+      usados = excluded.usados,
+      ativo = excluded.ativo,
+      comprador_id = excluded.comprador_id,
       updated_at = excluded.updated_at;
   else
     insert into public.webhooks_log (

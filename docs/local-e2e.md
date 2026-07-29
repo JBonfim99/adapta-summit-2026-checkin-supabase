@@ -15,7 +15,7 @@ pnpm e2e:local:setup
 O segundo comando:
 
 - cria `.env.local` e `supabase/.env.local`;
-- mantem INAC e SendGrid em modo mock;
+- mantem INAC, SendGrid e BotConversa em modo mock;
 - cria um administrador local;
 - cria um comprador, dois ingressos e links de acesso;
 - imprime as URLs e credenciais locais.
@@ -34,6 +34,10 @@ Com os dois processos ativos, valide os acessos:
 ```bash
 pnpm e2e:local:verify
 ```
+
+A verificacao cobre comprador, helpdesk, admin, importacao das quatro
+categorias, reconciliacao, cortesia, API externa, Guru idempotente e consumo
+das filas de e-mail e WhatsApp pelo worker.
 
 ## Dados padrao
 

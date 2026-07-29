@@ -5,6 +5,14 @@ import {
   mutateCredentialledTicket,
 } from '../_shared/ticket-operations.ts'
 import { sendEmail } from '../_shared/sendgrid.ts'
+import { callInac } from '../_shared/inac.ts'
+import {
+  auditEvent,
+  createParticipantViewToken,
+  requireOperationalWrite,
+} from '../_shared/operations.ts'
+import { handleAdminDataParity } from '../_shared/admin-data-parity.ts'
+import { handleAdminDispatchParity } from '../_shared/admin-dispatch-parity.ts'
 
 const collections = new Set([
   'compradores',
@@ -13,9 +21,28 @@ const collections = new Set([
   'tokens_acesso',
   'links_participante',
   'webhooks_log',
+  'disparos',
+  'envios',
+  'pedidos_guru',
+  'disparos_wa',
+  'cortesias',
+  'cron_health',
   'system_state',
   'sync_events',
 ])
+const mutableCollections = new Set(['compradores'])
+
+async function fetchAll(
+  buildQuery: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: any }>,
+) {
+  const rows: any[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await buildQuery(from, from + 999)
+    if (error) throw error
+    rows.push(...(data ?? []))
+    if (!data || data.length < 1000) return rows
+  }
+}
 
 function withCompatibilityFields<T extends Record<string, unknown>>(row: T) {
   return {
@@ -92,7 +119,7 @@ async function addExpansions(collection: string, rows: Array<Record<string, any>
   return rows
 }
 
-async function collectionApi(req: Request, collection: string) {
+async function collectionApi(req: Request, collection: string, role: string) {
   if (!collections.has(collection)) throw new ApiError(404, 'COLLECTION_NOT_AVAILABLE')
   const input = await body<{
     action?: string
@@ -106,7 +133,14 @@ async function collectionApi(req: Request, collection: string) {
   const options = input.options ?? {}
   const db = adminDb()
 
+  if (['create', 'update', 'delete'].includes(action)) {
+    if (role === 'viewer') throw new ApiError(403, 'READ_ONLY_ADMIN')
+    if (!mutableCollections.has(collection)) {
+      throw new ApiError(403, 'COLLECTION_MUTATION_NOT_ALLOWED')
+    }
+  }
   if (action === 'create') {
+    await requireOperationalWrite(db)
     const { data, error } = await db
       .from(collection)
       .insert(input.data ?? {})
@@ -116,6 +150,7 @@ async function collectionApi(req: Request, collection: string) {
     return json(withCompatibilityFields(data))
   }
   if (action === 'update') {
+    await requireOperationalWrite(db)
     const { data, error } = await db
       .from(collection)
       .update(input.data ?? {})
@@ -126,12 +161,25 @@ async function collectionApi(req: Request, collection: string) {
     return json(withCompatibilityFields(data))
   }
   if (action === 'delete') {
+    await requireOperationalWrite(db)
     const { error } = await db.from(collection).delete().eq('id', input.id)
     if (error) throw new ApiError(400, error.message, error)
     return json({ success: true })
   }
 
-  const perPage = action === 'getFullList' ? 1000 : Math.min(Number(input.perPage ?? 30), 1000)
+  if (action === 'getFullList') {
+    const data = await fetchAll((from, to) => {
+      let query = db.from(collection).select('*')
+      query = applyFilter(query, options.filter)
+      query = applySort(query, options.sort)
+      return query.range(from, to)
+    })
+    const rows = data.map(withCompatibilityFields)
+    await addExpansions(collection, rows, options.expand)
+    return json(rows)
+  }
+
+  const perPage = Math.min(Number(input.perPage ?? 30), 1000)
   const page = Math.max(Number(input.page ?? 1), 1)
   let query = db.from(collection).select('*', { count: 'exact' })
   query = applyFilter(query, options.filter)
@@ -142,8 +190,6 @@ async function collectionApi(req: Request, collection: string) {
 
   const rows = (data ?? []).map(withCompatibilityFields)
   await addExpansions(collection, rows, options.expand)
-  if (action === 'getFullList') return json(rows)
-
   const totalItems = count ?? rows.length
   return json({
     page,
@@ -167,6 +213,7 @@ async function stats() {
     platinum,
     platinumFilled,
     activity,
+    filledRows,
   ] = await Promise.all([
     db.from('compradores').select('*', { count: 'exact', head: true }),
     db.from('ingressos').select('*', { count: 'exact', head: true }),
@@ -195,17 +242,48 @@ async function stats() {
       .from('participantes')
       .select('id,nome_completo,email,created_at,ingresso_id')
       .order('created_at', { ascending: false })
-      .limit(20),
+      .limit(5),
+    fetchAll((from, to) =>
+      db
+        .from('ingressos')
+        .select('id,preenchido_em,created_at')
+        .eq('status', 'Pré-Credenciado')
+        .range(from, to),
+    ),
   ])
 
   const allActivity = activity.data ?? []
   const hours = new Map<string, number>()
-  for (const row of allActivity) {
-    const date = new Date(row.created_at)
+  const deltas: number[] = []
+  let lastTimestamp = 0
+  for (const row of filledRows) {
+    if (!row.preenchido_em) continue
+    const date = new Date(row.preenchido_em)
+    if (Number.isNaN(date.getTime())) continue
     date.setMinutes(0, 0, 0)
     const key = date.toISOString()
     hours.set(key, (hours.get(key) ?? 0) + 1)
+    lastTimestamp = Math.max(lastTimestamp, date.getTime())
+    const created = new Date(row.created_at).getTime()
+    const filledAt = new Date(row.preenchido_em).getTime()
+    if (Number.isFinite(created) && filledAt >= created) deltas.push(filledAt - created)
   }
+  const end = new Date(lastTimestamp || Date.now())
+  end.setMinutes(0, 0, 0)
+  const hourly = Array.from({ length: 48 }, (_, index) => {
+    const hour = new Date(end.getTime() - (47 - index) * 60 * 60 * 1000)
+    return { hora: hour.toISOString(), total: hours.get(hour.toISOString()) ?? 0 }
+  })
+  deltas.sort((left, right) => left - right)
+  const average = deltas.length
+    ? Math.round(deltas.reduce((sum, value) => sum + value, 0) / deltas.length)
+    : 0
+  const middle = Math.floor(deltas.length / 2)
+  const median = deltas.length
+    ? deltas.length % 2
+      ? deltas[middle]
+      : Math.round((deltas[middle - 1] + deltas[middle]) / 2)
+    : 0
   const total = tickets.count ?? 0
   const filledCount = filled.count ?? 0
   const goldCount = gold.count ?? 0
@@ -227,12 +305,10 @@ async function stats() {
       pendentes: platinumCount - (platinumFilled.count ?? 0),
     },
     activity: allActivity.map(withCompatibilityFields),
-    por_hora: [...hours.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([hora, count]) => ({ hora, total: count })),
-    tempo_medio_ms: 0,
-    tempo_mediana_ms: 0,
-    credenciados_com_tempo: filledCount,
+    por_hora: hourly,
+    tempo_medio_ms: average,
+    tempo_mediana_ms: median,
+    credenciados_com_tempo: deltas.length,
   })
 }
 
@@ -243,92 +319,120 @@ async function participantsSearch(req: Request) {
   const search = (url.searchParams.get('q') ?? '').trim().replaceAll(',', ' ')
   const status = url.searchParams.get('status')
   const type = url.searchParams.get('tipo')
-  const db = adminDb()
-
-  let query: any = db.from('ingressos').select('*', { count: 'exact' })
-  if (status && status !== 'all') query = query.eq('status', status)
-  if (type && type !== 'all') query = query.eq('tipo_ingresso', type)
-  query = query.order('created_at', { ascending: false })
-  query = query.range((page - 1) * perPage, page * perPage - 1)
-  const { data, count, error } = await query
-  if (error) throw error
-
-  let rows = (data ?? []).map(withCompatibilityFields)
-  await addExpansions('ingressos', rows, 'participante_id,comprador_id')
-  if (search) {
-    const term = search.toLowerCase()
-    rows = rows.filter((row) => {
-      const participant = row.expand?.participante_id ?? {}
-      const buyer = row.expand?.comprador_id ?? {}
-      return [
-        row.pedido_id,
-        row.tipo_ingresso,
-        participant.nome_completo,
-        participant.email,
-        participant.cpf,
-        buyer.nome,
-        buyer.email,
-      ].some((value) =>
-        String(value ?? '')
-          .toLowerCase()
-          .includes(term),
-      )
-    })
-  }
-  const totalItems = search ? rows.length : (count ?? rows.length)
-  return json({
-    page,
-    perPage,
-    totalItems,
-    totalPages: Math.max(1, Math.ceil(totalItems / perPage)),
-    items: rows,
+  const result = await rpc<Record<string, unknown>>('admin_participants_search', {
+    p_query: search,
+    p_status: status,
+    p_type: type,
+    p_page: page,
+    p_per_page: perPage,
   })
+  return json(result)
 }
 
 async function logs(req: Request) {
   const url = new URL(req.url)
   const page = Math.max(Number(url.searchParams.get('page') ?? 1), 1)
-  const perPage = Math.min(Number(url.searchParams.get('perPage') ?? 20), 100)
+  const perPage = Math.min(Number(url.searchParams.get('perPage') ?? 20), 200)
   const filter = url.searchParams.get('filter') ?? 'todos'
   const db = adminDb()
-
-  let query: any = db.from('webhooks_log').select('*', { count: 'exact' })
-  if (filter === 'erros') query = query.or('status.lt.200,status.gte.300')
-  if (filter === 'ok') query = query.gte('status', 200).lt('status', 300)
-  if (filter === 'navegador') query = query.eq('evento', 'client_error')
-  if (filter === 'helpdesk') query = query.ilike('evento', '%helpdesk%')
-  if (filter === 'manuais') query = query.ilike('evento', '%ticket_%')
-  query = query
-    .order('created_at', { ascending: false })
-    .range((page - 1) * perPage, page * perPage - 1)
-  const { data, count, error } = await query
-  if (error) throw error
-  const rows = (data ?? []).map(withCompatibilityFields)
-  await addExpansions('webhooks_log', rows, 'ingresso_id')
-  const [errorCount, browserCount] = await Promise.all([
-    db
-      .from('webhooks_log')
-      .select('*', { count: 'exact', head: true })
-      .or('status.lt.200,status.gte.300'),
-    db
-      .from('webhooks_log')
-      .select('*', { count: 'exact', head: true })
-      .eq('evento', 'client_error'),
+  const [allLogs, allTickets] = await Promise.all([
+    fetchAll((from, to) =>
+      db.from('webhooks_log').select('*').order('created_at', { ascending: false }).range(from, to),
+    ),
+    fetchAll((from, to) =>
+      db
+        .from('ingressos')
+        .select('id,pedido_id,inac_id,status_webhook')
+        .range(from, to),
+    ),
   ])
-  const totalItems = count ?? rows.length
+  const tickets = new Map(allTickets.map((ticket) => [ticket.id, ticket]))
+  const manualEvents = new Set([
+    'excluido_manual',
+    'comprador_excluido',
+    'editado_manual',
+    'tipo_alterado',
+    'api_criacao_comprador',
+    'api_credenciamento',
+    'api_reenvio_comprador',
+    'api_reenvio_participante',
+    'helpdesk_credenciamento',
+    'helpdesk_edicao',
+    'helpdesk_tipo_alterado',
+    'helpdesk_qr',
+    'helpdesk_qr_gerado',
+    'helpdesk_erro',
+    'helpdesk_novo_credenciamento',
+    'helpdesk_reenvio_comprador',
+    'helpdesk_reenvio_participante',
+  ])
+  const latest = new Map<string, any>()
+  for (const row of allLogs) {
+    if (row.ingresso_id && tickets.has(row.ingresso_id) && !latest.has(row.ingresso_id)) {
+      latest.set(row.ingresso_id, row)
+    }
+  }
+  const representative = [
+    ...latest.values(),
+    ...allLogs.filter(
+      (row) =>
+        manualEvents.has(row.evento) &&
+        (!row.ingresso_id || !tickets.has(row.ingresso_id)),
+    ),
+  ]
+  const isError = (row: any) => {
+    const ticket = tickets.get(row.ingresso_id)
+    return Boolean(
+      ticket &&
+        !ticket.inac_id &&
+        (ticket.status_webhook === 'erro' ||
+          (!ticket.status_webhook && (row.status < 200 || row.status >= 300))),
+    )
+  }
+  const errorCount = representative.filter(isError).length
+  const browserRows = allLogs.filter(
+    (row) => row.evento === 'client_error' || row.evento === 'erro_navegador',
+  )
+  let selected =
+    filter === 'helpdesk'
+      ? allLogs.filter((row) => String(row.evento ?? '').startsWith('helpdesk_'))
+      : filter === 'navegador'
+        ? browserRows
+        : representative.filter((row) => {
+            if (filter === 'erros') return isError(row)
+            if (filter === 'ok') return !isError(row)
+            if (filter === 'manuais') return manualEvents.has(row.evento)
+            return true
+          })
+  selected = selected.sort((left, right) =>
+    String(right.created_at).localeCompare(String(left.created_at)),
+  )
+  const totalItems = selected.length
+  const rows = selected
+    .slice((page - 1) * perPage, page * perPage)
+    .map((row) => {
+      const ticket = tickets.get(row.ingresso_id)
+      return {
+        ...withCompatibilityFields(row),
+        expand: {
+          ingresso_id: ticket ? withCompatibilityFields(ticket) : undefined,
+        },
+      }
+    })
   return json({
     items: rows,
     page,
     perPage,
     totalItems,
     totalPages: Math.max(1, Math.ceil(totalItems / perPage)),
-    errorCount: errorCount.count ?? 0,
-    navegadorCount: browserCount.count ?? 0,
+    errorCount,
+    navegadorCount: browserRows.length,
   })
 }
 
 async function retryTicket(ticketId: string) {
   const db = adminDb()
+  await requireOperationalWrite(db)
   const { data: ticket } = await db
     .from('ingressos')
     .select('id,participante_id')
@@ -346,6 +450,7 @@ async function retryTicket(ticketId: string) {
 
 async function retryAll() {
   const db = adminDb()
+  await requireOperationalWrite(db)
   const { data: tickets } = await db
     .from('ingressos')
     .select('id,participante_id')
@@ -365,22 +470,18 @@ async function retryAll() {
 
 async function createTicket(req: Request) {
   const input = await body<Record<string, unknown>>(req)
-  const { data, error } = await adminDb()
-    .from('ingressos')
-    .insert({
-      comprador_id: input.comprador_id,
-      tipo_ingresso: input.tipo_ingresso,
-      pedido_id: input.pedido_id || `ADMIN-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
-      origem: 'admin',
-    })
-    .select()
-    .single()
-  if (error) throw new ApiError(400, error.message, error)
-  return json(withCompatibilityFields(data), 201)
+  await requireOperationalWrite()
+  const result = await rpc<Record<string, unknown>>('create_admin_ticket', {
+    p_buyer_id: input.comprador_id,
+    p_ticket_type: input.tipo_ingresso,
+    p_order_id: input.pedido_id || null,
+  })
+  return json(result)
 }
 
 async function createParticipant(req: Request) {
   const input = await body<Record<string, unknown>>(req)
+  await requireOperationalWrite()
   const result = await rpc<{ ticketId: string; participantId: string }>('credential_ticket', {
     p_ticket_id: input.ingresso_id,
     p_payload: input,
@@ -392,25 +493,16 @@ async function createParticipant(req: Request) {
 
 async function inviteLink(ticketId: string) {
   const db = adminDb()
+  await requireOperationalWrite(db)
   const { data: ticket } = await db
     .from('ingressos')
     .select('id,status')
     .eq('id', ticketId)
     .maybeSingle()
   if (!ticket) throw new ApiError(404, 'TICKET_NOT_FOUND')
-  const { data: existing } = await db
-    .from('links_participante')
-    .select('token,expira_em')
-    .eq('ingresso_id', ticket.id)
-    .eq('usado', false)
-    .gt('expira_em', new Date().toISOString())
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (existing) return json(existing)
   if (ticket.status !== 'Pendente') throw new ApiError(409, 'TICKET_ALREADY_CREDENTIALLED')
   const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
   await db.from('links_participante').insert({
     ingresso_id: ticket.id,
     token,
@@ -421,12 +513,28 @@ async function inviteLink(ticketId: string) {
 
 async function buyerAccessLink(buyerId: string) {
   const db = adminDb()
-  const { data: buyer } = await db.from('compradores').select('id').eq('id', buyerId).maybeSingle()
+  await requireOperationalWrite(db)
+  const { data: buyer } = await db
+    .from('compradores')
+    .select('id,nome,email')
+    .eq('id', buyerId)
+    .maybeSingle()
   if (!buyer) throw new ApiError(404, 'BUYER_NOT_FOUND')
   const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
   const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
   await db.from('tokens_acesso').insert({ comprador_id: buyerId, token, expira_em: expiresAt })
-  return json({ token, expira_em: expiresAt })
+  await auditEvent(db, {
+    evento: 'admin_link_acesso',
+    method: 'ADMIN',
+    detalhe: `Link de acesso gerado no admin para ${buyer.nome} (${buyer.email})`,
+    payload: { comprador_id: buyer.id, expira_em: expiresAt },
+  })
+  return json({
+    token,
+    email: buyer.email,
+    nome: buyer.nome,
+    expira_em: expiresAt,
+  })
 }
 
 async function resendEssential(req: Request) {
@@ -434,6 +542,7 @@ async function resendEssential(req: Request) {
   const audience = String(input.audience ?? '')
   const recipientId = String(input.recipient_id ?? '')
   const db = adminDb()
+  await requireOperationalWrite(db)
   const baseUrl = (Deno.env.get('APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '')
 
   if (audience === 'compradores') {
@@ -465,14 +574,7 @@ async function resendEssential(req: Request) {
       .eq('id', recipientId)
       .maybeSingle()
     if (!participant) throw new ApiError(404, 'PARTICIPANT_NOT_FOUND')
-    const { data: link } = await db
-      .from('links_participante')
-      .select('token')
-      .eq('ingresso_id', participant.ingresso_id)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-    if (!link) throw new ApiError(404, 'PARTICIPANT_LINK_NOT_FOUND')
+    const link = await createParticipantViewToken(db, participant.ingresso_id)
     const ticketUrl = `${baseUrl}/ingresso?token=${link.token}`
     await sendEmail(db, {
       to: participant.email,
@@ -491,6 +593,13 @@ async function resendEssential(req: Request) {
 
 async function deleteBuyer(buyerId: string) {
   const db = adminDb()
+  await requireOperationalWrite(db)
+  const { data: buyer } = await db
+    .from('compradores')
+    .select('id,nome,email')
+    .eq('id', buyerId)
+    .maybeSingle()
+  if (!buyer) throw new ApiError(404, 'BUYER_NOT_FOUND')
   const { data: tickets } = await db
     .from('ingressos')
     .select('id,status,inac_id')
@@ -505,6 +614,18 @@ async function deleteBuyer(buyerId: string) {
   if (ticketIds.length > 0) await db.from('ingressos').delete().in('id', ticketIds)
   const { error } = await db.from('compradores').delete().eq('id', buyerId)
   if (error) throw error
+  await auditEvent(db, {
+    evento: 'comprador_excluido',
+    method: 'MANUAL',
+    detalhe: `Comprador ${buyer.nome} (${buyer.email}) excluido manualmente pelo admin`,
+    payload: {
+      acao: 'exclusao_comprador',
+      nome: buyer.nome,
+      email: buyer.email,
+      ingressos_removidos: ticketIds.length,
+    },
+    response: 'Sem INAC.',
+  })
   return json({ success: true, removed_ingressos: ticketIds.length })
 }
 
@@ -705,6 +826,66 @@ async function insights() {
   })
 }
 
+async function syncInacUpgrades() {
+  const db = adminDb()
+  await requireOperationalWrite(db)
+  const { data: tickets, error } = await db
+    .from('ingressos')
+    .select('id,pedido_id,tipo_ingresso,inac_id,origem,participante_id')
+    .eq('tipo_ingresso', 'PLATINUM')
+    .ilike('origem', '%pending-inac-edit%')
+    .limit(10)
+  if (error) throw error
+
+  let ok = 0
+  let failed = 0
+  const skipped: Array<{ id: string; motivo: string }> = []
+  for (const ticket of tickets ?? []) {
+    if (!ticket.inac_id || !ticket.participante_id) {
+      skipped.push({
+        id: ticket.id,
+        motivo: !ticket.inac_id ? 'sem inac_id' : 'sem participante',
+      })
+      continue
+    }
+    const { data: participant } = await db
+      .from('participantes')
+      .select('id,nome_completo,email,cpf,telefone,nome_empresa,profissao')
+      .eq('id', ticket.participante_id)
+      .maybeSingle()
+    if (!participant) {
+      skipped.push({ id: ticket.id, motivo: 'participante nao encontrado' })
+      continue
+    }
+    const result = await callInac(db, 'edit', ticket, participant, { category_id: 6125 })
+    if (result.success) {
+      ok += 1
+      const origem = String(ticket.origem ?? '')
+        .split(/\s+/)
+        .filter((tag) => tag && tag !== 'pending-inac-edit')
+        .join(' ')
+      await db
+        .from('ingressos')
+        .update({ origem, status_webhook: 'enviado' })
+        .eq('id', ticket.id)
+    } else {
+      failed += 1
+      await db.from('ingressos').update({ status_webhook: 'erro' }).eq('id', ticket.id)
+    }
+    await auditEvent(db, {
+      ingressoId: ticket.id,
+      evento: result.success ? 'webhook_editado' : 'webhook_edicao_erro',
+      detalhe: result.success
+        ? `Categoria atualizada na INAC para Platinum (attendee ${ticket.inac_id})`
+        : result.error || 'INAC recusou a edicao',
+      status: result.status,
+      payload: result.payload,
+      response: JSON.stringify(result.response ?? '').slice(0, 2000),
+    })
+  }
+  return json({ tried: tickets?.length ?? 0, ok, failed, skipped })
+}
+
 async function systemHealth() {
   const db = adminDb()
   const [{ data: health, error }, buyers, tickets, participants, tokens, links] = await Promise.all(
@@ -767,7 +948,10 @@ Deno.serve((req) =>
     const path = routePath(req, 'admin-api')
 
     if (req.method === 'POST' && path.startsWith('/backend/v1/admin/collections/')) {
-      return collectionApi(req, path.split('/').at(-1) ?? '')
+      return collectionApi(req, path.split('/').at(-1) ?? '', auth.profile.role)
+    }
+    if (auth.profile.role === 'viewer' && req.method !== 'GET') {
+      throw new ApiError(403, 'READ_ONLY_ADMIN')
     }
     if (req.method === 'GET' && path === '/backend/v1/admin/stats') return stats()
     if (req.method === 'GET' && path === '/backend/v1/admin/participants/search') {
@@ -795,13 +979,14 @@ Deno.serve((req) =>
       return retryAll()
     }
     if (req.method === 'POST' && path === '/backend/v1/admin/sync-inac-upgrades') {
-      return json({ tried: 0, ok: 0, failed: 0, skipped: [], out_of_scope: true })
+      return syncInacUpgrades()
     }
 
     const retry = path.match(/^\/backend\/v1\/admin\/retry-webhook\/([^/]+)$/)
     if (req.method === 'POST' && retry) return retryTicket(decodeURIComponent(retry[1]))
     const edit = path.match(/^\/backend\/v1\/admin\/tickets\/([^/]+)\/edit$/)
     if (req.method === 'POST' && edit) {
+      await requireOperationalWrite()
       return json(
         await mutateCredentialledTicket(adminDb(), {
           ticketId: decodeURIComponent(edit[1]),
@@ -813,6 +998,7 @@ Deno.serve((req) =>
     }
     const changeType = path.match(/^\/backend\/v1\/admin\/tickets\/([^/]+)\/change-type$/)
     if (req.method === 'POST' && changeType) {
+      await requireOperationalWrite()
       return json(
         await mutateCredentialledTicket(adminDb(), {
           ticketId: decodeURIComponent(changeType[1]),
@@ -824,6 +1010,7 @@ Deno.serve((req) =>
     }
     const removeTicket = path.match(/^\/backend\/v1\/admin\/tickets\/([^/]+)\/delete$/)
     if (req.method === 'POST' && removeTicket) {
+      await requireOperationalWrite()
       const ticketId = decodeURIComponent(removeTicket[1])
       const { data: ticket } = await adminDb()
         .from('ingressos')
@@ -855,6 +1042,11 @@ Deno.serve((req) =>
     if (req.method === 'POST' && removeBuyer) {
       return deleteBuyer(decodeURIComponent(removeBuyer[1]))
     }
+
+    const dataParityResponse = await handleAdminDataParity(req, path)
+    if (dataParityResponse) return dataParityResponse
+    const dispatchParityResponse = await handleAdminDispatchParity(req, path)
+    if (dispatchParityResponse) return dispatchParityResponse
 
     throw new ApiError(404, 'ROUTE_NOT_FOUND')
   }),

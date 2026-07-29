@@ -1,5 +1,9 @@
 import { adminDb, buyerToken, rpc } from '../_shared/db.ts'
 import { ApiError, handler, json, routePath } from '../_shared/http.ts'
+import {
+  createParticipantViewToken,
+  requireOperationalWrite,
+} from '../_shared/operations.ts'
 
 async function tickets(req: Request) {
   const token = buyerToken(req)
@@ -31,6 +35,7 @@ async function invite(req: Request, ticketId: string) {
   const url = new URL(req.url)
   const force = url.searchParams.get('force') === 'true'
   const db = adminDb()
+  await requireOperationalWrite(db)
 
   if (force) {
     const buyer = await rpc<{ id: string }>('consume_buyer_token', { p_token: token })
@@ -52,6 +57,7 @@ async function invite(req: Request, ticketId: string) {
   const result = await rpc<Record<string, unknown>>('create_participant_link', {
     p_buyer_token: token,
     p_ticket_id: ticketId,
+    p_expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
   })
   return json(result)
 }
@@ -69,15 +75,8 @@ async function viewToken(req: Request, ticketId: string) {
   if (!ticket) throw new ApiError(404, 'TICKET_NOT_FOUND')
   if (!ticket.participante_id) throw new ApiError(409, 'TICKET_NOT_CREDENTIALLED')
 
-  const { data: link } = await db
-    .from('links_participante')
-    .select('token')
-    .eq('ingresso_id', ticketId)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (!link) throw new ApiError(404, 'PARTICIPANT_LINK_NOT_FOUND')
-  return json({ token: link.token })
+  await requireOperationalWrite(db)
+  return json(await createParticipantViewToken(db, ticketId))
 }
 
 Deno.serve((req) =>

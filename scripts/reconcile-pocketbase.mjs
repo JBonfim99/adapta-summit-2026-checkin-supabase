@@ -70,6 +70,11 @@ async function main() {
     'tokens_acesso',
     'links_participante',
     'webhooks_log',
+    'disparos',
+    'envios',
+    'pedidos_guru',
+    'disparos_wa',
+    'cortesias',
   ]
   let failed = false
   for (const name of names) {

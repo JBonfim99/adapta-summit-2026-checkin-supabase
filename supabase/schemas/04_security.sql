@@ -4,6 +4,12 @@ alter table public.participantes enable row level security;
 alter table public.tokens_acesso enable row level security;
 alter table public.links_participante enable row level security;
 alter table public.webhooks_log enable row level security;
+alter table public.disparos enable row level security;
+alter table public.envios enable row level security;
+alter table public.pedidos_guru enable row level security;
+alter table public.disparos_wa enable row level security;
+alter table public.cortesias enable row level security;
+alter table public.cron_health enable row level security;
 alter table public.admin_profiles enable row level security;
 alter table public.system_state enable row level security;
 alter table public.integration_attempts enable row level security;
@@ -84,6 +90,48 @@ with check (true);
 
 create policy webhooks_log_service_role
 on public.webhooks_log
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy disparos_service_role
+on public.disparos
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy envios_service_role
+on public.envios
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy pedidos_guru_service_role
+on public.pedidos_guru
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy disparos_wa_service_role
+on public.disparos_wa
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy cortesias_service_role
+on public.cortesias
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy cron_health_service_role
+on public.cron_health
 for all
 to service_role
 using (true)

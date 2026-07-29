@@ -397,6 +397,9 @@ verify_jwt = false
 [functions.sync-ingest]
 verify_jwt = false
 
+[functions.dispatch-worker]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

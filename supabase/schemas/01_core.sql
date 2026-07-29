@@ -192,6 +192,131 @@ create index webhooks_log_ingresso_id_idx on public.webhooks_log (ingresso_id);
 create index webhooks_log_created_at_idx on public.webhooks_log (created_at desc, id desc);
 create index webhooks_log_evento_idx on public.webhooks_log (evento, created_at desc);
 
+create table public.disparos (
+  id text primary key default private.new_text_id(),
+  template_id text not null,
+  template_nome text not null default '',
+  cluster text not null
+    check (cluster in (
+      'todos',
+      'pendentes',
+      'participantes_todos',
+      'participantes_recentes',
+      'individual'
+    )),
+  nome text not null default '',
+  audience text not null default 'compradores'
+    check (audience in ('compradores', 'participantes')),
+  total integer not null default 0 check (total >= 0),
+  enviados integer not null default 0 check (enviados >= 0),
+  erros integer not null default 0 check (erros >= 0),
+  status text not null default 'em_andamento'
+    check (status in ('em_andamento', 'concluido', 'erro')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index disparos_created_at_idx on public.disparos (created_at desc, id desc);
+create index disparos_status_idx
+  on public.disparos (created_at, id)
+  where status = 'em_andamento';
+
+create table public.envios (
+  id text primary key default private.new_text_id(),
+  disparo_id text not null
+    references public.disparos (id) on update cascade on delete cascade,
+  comprador_id text
+    references public.compradores (id) on update cascade on delete set null,
+  participante_id text
+    references public.participantes (id) on update cascade on delete set null,
+  nome text not null default '',
+  email text not null,
+  status text not null default 'na_fila'
+    check (status in ('na_fila', 'enviando', 'enviado', 'erro')),
+  tentativas integer not null default 0 check (tentativas >= 0),
+  erro text,
+  claim text,
+  proxima_tentativa_em timestamptz,
+  enviado_em timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index envios_disparo_idx on public.envios (disparo_id, created_at, id);
+create index envios_fila_idx
+  on public.envios (coalesce(proxima_tentativa_em, created_at), id)
+  where status in ('na_fila', 'erro');
+
+create table public.pedidos_guru (
+  id text primary key default private.new_text_id(),
+  transacao_id text not null unique,
+  status text not null,
+  email text not null default '',
+  comprador_id text
+    references public.compradores (id) on update cascade on delete set null,
+  ingressos integer not null default 0 check (ingressos >= 0),
+  email_status text not null default '',
+  payload jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index pedidos_guru_email_idx on public.pedidos_guru (lower(email));
+create index pedidos_guru_created_at_idx on public.pedidos_guru (created_at desc, id desc);
+
+create table public.disparos_wa (
+  id text primary key default private.new_text_id(),
+  nome text not null default '',
+  cluster text not null check (cluster in ('todos', 'pendentes', 'individual')),
+  total integer not null default 0 check (total >= 0),
+  enviados integer not null default 0 check (enviados >= 0),
+  erros integer not null default 0 check (erros >= 0),
+  status text not null default 'em_andamento'
+    check (status in ('em_andamento', 'concluido', 'erro')),
+  flow text not null default '',
+  flow_nome text not null default '',
+  mapping jsonb not null default '[]'::jsonb
+    check (jsonb_typeof(mapping) = 'array'),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index disparos_wa_created_at_idx on public.disparos_wa (created_at desc, id desc);
+create index disparos_wa_status_idx
+  on public.disparos_wa (created_at, id)
+  where status = 'em_andamento';
+
+create table public.cortesias (
+  id text primary key default private.new_text_id(),
+  anfitriao text not null check (length(btrim(anfitriao)) >= 2),
+  token text not null unique,
+  tipo_ingresso text not null default 'GOLD'
+    check (tipo_ingresso in ('GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON')),
+  limite integer not null default 0 check (limite >= 0),
+  usados integer not null default 0 check (usados >= 0 and (limite = 0 or usados <= limite)),
+  ativo boolean not null default true,
+  comprador_id text
+    references public.compradores (id) on update cascade on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index cortesias_created_at_idx on public.cortesias (created_at desc, id desc);
+create index cortesias_ativas_idx on public.cortesias (token) where ativo = true;
+
+create table public.cron_health (
+  id text primary key default 'dispatch',
+  last_run timestamptz not null default now(),
+  email_last_run timestamptz,
+  whatsapp_last_run timestamptz,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+insert into public.cron_health (id) values ('dispatch')
+on conflict (id) do nothing;
+
 create table public.admin_profiles (
   user_id uuid primary key references auth.users (id) on delete cascade,
   display_name text not null,
@@ -224,7 +349,7 @@ create table public.integration_attempts (
     references public.ingressos (id) on update cascade on delete set null,
   participant_id text
     references public.participantes (id) on update cascade on delete set null,
-  provider text not null check (provider in ('inac', 'sendgrid')),
+    provider text not null check (provider in ('inac', 'sendgrid', 'botconversa')),
   operation text not null,
   idempotency_key text not null,
   attempt integer not null default 1 check (attempt > 0),
@@ -277,7 +402,12 @@ create table public.sync_events (
       'participantes',
       'tokens_acesso',
       'links_participante',
-      'webhooks_log'
+      'webhooks_log',
+      'disparos',
+      'envios',
+      'pedidos_guru',
+      'disparos_wa',
+      'cortesias'
     )
   ),
   record_id text not null,
@@ -330,6 +460,30 @@ for each row execute function private.set_updated_at();
 
 create trigger webhooks_log_set_updated_at
 before update on public.webhooks_log
+for each row execute function private.set_updated_at();
+
+create trigger disparos_set_updated_at
+before update on public.disparos
+for each row execute function private.set_updated_at();
+
+create trigger envios_set_updated_at
+before update on public.envios
+for each row execute function private.set_updated_at();
+
+create trigger pedidos_guru_set_updated_at
+before update on public.pedidos_guru
+for each row execute function private.set_updated_at();
+
+create trigger disparos_wa_set_updated_at
+before update on public.disparos_wa
+for each row execute function private.set_updated_at();
+
+create trigger cortesias_set_updated_at
+before update on public.cortesias
+for each row execute function private.set_updated_at();
+
+create trigger cron_health_set_updated_at
+before update on public.cron_health
 for each row execute function private.set_updated_at();
 
 create trigger admin_profiles_set_updated_at
