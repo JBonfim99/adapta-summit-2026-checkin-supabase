@@ -243,6 +243,8 @@ create table public.envios (
 );
 
 create index envios_disparo_idx on public.envios (disparo_id, created_at, id);
+create index envios_comprador_id_idx on public.envios (comprador_id);
+create index envios_participante_id_idx on public.envios (participante_id);
 create index envios_fila_idx
   on public.envios (coalesce(proxima_tentativa_em, created_at), id)
   where status in ('na_fila', 'erro');
@@ -263,6 +265,7 @@ create table public.pedidos_guru (
 
 create index pedidos_guru_email_idx on public.pedidos_guru (lower(email));
 create index pedidos_guru_created_at_idx on public.pedidos_guru (created_at desc, id desc);
+create index pedidos_guru_comprador_id_idx on public.pedidos_guru (comprador_id);
 
 create table public.disparos_wa (
   id text primary key default private.new_text_id(),
@@ -303,6 +306,7 @@ create table public.cortesias (
 
 create index cortesias_created_at_idx on public.cortesias (created_at desc, id desc);
 create index cortesias_ativas_idx on public.cortesias (token) where ativo = true;
+create index cortesias_comprador_id_idx on public.cortesias (comprador_id);
 
 create table public.cron_health (
   id text primary key default 'dispatch',
@@ -343,6 +347,8 @@ create table public.system_state (
 insert into public.system_state (singleton) values (true)
 on conflict (singleton) do nothing;
 
+create index system_state_activated_by_idx on public.system_state (activated_by);
+
 create table public.integration_attempts (
   id bigint generated always as identity primary key,
   ingresso_id text
@@ -366,6 +372,8 @@ create table public.integration_attempts (
 
 create index integration_attempts_ingresso_idx
   on public.integration_attempts (ingresso_id, created_at desc);
+create index integration_attempts_participant_idx
+  on public.integration_attempts (participant_id);
 create index integration_attempts_failed_idx
   on public.integration_attempts (provider, created_at, id)
   where success = false;
@@ -437,6 +445,9 @@ create table public.sync_tombstones (
   created_at timestamptz not null default now(),
   primary key (source_table, record_id)
 );
+
+create index sync_tombstones_event_id_idx
+  on public.sync_tombstones (event_id);
 
 create trigger compradores_set_updated_at
 before update on public.compradores
