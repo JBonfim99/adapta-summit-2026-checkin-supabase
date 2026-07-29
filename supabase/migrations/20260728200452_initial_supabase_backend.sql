@@ -955,7 +955,7 @@ begin
 
   if link.id is null then
     insert into public.links_participante (ingresso_id, token, expira_em)
-    values (ticket.id, encode(gen_random_bytes(32), 'hex'), p_expires_at)
+    values (ticket.id, encode(extensions.gen_random_bytes(32), 'hex'), p_expires_at)
     returning * into link;
   end if;
 

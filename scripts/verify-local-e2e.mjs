@@ -53,6 +53,20 @@ const tickets = await request('Ingressos do comprador', 'buyer-api', '/backend/v
   headers: { 'X-Buyer-Token': 'e2e-local-buyer-token-2026' },
 })
 
+const generatedInvite = await request(
+  'Geracao de link pelo botao Preencher',
+  'buyer-api',
+  '/backend/v1/buyer/tickets/e2e-ticket-platinum/invite?force=true',
+  {
+    method: 'POST',
+    headers: { 'X-Buyer-Token': 'e2e-local-buyer-token-2026' },
+    body: '{}',
+  },
+)
+if (typeof generatedInvite.token !== 'string' || generatedInvite.token.length !== 64) {
+  throw new Error('Geracao de link pelo botao Preencher: token invalido')
+}
+
 const participant = await request(
   'Link do participante',
   'public-api',
@@ -96,6 +110,7 @@ console.log(
     {
       buyer: buyer.comprador?.email,
       tickets: tickets.totalItems,
+      generatedInvite: 'ok',
       participantTicket: participant.id,
       helpdesk: 'ok',
       admin: 'ok',
