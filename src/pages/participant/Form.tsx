@@ -15,6 +15,7 @@ import pb from '@/lib/backend/client'
 import { getErrorMessage } from '@/lib/backend/errors'
 import { ROLES, REVENUE, EMPLOYEES, NICHES } from '@/lib/form-options'
 import { isValidCPF } from '@/lib/cpf'
+import { participantBuyerPrefill } from '@/lib/participant-prefill'
 
 const formSchema = z
   .object({
@@ -87,26 +88,6 @@ export default function ParticipantForm() {
   const [submitting, setSubmitting] = useState(false)
   const [emailChecking, setEmailChecking] = useState(false)
 
-  useEffect(() => {
-    if (!token) {
-      navigate('/participante/expirado')
-      return
-    }
-    pb.send(`/backend/v1/participant/link/${token}`)
-      .then((data) => {
-        // Já preenchido: leva à página de detalhes em vez do formulário.
-        if (data.usado) {
-          navigate(`/ingresso?token=${token}`, { replace: true })
-          return
-        }
-        setTicketInfo(data)
-        setLoading(false)
-      })
-      .catch(() => {
-        navigate('/participante/expirado')
-      })
-  }, [token, navigate])
-
   const methods = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -128,6 +109,33 @@ export default function ParticipantForm() {
     },
     mode: 'onTouched',
   })
+
+  useEffect(() => {
+    if (!token) {
+      navigate('/participante/expirado')
+      return
+    }
+    pb.send(`/backend/v1/participant/link/${token}`)
+      .then((data) => {
+        // Já preenchido: leva à página de detalhes em vez do formulário.
+        if (data.usado) {
+          navigate(`/ingresso?token=${token}`, { replace: true })
+          return
+        }
+        setTicketInfo(data)
+        methods.reset({
+          ...methods.getValues(),
+          ...participantBuyerPrefill(data.comprador, {
+            nome: searchParams.get('nome'),
+            email: searchParams.get('email'),
+          }),
+        })
+        setLoading(false)
+      })
+      .catch(() => {
+        navigate('/participante/expirado')
+      })
+  }, [methods, navigate, searchParams, token])
 
   const temEmpresa = methods.watch('tem_empresa')
 

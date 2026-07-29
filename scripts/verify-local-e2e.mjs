@@ -39,6 +39,21 @@ async function request(name, functionName, path, init = {}) {
   return text ? JSON.parse(text) : null
 }
 
+async function expectError(name, functionName, path, expectedStatus, expectedMessage, init = {}) {
+  const response = await fetch(`${functionsUrl}/${functionName}${path}`, {
+    ...init,
+    headers: {
+      apikey: publishableKey,
+      'Content-Type': 'application/json',
+      ...init.headers,
+    },
+  })
+  const data = await response.json()
+  if (response.status !== expectedStatus || !String(data.message ?? '').includes(expectedMessage)) {
+    throw new Error(`${name}: HTTP ${response.status} ${JSON.stringify(data)}`)
+  }
+}
+
 function cpfFor(seed) {
   const base = String(seed).replace(/\D/g, '').padStart(9, '1').slice(-9).split('').map(Number)
   const digit = (numbers, weight) => {
@@ -58,6 +73,18 @@ const buyer = await request(
   {
     method: 'POST',
     body: JSON.stringify({ token: 'e2e-local-buyer-token-2026' }),
+  },
+)
+
+await expectError(
+  'E-mail desconhecido no login',
+  'public-api',
+  '/backend/v1/auth/magic-link',
+  400,
+  'Não encontramos este e-mail',
+  {
+    method: 'POST',
+    body: JSON.stringify({ email: 'nao-cadastrado@adapta.test' }),
   },
 )
 
@@ -88,6 +115,14 @@ const participant = await request(
   'public-api',
   '/backend/v1/participant/link/e2e-local-participant-token-2026',
 )
+if (
+  participant.comprador?.nome !== 'Comprador Local' ||
+  participant.comprador?.email !== 'comprador.local@adapta.test' ||
+  participant.comprador?.documento !== '12345678900' ||
+  participant.comprador?.telefone !== '11999999999'
+) {
+  throw new Error('Link do participante: dados do comprador incompletos')
+}
 
 await request('Login do helpdesk', 'helpdesk-api', '/backend/v1/helpdesk/login', {
   method: 'POST',

@@ -1,5 +1,4 @@
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useParams } from 'react-router-dom'
-import { useEffect } from 'react'
 import { Toaster } from '@/components/ui/toaster'
 import { Toaster as Sonner } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -44,55 +43,11 @@ function CredenciamentoRedirect() {
   return <Navigate to={`/participante${location.search}`} replace />
 }
 
-function PrefillHack() {
-  const location = useLocation()
-  useEffect(() => {
-    if (location.pathname === '/participante') {
-      const params = new URLSearchParams(location.search)
-      const nome = params.get('nome')
-      const email = params.get('email')
-
-      const attemptFill = () => {
-        if (nome) {
-          const el = document.querySelector(
-            'input[name="nome_completo"], input[name="name"]',
-          ) as HTMLInputElement
-          if (el && !el.value) {
-            const setter = Object.getOwnPropertyDescriptor(
-              window.HTMLInputElement.prototype,
-              'value',
-            )?.set
-            setter?.call(el, nome)
-            el.dispatchEvent(new Event('input', { bubbles: true }))
-          }
-        }
-        if (email) {
-          const el = document.querySelector('input[name="email"]') as HTMLInputElement
-          if (el && !el.value) {
-            const setter = Object.getOwnPropertyDescriptor(
-              window.HTMLInputElement.prototype,
-              'value',
-            )?.set
-            setter?.call(el, email)
-            el.dispatchEvent(new Event('input', { bubbles: true }))
-          }
-        }
-      }
-
-      setTimeout(attemptFill, 100)
-      setTimeout(attemptFill, 500)
-      setTimeout(attemptFill, 1000)
-    }
-  }, [location])
-  return null
-}
-
 const App = () => (
   <AppProvider>
     <AuthProvider>
       <BrowserRouter>
         <TooltipProvider>
-          <PrefillHack />
           <Toaster />
           <Sonner />
           <Routes>

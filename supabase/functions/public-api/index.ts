@@ -36,8 +36,14 @@ async function magicLink(req: Request) {
       .select('id,ingresso_id,nome_completo,email')
       .eq('email_normalized', email)
       .maybeSingle()
-    // Do not disclose which addresses are registered.
-    if (!participant) return json({ success: true })
+    if (!participant) {
+      throw new ApiError(
+        400,
+        'Não encontramos este e-mail nem na base de compradores nem na base de participantes. ' +
+          'Se você recebeu o ingresso de outra pessoa, peça para quem comprou reenviar o seu link. ' +
+          'Em caso de dúvida, fale com duvidas@adapta.org.',
+      )
+    }
 
     const { token: ticketToken } = await createParticipantViewToken(
       db,
@@ -123,7 +129,7 @@ async function participantLink(token: string) {
     .single()
   const { data: buyer } = await db
     .from('compradores')
-    .select('id,nome,email')
+    .select('id,nome,email,documento,telefone')
     .eq('id', ticket.comprador_id)
     .single()
 
