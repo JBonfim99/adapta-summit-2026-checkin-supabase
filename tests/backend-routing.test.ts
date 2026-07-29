@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { functionNameForPath } from '../src/lib/backend/routing'
+import { routeContracts } from '../scripts/route-contracts.mjs'
 
 describe('backend route ownership', () => {
   it.each([
@@ -10,5 +11,16 @@ describe('backend route ownership', () => {
     ['/backend/v1/admin/stats', 'admin-api'],
   ])('maps %s to %s', (path, functionName) => {
     expect(functionNameForPath(path)).toBe(functionName)
+  })
+
+  it('maps every route in the 65-contract matrix to its Edge Function', () => {
+    expect(routeContracts).toHaveLength(65)
+    for (const contract of routeContracts) {
+      const concretePath = contract.path.replace(/\{[^}]+\}/g, 'contract-fixture')
+      expect(functionNameForPath(concretePath)).toBe(contract.owner)
+      expect(contract.auth).toBeTruthy()
+      expect(contract.effect).toBeTruthy()
+      expect(contract.assertion).toBeTruthy()
+    }
   })
 })

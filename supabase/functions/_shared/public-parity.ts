@@ -1,6 +1,6 @@
 import { adminDb, rpc } from './db.ts'
 import { ApiError, body, json } from './http.ts'
-import { sendEmail } from './sendgrid.ts'
+import { sendEmail, sendGridTemplateId, sendGridTemplateNames } from './sendgrid.ts'
 import {
   auditEvent,
   cpfDigits,
@@ -11,6 +11,7 @@ import {
   validPhone,
 } from './operations.ts'
 import { dispatchCredentialToInac } from './ticket-operations.ts'
+import { guruBuyer, guruItems, guruTransactionId } from './guru-contract.ts'
 
 const appUrl = () => (Deno.env.get('APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '')
 
@@ -45,7 +46,7 @@ async function sendBuyerAccess(
   const accessUrl = `${appUrl()}/acesso?token=${encodeURIComponent(token)}`
   await sendEmail(db, {
     to: buyer.email,
-    templateId: templateId || Deno.env.get('SENDGRID_BUYER_TEMPLATE_ID') || undefined,
+    templateId: templateId || sendGridTemplateId(sendGridTemplateNames.buyerInitial) || undefined,
     subject: 'Seu acesso ao Adapta Summit 2026',
     html: `<p><a href="${accessUrl}">Acesse seus ingressos</a>.</p>`,
     dynamicData: {
@@ -69,7 +70,7 @@ async function sendParticipantTicket(
   const ticketUrl = `${appUrl()}/ingresso?token=${encodeURIComponent(token)}`
   await sendEmail(db, {
     to: participant.email,
-    templateId: Deno.env.get('SENDGRID_PARTICIPANT_TEMPLATE_ID') || undefined,
+    templateId: sendGridTemplateId(sendGridTemplateNames.participant) || undefined,
     subject: 'Seu ingresso do Adapta Summit 2026',
     html: `<p><a href="${ticketUrl}">Visualize seu ingresso</a>.</p>`,
     dynamicData: {
@@ -142,56 +143,31 @@ async function registerCourtesy(req: Request) {
   })
 }
 
-function guruItems(payload: Record<string, any>) {
-  const source = Array.isArray(payload.items)
-    ? payload.items
-    : payload.product
-      ? [payload.product]
-      : []
-  const items: Array<{ type: 'GOLD' | 'PLATINUM'; quantity: number }> = []
-  for (const item of source) {
-    const name = `${item?.name ?? ''} ${item?.offer?.name ?? ''}`.toLowerCase()
-    const type = name.includes('platinum')
-      ? 'PLATINUM'
-      : name.includes('gold')
-        ? 'GOLD'
-        : null
-    if (!type) continue
-    items.push({
-      type,
-      quantity: Math.min(Math.max(Number(item?.quantity ?? 1) || 1, 1), 100),
-    })
-  }
-  return items
-}
-
 async function guruWebhook(req: Request) {
   await requireOperationalWrite()
   const input = await body<Record<string, any>>(req)
   const status = String(input.status ?? '').toLowerCase()
-  const transactionId = String(input.payment?.marketplace_id ?? input.id ?? '').trim()
+  const transactionId = guruTransactionId(input)
   if (!transactionId) return json({ ignored: true, reason: 'sem transacao_id' })
   if (status !== 'approved') {
     return json({ ignored: true, status, transacao_id: transactionId })
   }
-  const contact = input.contact ?? input.customer ?? {}
+  const contactInput = input.contact ? input : { ...input, contact: input.customer ?? {} }
+  const contact = guruBuyer(contactInput)
   const email = normalizeEmail(contact.email)
   if (!email) return json({ ignored: true, reason: 'sem email', transacao_id: transactionId })
-  const buyer = {
-    nome: String(contact.name ?? contact.nome ?? '').trim(),
-    documento: cpfDigits(contact.doc ?? contact.document ?? contact.cpf),
-    uf: String(contact.address?.state ?? contact.uf ?? ''),
-    cidade: String(contact.address?.city ?? contact.cidade ?? ''),
-    telefone: String(contact.phone ?? contact.telefone ?? ''),
-  }
+  const buyer = contact
   let result
   try {
+    const templateId = sendGridTemplateId(sendGridTemplateNames.buyerInitial)
     result = await rpc<Record<string, any>>('process_guru_order', {
       p_transaction_id: transactionId,
       p_email: email,
       p_buyer: buyer,
       p_items: guruItems(input),
       p_payload: input,
+      p_template_id: templateId,
+      p_template_name: sendGridTemplateNames.buyerInitial,
     })
   } catch (error) {
     const { data: existing } = await adminDb()
@@ -203,59 +179,6 @@ async function guruWebhook(req: Request) {
     throw error
   }
   if (result.duplicate) return json(result)
-  if (Number(result.ingressos ?? 0) > 0) {
-    try {
-      const db = adminDb()
-      const templateId = Deno.env.get('SENDGRID_BUYER_TEMPLATE_ID') ?? ''
-      if (!templateId) throw new Error('SENDGRID_BUYER_TEMPLATE_ID_NOT_CONFIGURED')
-      const { data: dispatch, error: dispatchError } = await db
-        .from('disparos')
-        .insert({
-          template_id: templateId,
-          template_nome: 'Acesso do comprador - Guru',
-          cluster: 'individual',
-          nome: `Guru ${transactionId}`,
-          audience: 'compradores',
-          total: 1,
-        })
-        .select('id')
-        .single()
-      if (dispatchError) throw dispatchError
-      const { error: queueError } = await db.from('envios').insert({
-        disparo_id: dispatch.id,
-        comprador_id: result.comprador_id,
-        nome: result.nome,
-        email: result.email,
-        status: 'na_fila',
-      })
-      if (queueError) throw queueError
-      await Promise.all([
-        db
-          .from('compradores')
-          .update({
-            acesso_status: 'na_fila',
-            acesso_disparo_id: dispatch.id,
-            acesso_template_id: templateId,
-            acesso_tentativas: 0,
-            acesso_erro: null,
-          })
-          .eq('id', result.comprador_id),
-        db
-          .from('pedidos_guru')
-          .update({ email_status: 'na_fila' })
-          .eq('transacao_id', transactionId),
-      ])
-      result.email_enfileirado = true
-    } catch (error) {
-      await adminDb()
-        .from('pedidos_guru')
-        .update({
-          email_status: `erro:${error instanceof Error ? error.message : 'SEND_FAILED'}`.slice(0, 200),
-        })
-        .eq('transacao_id', transactionId)
-      result.email_enfileirado = false
-    }
-  }
   return json({ ok: true, ...result })
 }
 
@@ -484,7 +407,9 @@ async function externalResendBuyer(req: Request) {
     await sendBuyerAccess(
       buyer,
       'api_resend_buyer',
-      Deno.env.get('SENDGRID_BUYER_REMINDER_TEMPLATE_ID') || undefined,
+      Deno.env.get('SENDGRID_BUYER_REMINDER_TEMPLATE_ID') ||
+        sendGridTemplateId(sendGridTemplateNames.buyerFollowup) ||
+        undefined,
     )
   } catch (error) {
     sent = false

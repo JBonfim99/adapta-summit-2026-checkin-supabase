@@ -7,6 +7,7 @@ import {
   requireOperationalWrite,
   ticketTypes,
 } from './operations.ts'
+import { sendGridTemplateId, sendGridTemplateNames } from './sendgrid.ts'
 
 type AnyRow = Record<string, any>
 
@@ -26,7 +27,9 @@ async function allRows(table: string, columns = '*') {
 
 async function queueImportEmail(buyerIds: string[], existingDispatchId: string) {
   const db = adminDb()
-  const templateId = Deno.env.get('SENDGRID_IMPORT_TEMPLATE_ID') ?? ''
+  const templateId =
+    Deno.env.get('SENDGRID_IMPORT_TEMPLATE_ID') ||
+    sendGridTemplateId(sendGridTemplateNames.buyerInitial)
   if (!templateId) {
     return {
       skipped: true,
@@ -42,7 +45,8 @@ async function queueImportEmail(buyerIds: string[], existingDispatchId: string) 
       .from('disparos')
       .insert({
         template_id: templateId,
-        template_nome: Deno.env.get('SENDGRID_IMPORT_TEMPLATE_NAME') ?? 'Importacao de compradores',
+        template_nome:
+          Deno.env.get('SENDGRID_IMPORT_TEMPLATE_NAME') || sendGridTemplateNames.buyerInitial,
         cluster: 'individual',
         nome: 'Importacao de compradores',
         audience: 'compradores',
@@ -211,7 +215,9 @@ async function createReconciliationBuyers(req: Request) {
   const db = adminDb()
   const existingBuyers = await allRows('compradores', 'id,email_normalized,documento')
   const buyerEmails = new Set(existingBuyers.map((buyer) => buyer.email_normalized))
-  const buyerCpfs = new Set(existingBuyers.map((buyer) => cpfDigits(buyer.documento)).filter(Boolean))
+  const buyerCpfs = new Set(
+    existingBuyers.map((buyer) => cpfDigits(buyer.documento)).filter(Boolean),
+  )
 
   for (const row of rows) {
     const email = normalizeEmail(row.email)
@@ -373,20 +379,14 @@ async function courtesyRecords(id: string) {
   })
 }
 
-export async function handleAdminDataParity(
-  req: Request,
-  path: string,
-): Promise<Response | null> {
+export async function handleAdminDataParity(req: Request, path: string): Promise<Response | null> {
   if (req.method === 'POST' && path === '/backend/v1/admin/import-buyers') {
     return importBuyers(req)
   }
   if (req.method === 'POST' && path === '/backend/v1/admin/reconciliar-ingressos') {
     return reconcileTickets(req)
   }
-  if (
-    req.method === 'POST' &&
-    path === '/backend/v1/admin/reconciliar-criar-compradores'
-  ) {
+  if (req.method === 'POST' && path === '/backend/v1/admin/reconciliar-criar-compradores') {
     return createReconciliationBuyers(req)
   }
   if (req.method === 'GET' && path === '/backend/v1/admin/cortesias') {

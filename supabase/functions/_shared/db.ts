@@ -19,22 +19,34 @@ export function adminDb(): SupabaseClient {
 export async function rpc<T>(
   name: string,
   args: Record<string, unknown>,
+  options: { retryTransient?: boolean } = {},
 ): Promise<T> {
-  const { data, error } = await adminDb().rpc(name, args)
-  if (error) {
-    const status =
-      /TypeError|sending request|fetch|connection|timeout/i.test(error.message)
+  const attempts = options.retryTransient ? 3 : 1
+  let lastError: { message: string } | undefined
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const { data, error } = await adminDb().rpc(name, args)
+    if (!error) return data as T
+
+    lastError = error
+    const transient = /TypeError|sending request|fetch|connection|timeout/i.test(error.message)
+    if (!transient || attempt === attempts) {
+      const status = transient
         ? 503
         : error.message.includes('NOT_FOUND') || error.message.includes('INVALID_OR_EXPIRED')
-        ? 404
-        : error.message.includes('ALREADY') ||
-            error.message.includes('STALE') ||
-            error.message.includes('IN_PROGRESS')
-          ? 409
-          : 400
-    throw new ApiError(status, error.message)
+          ? 404
+          : error.message.includes('ALREADY') ||
+              error.message.includes('STALE') ||
+              error.message.includes('IN_PROGRESS')
+            ? 409
+            : 400
+      throw new ApiError(status, error.message)
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, attempt * 100 + Math.random() * 100))
   }
-  return data as T
+
+  throw new ApiError(503, lastError?.message ?? 'DATABASE_UNAVAILABLE')
 }
 
 export async function requireAdmin(req: Request, roles = ['admin', 'operator', 'viewer']) {
@@ -70,7 +82,7 @@ export function buyerToken(req: Request): string {
 
 export function requireHelpdesk(req: Request): string {
   const supplied = req.headers.get('X-Helpdesk-Key') ?? ''
-  const configured = Deno.env.get('HELPDESK_KEY') ?? ''
+  const configured = Deno.env.get('HELPDESK_KEY') ?? Deno.env.get('HELPDESK_PASSWORD') ?? ''
   if (!configured || supplied.length !== configured.length) {
     throw new ApiError(401, 'HELPDESK_ACCESS_DENIED')
   }

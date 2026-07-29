@@ -12,6 +12,47 @@ interface SendEmailInput {
   attempt?: number
 }
 
+export const sendGridTemplateNames = {
+  magicLink: 'Skip-Summit26-Magiclink-acesso',
+  buyerInitial: 'Skip-Summit26-Send-Comprador',
+  buyerFollowup: 'Skip-Summit26-Send-Comprador-Email02',
+  participant: 'Skip-Summit26-Send-Participante',
+} as const
+
+const templateEnvByName: Record<string, string[]> = {
+  [sendGridTemplateNames.magicLink]: [
+    'SENDGRID_MAGICLINK_TEMPLATE_ID',
+    'SENDGRID_BUYER_TEMPLATE_ID',
+  ],
+  [sendGridTemplateNames.buyerInitial]: [
+    'SENDGRID_BUYER_INITIAL_TEMPLATE_ID',
+    'SENDGRID_BUYER_TEMPLATE_ID',
+  ],
+  [sendGridTemplateNames.buyerFollowup]: ['SENDGRID_BUYER_TEMPLATE_ID'],
+  [sendGridTemplateNames.participant]: ['SENDGRID_PARTICIPANT_TEMPLATE_ID'],
+}
+
+const mockTemplateIds: Record<string, string> = {
+  [sendGridTemplateNames.magicLink]: 'd-mock-summit26-magiclink',
+  [sendGridTemplateNames.buyerInitial]: 'd-mock-summit26-comprador',
+  [sendGridTemplateNames.buyerFollowup]: 'd-mock-summit26-comprador-email02',
+  [sendGridTemplateNames.participant]: 'd-mock-summit26-participante',
+}
+
+export function sendGridTemplateId(name: string): string {
+  for (const envName of templateEnvByName[name] ?? []) {
+    const value = Deno.env.get(envName) ?? ''
+    if (value) return value
+  }
+  return (Deno.env.get('SENDGRID_MODE') ?? 'mock') === 'mock' ? (mockTemplateIds[name] ?? '') : ''
+}
+
+export function configuredSendGridTemplates() {
+  return Object.values(sendGridTemplateNames)
+    .map((name) => ({ id: sendGridTemplateId(name), name }))
+    .filter((template) => template.id)
+}
+
 export async function sendEmail(db: SupabaseClient, input: SendEmailInput) {
   const apiKey = Deno.env.get('SENDGRID_API_KEY') ?? ''
   const mode = Deno.env.get('SENDGRID_MODE') ?? (apiKey ? 'live' : 'mock')
@@ -36,7 +77,9 @@ export async function sendEmail(db: SupabaseClient, input: SendEmailInput) {
   if (!apiKey || !fromEmail) throw new Error('SENDGRID_NOT_CONFIGURED')
   const payload = input.templateId
     ? {
-        personalizations: [{ to: [{ email: input.to }], dynamic_template_data: input.dynamicData ?? {} }],
+        personalizations: [
+          { to: [{ email: input.to }], dynamic_template_data: input.dynamicData ?? {} },
+        ],
         from: { email: fromEmail, name: fromName },
         template_id: input.templateId,
       }

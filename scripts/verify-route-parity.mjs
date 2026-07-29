@@ -1,100 +1,80 @@
 import { readFile } from 'node:fs/promises'
+import { routeContracts } from './route-contracts.mjs'
 
-const contracts = `
-GET /backend/v1/admin/cortesias
-GET /backend/v1/admin/cortesias/{id}/registros
-GET /backend/v1/admin/insights
-GET /backend/v1/admin/logs
-GET /backend/v1/admin/participants/search
-GET /backend/v1/admin/sendgrid/templates
-GET /backend/v1/admin/sendgrid/templates/{id}/preview
-GET /backend/v1/admin/stats
-GET /backend/v1/admin/whatsapp/custom-fields
-GET /backend/v1/admin/whatsapp/flows
-GET /backend/v1/buyer/tickets
-GET /backend/v1/cortesia/info/{token}
-GET /backend/v1/dispatch/health
-GET /backend/v1/external/compradores
-GET /backend/v1/external/participantes
-GET /backend/v1/helpdesk/search
-GET /backend/v1/helpdesk/ticket/{id}/qr
-GET /backend/v1/participant/link/{token}
-GET /backend/v1/participant/ticket/{token}
-POST /backend/v1/admin/buyers/{buyerId}/access-link
-POST /backend/v1/admin/buyers/{id}/delete
-POST /backend/v1/admin/cortesias/{id}/toggle
-POST /backend/v1/admin/cortesias/create
-POST /backend/v1/admin/dispatch/{disparoId}/retry
-POST /backend/v1/admin/dispatch/enqueue
-POST /backend/v1/admin/dispatch/preview
-POST /backend/v1/admin/dispatch/search-recipient
-POST /backend/v1/admin/import-buyers
-POST /backend/v1/admin/participant/create
-POST /backend/v1/admin/reconciliar-criar-compradores
-POST /backend/v1/admin/reconciliar-ingressos
-POST /backend/v1/admin/retry-webhook/{ingressoId}
-POST /backend/v1/admin/retry-webhook-all
-POST /backend/v1/admin/sync-inac-upgrades
-POST /backend/v1/admin/ticket/{ingressoId}/invite-link
-POST /backend/v1/admin/tickets
-POST /backend/v1/admin/tickets/{id}/change-type
-POST /backend/v1/admin/tickets/{id}/delete
-POST /backend/v1/admin/tickets/{id}/edit
-POST /backend/v1/admin/whatsapp/{disparoId}/retry
-POST /backend/v1/admin/whatsapp/enqueue
-POST /backend/v1/admin/whatsapp/preview
-POST /backend/v1/admin/whatsapp/send-individual
-POST /backend/v1/auth/magic-link
-POST /backend/v1/auth/magic-link/consume
-POST /backend/v1/buyer/tickets/{id}/invite
-POST /backend/v1/buyer/tickets/{id}/view-token
-POST /backend/v1/client-error
-POST /backend/v1/cortesia/registrar
-POST /backend/v1/external/compradores
-POST /backend/v1/external/credenciamento
-POST /backend/v1/external/reenviar-comprador
-POST /backend/v1/external/reenviar-participante
-POST /backend/v1/helpdesk/comprador/{id}/reenviar
-POST /backend/v1/helpdesk/credenciar
-POST /backend/v1/helpdesk/login
-POST /backend/v1/helpdesk/novo-credenciamento
-POST /backend/v1/helpdesk/ticket/{id}/editar
-POST /backend/v1/helpdesk/ticket/{id}/gerar-qr
-POST /backend/v1/helpdesk/ticket/{id}/reenviar
-POST /backend/v1/helpdesk/ticket/{id}/tipo
-POST /backend/v1/participant/cpf-check
-POST /backend/v1/participant/email-check
-POST /backend/v1/participant/submit
-POST /backend/v1/webhooks/guru
-`
-  .trim()
-  .split('\n')
-
-const files = [
-  'supabase/functions/admin-api/index.ts',
-  'supabase/functions/buyer-api/index.ts',
-  'supabase/functions/helpdesk-api/index.ts',
-  'supabase/functions/public-api/index.ts',
-  'supabase/functions/_shared/admin-data-parity.ts',
-  'supabase/functions/_shared/admin-dispatch-parity.ts',
-  'supabase/functions/_shared/public-parity.ts',
-]
-const source = (
-  await Promise.all(files.map((file) => readFile(file, 'utf8')))
-)
-  .join('\n')
-  .replaceAll('\\/', '/')
-
-if (contracts.length !== 65) throw new Error(`Expected 65 contracts, found ${contracts.length}`)
-
-const missing = contracts.filter((contract) => {
-  const [method, path] = contract.split(' ')
-  const staticSegments = path.split(/\{[^}]+\}/).filter((segment) => segment.length >= 5)
-  return !source.includes(`'${method}'`) || staticSegments.some((segment) => !source.includes(segment))
-})
-
-if (missing.length > 0) {
-  throw new Error(`Missing route implementations:\n${missing.join('\n')}`)
+const ownerFiles = {
+  'admin-api': [
+    'supabase/functions/admin-api/index.ts',
+    'supabase/functions/_shared/admin-data-parity.ts',
+    'supabase/functions/_shared/admin-dispatch-parity.ts',
+  ],
+  'buyer-api': ['supabase/functions/buyer-api/index.ts'],
+  'helpdesk-api': ['supabase/functions/helpdesk-api/index.ts', 'supabase/schemas/06_parity.sql'],
+  'public-api': [
+    'supabase/functions/public-api/index.ts',
+    'supabase/functions/_shared/public-parity.ts',
+  ],
 }
 
-console.log(`Route parity: ${contracts.length}/65 contracts represented.`)
+if (routeContracts.length !== 65) {
+  throw new Error(`Expected 65 contracts, found ${routeContracts.length}`)
+}
+
+const keys = routeContracts.map((contract) => `${contract.method} ${contract.path}`)
+if (new Set(keys).size !== keys.length) throw new Error('Duplicate route contracts found')
+
+const sources = Object.fromEntries(
+  await Promise.all(
+    Object.entries(ownerFiles).map(async ([owner, files]) => [
+      owner,
+      (await Promise.all(files.map((file) => readFile(file, 'utf8'))))
+        .join('\n')
+        .replaceAll('\\/', '/'),
+    ]),
+  ),
+)
+
+const failures = []
+for (const contract of routeContracts) {
+  const source = sources[contract.owner]
+  if (!source) {
+    failures.push(`${contract.method} ${contract.path}: unknown owner ${contract.owner}`)
+    continue
+  }
+  for (const field of ['auth', 'implementation', 'effect', 'assertion']) {
+    if (!String(contract[field] ?? '').trim()) {
+      failures.push(`${contract.method} ${contract.path}: missing ${field}`)
+    }
+  }
+  const staticSegments = contract.path.split(/\{[^}]+\}/).filter((segment) => segment.length >= 5)
+  if (staticSegments.some((segment) => !source.includes(segment))) {
+    failures.push(`${contract.method} ${contract.path}: handler path not represented`)
+  }
+  if (!source.includes(contract.implementation)) {
+    failures.push(
+      `${contract.method} ${contract.path}: implementation ${contract.implementation} missing`,
+    )
+  }
+  if (
+    /stub|not[_ -]?implemented|todo/i.test(contract.implementation) ||
+    /stub|not[_ -]?implemented|todo/i.test(contract.assertion)
+  ) {
+    failures.push(`${contract.method} ${contract.path}: contract points to a stub`)
+  }
+  if (contract.method !== 'GET' && contract.effect === 'read') {
+    failures.push(`${contract.method} ${contract.path}: mutation has no declared effect`)
+  }
+}
+
+const allSources = Object.values(sources).join('\n')
+if (allSources.includes('/backend/v1/admin/resend')) {
+  failures.push('Deprecated /backend/v1/admin/resend route is still present')
+}
+
+if (failures.length > 0) {
+  throw new Error(`Route contract failures:\n${failures.join('\n')}`)
+}
+
+const authModes = [...new Set(routeContracts.map((contract) => contract.auth))].sort()
+console.log(
+  `Route contract matrix: ${routeContracts.length}/65 routes with implementation, auth, effect and assertion (${authModes.join(', ')}).`,
+)

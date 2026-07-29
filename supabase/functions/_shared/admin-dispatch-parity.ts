@@ -6,6 +6,7 @@ import {
   sendBotConversa,
 } from './botconversa.ts'
 import { auditEvent, requireOperationalWrite } from './operations.ts'
+import { configuredSendGridTemplates } from './sendgrid.ts'
 
 type AnyRow = Record<string, any>
 
@@ -24,7 +25,12 @@ async function paged<T = AnyRow>(
 async function sendgridTemplates() {
   const key = Deno.env.get('SENDGRID_API_KEY') ?? ''
   if (!key) {
-    return json({ templates: [], error: 'SENDGRID_API_KEY nao configurada' })
+    const templates = configuredSendGridTemplates()
+    return json({
+      templates,
+      mock: (Deno.env.get('SENDGRID_MODE') ?? 'mock') === 'mock',
+      error: templates.length ? undefined : 'SENDGRID_API_KEY nao configurada',
+    })
   }
   try {
     const response = await fetch(
@@ -57,8 +63,8 @@ async function sendgridPreview(templateId: string) {
     const payload = await response.json()
     if (!response.ok) throw new Error(`SendGrid HTTP ${response.status}`)
     const versions = Array.isArray(payload.versions) ? payload.versions : []
-    const version = versions.find((item: AnyRow) => item.active === 1 || item.active === true)
-      ?? versions[0]
+    const version =
+      versions.find((item: AnyRow) => item.active === 1 || item.active === true) ?? versions[0]
     if (!version) return json({ html: '', error: 'Template sem versao ativa' })
     return json({
       html: version.html_content ?? '',
@@ -75,7 +81,9 @@ async function sendgridPreview(templateId: string) {
 
 async function recipientSearch(req: Request) {
   const input = await body<{ q?: string; audience?: string }>(req)
-  const query = String(input.q ?? '').trim().replace(/[,%]/g, ' ')
+  const query = String(input.q ?? '')
+    .trim()
+    .replace(/[,%]/g, ' ')
   if (!query) return json({ results: [] })
   const participant = input.audience === 'participantes'
   const table = participant ? 'participantes' : 'compradores'
@@ -98,11 +106,7 @@ async function recipientSearch(req: Request) {
 
 async function pendingBuyerIds() {
   const tickets = await paged<AnyRow>((from, to) =>
-    adminDb()
-      .from('ingressos')
-      .select('comprador_id')
-      .eq('status', 'Pendente')
-      .range(from, to),
+    adminDb().from('ingressos').select('comprador_id').eq('status', 'Pendente').range(from, to),
   )
   return [...new Set(tickets.map((ticket) => ticket.comprador_id))]
 }
@@ -121,21 +125,20 @@ async function emailRecipients(input: AnyRow) {
       .maybeSingle()
     if (error) throw error
     return data
-      ? [{
-          id: data.id,
-          nome: data[name] ?? '',
-          email: data.email,
-          audience: participant ? 'participantes' : 'compradores',
-        }]
+      ? [
+          {
+            id: data.id,
+            nome: data[name] ?? '',
+            email: data.email,
+            audience: participant ? 'participantes' : 'compradores',
+          },
+        ]
       : []
   }
 
   if (participant) {
     return paged<AnyRow>((from, to) => {
-      let query = db
-        .from('participantes')
-        .select('id,nome_completo,email')
-        .neq('email', '')
+      let query = db.from('participantes').select('id,nome_completo,email').neq('email', '')
       if (cluster === 'participantes_recentes') {
         const days = Math.min(Math.max(Number(input.dias ?? 7) || 7, 1), 365)
         query = query.gte('created_at', new Date(Date.now() - days * 86400000).toISOString())
@@ -183,7 +186,9 @@ async function emailPreview(req: Request) {
 
 async function insertChunks(table: string, rows: AnyRow[], size = 500) {
   for (let index = 0; index < rows.length; index += size) {
-    const { error } = await adminDb().from(table).insert(rows.slice(index, index + size))
+    const { error } = await adminDb()
+      .from(table)
+      .insert(rows.slice(index, index + size))
     if (error) throw error
   }
 }
@@ -191,7 +196,9 @@ async function insertChunks(table: string, rows: AnyRow[], size = 500) {
 async function updateRecipientEmailQueue(recipients: AnyRow[], dispatch: AnyRow) {
   const grouped = {
     compradores: recipients.filter((row) => row.audience === 'compradores').map((row) => row.id),
-    participantes: recipients.filter((row) => row.audience === 'participantes').map((row) => row.id),
+    participantes: recipients
+      .filter((row) => row.audience === 'participantes')
+      .map((row) => row.id),
   }
   for (const [table, ids] of Object.entries(grouped)) {
     for (let index = 0; index < ids.length; index += 500) {
@@ -217,7 +224,8 @@ async function emailEnqueue(req: Request) {
   const templateId = String(input.template_id ?? '').trim()
   if (!templateId.startsWith('d-')) throw new ApiError(400, 'Selecione um template valido')
   const recipients = await emailRecipients(input)
-  const audience = recipients[0]?.audience ??
+  const audience =
+    recipients[0]?.audience ??
     (String(input.cluster ?? '').startsWith('participantes') ? 'participantes' : 'compradores')
   const db = adminDb()
   const { data: dispatch, error } = await db

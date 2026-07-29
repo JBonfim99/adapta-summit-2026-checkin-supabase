@@ -385,6 +385,8 @@ declare
   ticket public.ingressos;
   participant public.participantes;
   claim public.ticket_operation_claims;
+  normalized_email text;
+  normalized_cpf text;
 begin
   if p_operation not in ('edit', 'change_type', 'delete') then
     raise exception using errcode = 'P0001', message = 'INVALID_OPERATION';
@@ -413,6 +415,31 @@ begin
     into participant
     from public.participantes
    where id = ticket.participante_id;
+
+  if participant.id is null then
+    raise exception using errcode = 'P0001', message = 'PARTICIPANT_NOT_FOUND';
+  end if;
+
+  if p_operation = 'edit' then
+    normalized_email := lower(btrim(coalesce(p_payload->>'email', participant.email)));
+    normalized_cpf := private.normalize_cpf(coalesce(p_payload->>'cpf', participant.cpf));
+    if exists (
+      select 1
+        from public.participantes p
+       where p.email_normalized = normalized_email
+         and p.id <> participant.id
+    ) then
+      raise exception using errcode = 'P0001', message = 'EMAIL_ALREADY_USED';
+    end if;
+    if exists (
+      select 1
+        from public.participantes p
+       where p.cpf_normalized = normalized_cpf
+         and p.id <> participant.id
+    ) then
+      raise exception using errcode = 'P0001', message = 'CPF_ALREADY_USED';
+    end if;
+  end if;
 
   insert into public.ticket_operation_claims (
     ingresso_id,
@@ -453,6 +480,7 @@ as $$
 declare
   claim public.ticket_operation_claims;
   ticket public.ingressos;
+  participant public.participantes;
   participant_id text;
 begin
   select *
@@ -493,18 +521,63 @@ begin
     raise exception using errcode = 'P0001', message = 'STALE_TICKET';
   end if;
 
+  select *
+    into participant
+    from public.participantes
+   where id = ticket.participante_id;
+
   if claim.operation = 'edit' then
     update public.participantes
        set nome_completo = coalesce(claim.payload->>'nome_completo', nome_completo),
            email = coalesce(claim.payload->>'email', email),
            cpf = coalesce(claim.payload->>'cpf', cpf),
            telefone = coalesce(claim.payload->>'telefone', telefone),
-           nome_empresa = coalesce(
-             claim.payload->>'nome_empresa',
+           tem_empresa = case
+             when claim.payload ? 'tem_empresa'
+               then (claim.payload->>'tem_empresa')::boolean
+             else tem_empresa
+           end,
+           nome_empresa = coalesce(claim.payload->>'nome_empresa', nome_empresa),
+           cargo = coalesce(claim.payload->>'cargo', cargo),
+           profissao = coalesce(
+             claim.payload->>'profissao',
              claim.payload->>'empresa',
-             nome_empresa
+             profissao
            ),
-           cargo = coalesce(claim.payload->>'cargo', cargo)
+           nicho = coalesce(claim.payload->>'nicho', nicho),
+           num_funcionarios = coalesce(
+             claim.payload->>'num_funcionarios',
+             num_funcionarios
+           ),
+           faturamento_anual = coalesce(
+             claim.payload->>'faturamento_anual',
+             faturamento_anual
+           ),
+           areas_ajuda = case
+             when jsonb_typeof(claim.payload->'areas_ajuda') = 'array'
+               then claim.payload->'areas_ajuda'
+             else areas_ajuda
+           end,
+           expectativa_aprendizado = coalesce(
+             claim.payload->>'expectativa_aprendizado',
+             expectativa_aprendizado
+           ),
+           expectativa_experiencia = coalesce(
+             claim.payload->>'expectativa_experiencia',
+             expectativa_experiencia
+           ),
+           ia_uso_diario = case
+             when claim.payload ? 'ia_uso_diario'
+               then nullif(claim.payload->>'ia_uso_diario', '')::integer
+             else ia_uso_diario
+           end,
+           ia_profundidade = case
+             when claim.payload ? 'ia_profundidade'
+               then nullif(claim.payload->>'ia_profundidade', '')::integer
+             else ia_profundidade
+           end,
+           ia_ferramentas = coalesce(claim.payload->>'ia_ferramentas', ia_ferramentas),
+           ia_desafio = coalesce(claim.payload->>'ia_desafio', ia_desafio)
      where id = ticket.participante_id;
   elsif claim.operation = 'change_type' then
     if claim.payload->>'tipo' not in ('GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON') then
@@ -515,6 +588,49 @@ begin
      where id = ticket.id;
   elsif claim.operation = 'delete' then
     participant_id := ticket.participante_id;
+    select *
+      into participant
+      from public.participantes
+     where id = participant_id;
+
+    update public.ticket_operation_claims
+       set state = 'completed',
+           result = p_provider_result,
+           completed_at = now()
+     where id = claim.id;
+
+    insert into public.webhooks_log (
+      ingresso_id,
+      status,
+      method,
+      evento,
+      detalhe,
+      payload,
+      metadata
+    ) values (
+      ticket.id,
+      200,
+      'MANUAL',
+      'excluido_manual',
+      'Ingresso ' || ticket.pedido_id || ' (' || ticket.tipo_ingresso ||
+        ') excluido definitivamente.',
+      jsonb_build_object(
+        'acao', 'exclusao',
+        'pedido_id', ticket.pedido_id,
+        'tipo', ticket.tipo_ingresso,
+        'participante', participant.nome_completo,
+        'inac_id', coalesce(ticket.inac_id, ''),
+        'inac_deleted', ticket.inac_id is not null,
+        'actor', claim.actor
+      )::text,
+      jsonb_build_object(
+        'actor', claim.actor,
+        'claim_id', claim.id,
+        'snapshot', to_jsonb(ticket) || jsonb_build_object('participante', to_jsonb(participant)),
+        'provider_result', p_provider_result
+      )
+    );
+
     update public.ingressos
        set participante_id = null,
            status = 'Pendente',
@@ -524,6 +640,15 @@ begin
            inac_qr = null
      where id = ticket.id;
     delete from public.participantes where id = participant_id;
+    delete from public.ingressos where id = ticket.id;
+
+    return jsonb_build_object(
+      'success', true,
+      'claimId', claim.id,
+      'removed_participante', participant_id is not null,
+      'inac_id_present', ticket.inac_id is not null,
+      'snapshot', to_jsonb(ticket)
+    );
   end if;
 
   update public.ticket_operation_claims
@@ -538,16 +663,44 @@ begin
     method,
     evento,
     detalhe,
+    payload,
     metadata
   ) values (
     ticket.id,
     200,
-    'POST',
-    'ticket_' || claim.operation,
-    'Ticket operation completed after provider confirmation',
+    case when claim.actor like 'helpdesk:%' then 'HELPDESK' else 'MANUAL' end,
+    case
+      when claim.actor like 'helpdesk:%' and claim.operation = 'edit'
+        then 'helpdesk_edicao'
+      when claim.actor like 'helpdesk:%' and claim.operation = 'change_type'
+        then 'helpdesk_tipo_alterado'
+      when claim.operation = 'edit' then 'editado_manual'
+      when claim.operation = 'change_type' then 'tipo_alterado'
+      else 'ticket_' || claim.operation
+    end,
+    case
+      when claim.operation = 'edit'
+        then 'Ingresso ' || ticket.pedido_id || ' - dados editados por ' || claim.actor
+      when claim.operation = 'change_type'
+        then 'Ingresso ' || ticket.pedido_id || ' - tipo alterado de ' ||
+          ticket.tipo_ingresso || ' para ' || coalesce(claim.payload->>'tipo', '') ||
+          ' por ' || claim.actor
+      else 'Operacao concluida por ' || claim.actor
+    end,
+    jsonb_build_object(
+      'acao', claim.operation,
+      'pedido_id', ticket.pedido_id,
+      'actor', claim.actor,
+      'antes', case
+        when claim.operation = 'edit' then to_jsonb(participant)
+        else jsonb_build_object('tipo', ticket.tipo_ingresso)
+      end,
+      'depois', claim.payload
+    )::text,
     jsonb_build_object(
       'actor', claim.actor,
       'claim_id', claim.id,
+      'payload', claim.payload,
       'provider_result', p_provider_result
     )
   );

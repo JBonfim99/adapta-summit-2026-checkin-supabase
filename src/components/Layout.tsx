@@ -2,6 +2,7 @@ import { Outlet, Link, useNavigate } from 'react-router-dom'
 import { LogOut } from 'lucide-react'
 import { useApp } from '@/contexts/app-context'
 import { Button } from '@/components/ui/button'
+import EventoDataLocal from '@/components/EventoDataLocal'
 
 export default function Layout() {
   const { buyer, logoutBuyer } = useApp()
@@ -47,6 +48,8 @@ export default function Layout() {
       <main className="flex-1 container mx-auto px-4 py-8 max-w-7xl animate-fade-in">
         <Outlet />
       </main>
+
+      <EventoDataLocal className="container mx-auto px-4 max-w-7xl pb-8" />
 
       <footer className="border-t bg-white py-6 mt-auto">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground max-w-7xl space-y-1">

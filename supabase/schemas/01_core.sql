@@ -202,7 +202,8 @@ create table public.disparos (
       'pendentes',
       'participantes_todos',
       'participantes_recentes',
-      'individual'
+      'individual',
+      'guru'
     )),
   nome text not null default '',
   audience text not null default 'compradores'
@@ -220,6 +221,9 @@ create index disparos_created_at_idx on public.disparos (created_at desc, id des
 create index disparos_status_idx
   on public.disparos (created_at, id)
   where status = 'em_andamento';
+create unique index disparos_guru_unique
+  on public.disparos (cluster)
+  where cluster = 'guru';
 
 create table public.envios (
   id text primary key default private.new_text_id(),

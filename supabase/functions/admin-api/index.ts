@@ -4,13 +4,8 @@ import {
   dispatchCredentialToInac,
   mutateCredentialledTicket,
 } from '../_shared/ticket-operations.ts'
-import { sendEmail } from '../_shared/sendgrid.ts'
 import { callInac } from '../_shared/inac.ts'
-import {
-  auditEvent,
-  createParticipantViewToken,
-  requireOperationalWrite,
-} from '../_shared/operations.ts'
+import { auditEvent, requireOperationalWrite } from '../_shared/operations.ts'
 import { handleAdminDataParity } from '../_shared/admin-data-parity.ts'
 import { handleAdminDispatchParity } from '../_shared/admin-dispatch-parity.ts'
 
@@ -340,10 +335,7 @@ async function logs(req: Request) {
       db.from('webhooks_log').select('*').order('created_at', { ascending: false }).range(from, to),
     ),
     fetchAll((from, to) =>
-      db
-        .from('ingressos')
-        .select('id,pedido_id,inac_id,status_webhook')
-        .range(from, to),
+      db.from('ingressos').select('id,pedido_id,inac_id,status_webhook').range(from, to),
     ),
   ])
   const tickets = new Map(allTickets.map((ticket) => [ticket.id, ticket]))
@@ -375,18 +367,16 @@ async function logs(req: Request) {
   const representative = [
     ...latest.values(),
     ...allLogs.filter(
-      (row) =>
-        manualEvents.has(row.evento) &&
-        (!row.ingresso_id || !tickets.has(row.ingresso_id)),
+      (row) => manualEvents.has(row.evento) && (!row.ingresso_id || !tickets.has(row.ingresso_id)),
     ),
   ]
   const isError = (row: any) => {
     const ticket = tickets.get(row.ingresso_id)
     return Boolean(
       ticket &&
-        !ticket.inac_id &&
-        (ticket.status_webhook === 'erro' ||
-          (!ticket.status_webhook && (row.status < 200 || row.status >= 300))),
+      !ticket.inac_id &&
+      (ticket.status_webhook === 'erro' ||
+        (!ticket.status_webhook && (row.status < 200 || row.status >= 300))),
     )
   }
   const errorCount = representative.filter(isError).length
@@ -408,17 +398,15 @@ async function logs(req: Request) {
     String(right.created_at).localeCompare(String(left.created_at)),
   )
   const totalItems = selected.length
-  const rows = selected
-    .slice((page - 1) * perPage, page * perPage)
-    .map((row) => {
-      const ticket = tickets.get(row.ingresso_id)
-      return {
-        ...withCompatibilityFields(row),
-        expand: {
-          ingresso_id: ticket ? withCompatibilityFields(ticket) : undefined,
-        },
-      }
-    })
+  const rows = selected.slice((page - 1) * perPage, page * perPage).map((row) => {
+    const ticket = tickets.get(row.ingresso_id)
+    return {
+      ...withCompatibilityFields(row),
+      expand: {
+        ingresso_id: ticket ? withCompatibilityFields(ticket) : undefined,
+      },
+    }
+  })
   return json({
     items: rows,
     page,
@@ -537,60 +525,6 @@ async function buyerAccessLink(buyerId: string) {
   })
 }
 
-async function resendEssential(req: Request) {
-  const input = await body<{ audience?: string; recipient_id?: string }>(req)
-  const audience = String(input.audience ?? '')
-  const recipientId = String(input.recipient_id ?? '')
-  const db = adminDb()
-  await requireOperationalWrite(db)
-  const baseUrl = (Deno.env.get('APP_URL') ?? 'http://localhost:5173').replace(/\/$/, '')
-
-  if (audience === 'compradores') {
-    const { data: buyer } = await db
-      .from('compradores')
-      .select('id,nome,email')
-      .eq('id', recipientId)
-      .maybeSingle()
-    if (!buyer) throw new ApiError(404, 'BUYER_NOT_FOUND')
-    const access = await buyerAccessLink(buyer.id)
-    const accessBody = (await access.json()) as { token: string }
-    const accessUrl = `${baseUrl}/acesso?token=${accessBody.token}`
-    await sendEmail(db, {
-      to: buyer.email,
-      templateId: Deno.env.get('SENDGRID_BUYER_TEMPLATE_ID') || undefined,
-      subject: 'Seu acesso ao Adapta Summit 2026',
-      html: `<p><a href="${accessUrl}">Acesse seus ingressos</a>.</p>`,
-      dynamicData: { nome: buyer.nome, access_url: accessUrl },
-      idempotencyKey: `admin-buyer:${buyer.id}:${accessBody.token}`,
-      operation: 'admin_resend_buyer',
-    })
-    return json({ success: true, enqueued: 1 })
-  }
-
-  if (audience === 'participantes') {
-    const { data: participant } = await db
-      .from('participantes')
-      .select('id,ingresso_id,nome_completo,email')
-      .eq('id', recipientId)
-      .maybeSingle()
-    if (!participant) throw new ApiError(404, 'PARTICIPANT_NOT_FOUND')
-    const link = await createParticipantViewToken(db, participant.ingresso_id)
-    const ticketUrl = `${baseUrl}/ingresso?token=${link.token}`
-    await sendEmail(db, {
-      to: participant.email,
-      templateId: Deno.env.get('SENDGRID_PARTICIPANT_TEMPLATE_ID') || undefined,
-      subject: 'Seu ingresso do Adapta Summit 2026',
-      html: `<p><a href="${ticketUrl}">Visualize seu ingresso</a>.</p>`,
-      dynamicData: { nome: participant.nome_completo, ticket_url: ticketUrl },
-      idempotencyKey: `admin-participant:${participant.id}:${Date.now()}`,
-      operation: 'admin_resend_participant',
-    })
-    return json({ success: true, enqueued: 1 })
-  }
-
-  throw new ApiError(400, 'AUDIENCE_INVALID')
-}
-
 async function deleteBuyer(buyerId: string) {
   const db = adminDb()
   await requireOperationalWrite(db)
@@ -627,6 +561,32 @@ async function deleteBuyer(buyerId: string) {
     response: 'Sem INAC.',
   })
   return json({ success: true, removed_ingressos: ticketIds.length })
+}
+
+async function adminTicketMutation(input: {
+  ticketId: string
+  operation: 'edit' | 'change_type' | 'delete'
+  actor: string
+  payload?: Record<string, unknown>
+}) {
+  try {
+    return await mutateCredentialledTicket(adminDb(), input)
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 502) {
+      const action =
+        input.operation === 'delete'
+          ? 'remover o credenciamento'
+          : input.operation === 'change_type'
+            ? 'atualizar a categoria'
+            : 'editar o credenciamento'
+      return {
+        success: false,
+        inac_error: true,
+        error: `Falha ao ${action} na INAC. Nada foi alterado.`,
+      }
+    }
+    throw error
+  }
 }
 
 async function insights() {
@@ -864,10 +824,7 @@ async function syncInacUpgrades() {
         .split(/\s+/)
         .filter((tag) => tag && tag !== 'pending-inac-edit')
         .join(' ')
-      await db
-        .from('ingressos')
-        .update({ origem, status_webhook: 'enviado' })
-        .eq('id', ticket.id)
+      await db.from('ingressos').update({ origem, status_webhook: 'enviado' }).eq('id', ticket.id)
     } else {
       failed += 1
       await db.from('ingressos').update({ status_webhook: 'erro' }).eq('id', ticket.id)
@@ -972,9 +929,6 @@ Deno.serve((req) =>
     if (req.method === 'POST' && path === '/backend/v1/admin/participant/create') {
       return createParticipant(req)
     }
-    if (req.method === 'POST' && path === '/backend/v1/admin/resend') {
-      return resendEssential(req)
-    }
     if (req.method === 'POST' && path === '/backend/v1/admin/retry-webhook-all') {
       return retryAll()
     }
@@ -988,11 +942,11 @@ Deno.serve((req) =>
     if (req.method === 'POST' && edit) {
       await requireOperationalWrite()
       return json(
-        await mutateCredentialledTicket(adminDb(), {
+        await adminTicketMutation({
           ticketId: decodeURIComponent(edit[1]),
           operation: 'edit',
           actor: `admin:${auth.user.id}`,
-          payload: await body(req),
+          payload: await body<Record<string, unknown>>(req),
         }),
       )
     }
@@ -1000,11 +954,11 @@ Deno.serve((req) =>
     if (req.method === 'POST' && changeType) {
       await requireOperationalWrite()
       return json(
-        await mutateCredentialledTicket(adminDb(), {
+        await adminTicketMutation({
           ticketId: decodeURIComponent(changeType[1]),
           operation: 'change_type',
           actor: `admin:${auth.user.id}`,
-          payload: await body(req),
+          payload: await body<Record<string, unknown>>(req),
         }),
       )
     }
@@ -1019,16 +973,19 @@ Deno.serve((req) =>
         .maybeSingle()
       if (!ticket) throw new ApiError(404, 'TICKET_NOT_FOUND')
       if (!ticket.participante_id) {
-        const { error } = await adminDb().from('ingressos').delete().eq('id', ticketId)
-        if (error) throw error
-        return json({ success: true, inac_deleted: false })
+        return json(
+          await rpc('delete_pending_ticket', {
+            p_ticket_id: ticketId,
+            p_actor: `admin:${auth.user.id}`,
+          }),
+        )
       }
-      const result = await mutateCredentialledTicket(adminDb(), {
+      const result = await adminTicketMutation({
         ticketId,
         operation: 'delete',
         actor: `admin:${auth.user.id}`,
       })
-      return json({ ...result, inac_deleted: true })
+      return json(result)
     }
     const invitation = path.match(/^\/backend\/v1\/admin\/ticket\/([^/]+)\/invite-link$/)
     if (req.method === 'POST' && invitation) {

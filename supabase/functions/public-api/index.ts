@@ -1,11 +1,8 @@
 import { adminDb, rpc } from '../_shared/db.ts'
 import { ApiError, body, handler, json, routePath } from '../_shared/http.ts'
-import { callInac } from '../_shared/inac.ts'
-import { sendEmail } from '../_shared/sendgrid.ts'
-import {
-  createParticipantViewToken,
-  requireOperationalWrite,
-} from '../_shared/operations.ts'
+import { sendEmail, sendGridTemplateId, sendGridTemplateNames } from '../_shared/sendgrid.ts'
+import { dispatchCredentialToInac } from '../_shared/ticket-operations.ts'
+import { createParticipantViewToken, requireOperationalWrite } from '../_shared/operations.ts'
 import { handlePublicParity } from '../_shared/public-parity.ts'
 
 interface ParticipantPayload extends Record<string, unknown> {
@@ -20,7 +17,9 @@ const appUrl = () => (Deno.env.get('APP_URL') ?? 'http://localhost:5173').replac
 async function magicLink(req: Request) {
   await requireOperationalWrite()
   const input = await body<{ email?: string }>(req)
-  const email = String(input.email ?? '').trim().toLowerCase()
+  const email = String(input.email ?? '')
+    .trim()
+    .toLowerCase()
   if (!email || !email.includes('@')) throw new ApiError(400, 'EMAIL_INVALIDO')
 
   const db = adminDb()
@@ -45,14 +44,11 @@ async function magicLink(req: Request) {
       )
     }
 
-    const { token: ticketToken } = await createParticipantViewToken(
-      db,
-      participant.ingresso_id,
-    )
+    const { token: ticketToken } = await createParticipantViewToken(db, participant.ingresso_id)
     const ticketUrl = `${appUrl()}/ingresso?token=${encodeURIComponent(ticketToken)}`
     await sendEmail(db, {
       to: participant.email,
-      templateId: Deno.env.get('SENDGRID_PARTICIPANT_TEMPLATE_ID') || undefined,
+      templateId: sendGridTemplateId(sendGridTemplateNames.participant) || undefined,
       subject: 'Seu ingresso do Adapta Summit 2026',
       html: `<p><a href="${ticketUrl}">Visualize seu ingresso</a>.</p>`,
       dynamicData: {
@@ -64,43 +60,35 @@ async function magicLink(req: Request) {
       idempotencyKey: `participant-access:${participant.id}:${ticketToken}`,
       operation: 'participant_magic_link',
     })
-    return json({ success: true, sent: true })
+    return json({ sent: true })
   }
 
-  const { data: existing } = await db
-    .from('tokens_acesso')
-    .select('token,expira_em')
-    .eq('comprador_id', buyer.id)
-    .eq('usado', false)
-    .gt('expira_em', new Date().toISOString())
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  let token = existing?.token
-  if (!token) {
-    token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
-    const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
-    const { error } = await db.from('tokens_acesso').insert({
-      comprador_id: buyer.id,
-      token,
-      expira_em: expiresAt,
-    })
-    if (error) throw error
-  }
+  const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
+  const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
+  const { error } = await db.from('tokens_acesso').insert({
+    comprador_id: buyer.id,
+    token,
+    expira_em: expiresAt,
+  })
+  if (error) throw error
 
   const accessUrl = `${appUrl()}/acesso?token=${encodeURIComponent(token)}`
   await sendEmail(db, {
     to: buyer.email,
-    templateId: Deno.env.get('SENDGRID_BUYER_TEMPLATE_ID') || undefined,
+    templateId: sendGridTemplateId(sendGridTemplateNames.magicLink) || undefined,
     subject: 'Seu acesso ao Adapta Summit 2026',
     html: `<p>Ola, ${buyer.nome}.</p><p><a href="${accessUrl}">Acesse seus ingressos</a>.</p>`,
-    dynamicData: { nome: buyer.nome, access_url: accessUrl },
+    dynamicData: {
+      nome: buyer.nome,
+      firstname: buyer.nome.split(/\s+/)[0] || buyer.nome,
+      token,
+      access_url: accessUrl,
+    },
     idempotencyKey: `buyer-access:${buyer.id}:${token}`,
     operation: 'buyer_magic_link',
   })
 
-  return json({ success: true, sent: true })
+  return json({ sent: true })
 }
 
 async function consumeMagicLink(req: Request) {
@@ -155,9 +143,7 @@ async function participantTicket(token: string) {
 
   const { data: ticket } = await db
     .from('ingressos')
-    .select(
-      'id,pedido_id,tipo_ingresso,status,participante_id,inac_id,inac_qr,preenchido_em',
-    )
+    .select('id,pedido_id,tipo_ingresso,status,participante_id,inac_id,inac_qr,preenchido_em')
     .eq('id', link.ingresso_id)
     .single()
   if (!ticket?.participante_id) throw new ApiError(404, 'TICKET_NOT_CREDENTIALLED')
@@ -186,13 +172,24 @@ async function availability(req: Request, field: 'email' | 'cpf') {
   const db = adminDb()
   const value =
     field === 'email'
-      ? String(input.email ?? '').trim().toLowerCase()
+      ? String(input.email ?? '')
+          .trim()
+          .toLowerCase()
       : String(input.cpf ?? '').replace(/\D/g, '')
   const column = field === 'email' ? 'email_normalized' : 'cpf_normalized'
-  const { count, error } = await db
+  let query = db
     .from('participantes')
     .select('id', { count: 'exact', head: true })
     .eq(column, value)
+  if (field === 'cpf' && input.token) {
+    const { data: link } = await db
+      .from('links_participante')
+      .select('ingresso_id')
+      .eq('token', String(input.token))
+      .maybeSingle()
+    if (link?.ingresso_id) query = query.neq('ingresso_id', link.ingresso_id)
+  }
+  const { count, error } = await query
   if (error) throw error
   return json({ available: (count ?? 0) === 0 })
 }
@@ -215,33 +212,10 @@ async function submitParticipant(req: Request) {
   })
 
   const db = adminDb()
-  const { data: ticket } = await db
-    .from('ingressos')
-    .select('id,pedido_id,tipo_ingresso,inac_id')
-    .eq('id', result.ticketId)
-    .single()
-  const { data: participant } = await db
-    .from('participantes')
-    .select('id,nome_completo,email,cpf,telefone,nome_empresa,profissao')
-    .eq('id', result.participantId)
-    .single()
-
-  const inac = await callInac(db, 'add', ticket, participant)
-  await db
-    .from('ingressos')
-    .update(
-      inac.success
-        ? {
-            inac_id: inac.inacId,
-            inac_qr: inac.qrCode,
-            status_webhook: 'enviado',
-          }
-        : { status_webhook: 'erro' },
-    )
-    .eq('id', ticket.id)
+  const inac = await dispatchCredentialToInac(db, result.ticketId, result.participantId)
 
   await db.from('webhooks_log').insert({
-    ingresso_id: ticket.id,
+    ingresso_id: result.ticketId,
     status: inac.status,
     method: 'POST',
     evento: inac.success ? 'webhook_enviado' : 'webhook_erro',
@@ -261,13 +235,15 @@ async function submitParticipant(req: Request) {
 
 async function clientError(req: Request) {
   const input = await body<Record<string, unknown>>(req)
-  await adminDb().from('webhooks_log').insert({
-    status: 0,
-    method: 'CLIENT',
-    evento: 'client_error',
-    detalhe: String(input.message ?? 'Client error').slice(0, 1000),
-    metadata: input,
-  })
+  await adminDb()
+    .from('webhooks_log')
+    .insert({
+      status: 0,
+      method: 'CLIENT',
+      evento: 'client_error',
+      detalhe: String(input.message ?? 'Client error').slice(0, 1000),
+      metadata: input,
+    })
   return json({ success: true })
 }
 

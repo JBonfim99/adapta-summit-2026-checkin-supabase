@@ -47,7 +47,10 @@ async function expectSuccess(label, operation) {
 
 const frontendEnv = await readEnv('.env.local')
 const loadEnv = await readEnv('.env.load.local')
-const values = { ...loadEnv, ...frontendEnv, ...process.env }
+const preserveEnvFiles = process.env.E2E_PRESERVE_ENV_FILES === 'true'
+const values = preserveEnvFiles
+  ? { ...frontendEnv, ...loadEnv, ...process.env }
+  : { ...loadEnv, ...frontendEnv, ...process.env }
 
 const supabaseUrl = requireValue(values, ['SUPABASE_URL', 'VITE_SUPABASE_URL'])
 const publishableKey = requireValue(values, [
@@ -71,40 +74,42 @@ const buyerEmail = 'comprador.local@adapta.test'
 const buyerToken = 'e2e-local-buyer-token-2026'
 const participantToken = 'e2e-local-participant-token-2026'
 
-await writeFile(
-  new URL('.env.local', root),
-  [
-    `VITE_SUPABASE_URL=${supabaseUrl}`,
-    `VITE_SUPABASE_PUBLISHABLE_KEY=${publishableKey}`,
-    `VITE_APP_URL=${appUrl}`,
-    '',
-  ].join('\n'),
-  'utf8',
-)
+if (!preserveEnvFiles) {
+  await writeFile(
+    new URL('.env.local', root),
+    [
+      `VITE_SUPABASE_URL=${supabaseUrl}`,
+      `VITE_SUPABASE_PUBLISHABLE_KEY=${publishableKey}`,
+      `VITE_APP_URL=${appUrl}`,
+      '',
+    ].join('\n'),
+    'utf8',
+  )
 
-await writeFile(
-  new URL('supabase/.env.local', root),
-  [
-    `APP_URL=${appUrl}`,
-    `SUPABASE_URL=${supabaseUrl}`,
-    `SUPABASE_ANON_KEY=${publishableKey}`,
-    `SUPABASE_SERVICE_ROLE_KEY=${serviceRoleKey}`,
-    `HELPDESK_KEY=${helpdeskKey}`,
-    `SYNC_HMAC_SECRET=${syncSecret}`,
-    'INAC_MODE=mock',
-    'SENDGRID_MODE=mock',
-    'SENDGRID_FROM_NAME=Adapta Summit 2026',
-    'SENDGRID_BUYER_TEMPLATE_ID=d-local-buyer-template',
-    'SENDGRID_IMPORT_TEMPLATE_ID=d-local-import-template',
-    'SENDGRID_IMPORT_TEMPLATE_NAME=Importacao local',
-    'BOTCONVERSA_MODE=mock',
-    'EXTERNAL_API_KEY=ExternalLocal#2026',
-    'DISPATCH_WORKER_SECRET=WorkerLocal#2026',
-    'ALLOW_STANDBY_WRITES=true',
-    '',
-  ].join('\n'),
-  'utf8',
-)
+  await writeFile(
+    new URL('supabase/.env.local', root),
+    [
+      `APP_URL=${appUrl}`,
+      `SUPABASE_URL=${supabaseUrl}`,
+      `SUPABASE_ANON_KEY=${publishableKey}`,
+      `SUPABASE_SERVICE_ROLE_KEY=${serviceRoleKey}`,
+      `HELPDESK_KEY=${helpdeskKey}`,
+      `SYNC_HMAC_SECRET=${syncSecret}`,
+      'INAC_MODE=mock',
+      'SENDGRID_MODE=mock',
+      'SENDGRID_FROM_NAME=Adapta Summit 2026',
+      'SENDGRID_BUYER_TEMPLATE_ID=d-local-buyer-template',
+      'SENDGRID_IMPORT_TEMPLATE_ID=d-local-import-template',
+      'SENDGRID_IMPORT_TEMPLATE_NAME=Importacao local',
+      'BOTCONVERSA_MODE=mock',
+      'EXTERNAL_API_KEY=ExternalLocal#2026',
+      'DISPATCH_WORKER_SECRET=WorkerLocal#2026',
+      'ALLOW_STANDBY_WRITES=true',
+      '',
+    ].join('\n'),
+    'utf8',
+  )
+}
 
 const admin = createClient(supabaseUrl, serviceRoleKey, {
   auth: { autoRefreshToken: false, persistSession: false },

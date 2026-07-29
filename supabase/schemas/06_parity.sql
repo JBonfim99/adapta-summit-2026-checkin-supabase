@@ -83,6 +83,351 @@ begin
 end;
 $$;
 
+create or replace function private.unique_helpdesk_order_id()
+returns text
+language plpgsql
+volatile
+set search_path = ''
+as $$
+declare
+  alphabet constant text := '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  candidate text;
+begin
+  for attempt in 1..100 loop
+    select 'H' || string_agg(
+      substr(alphabet, 1 + floor(random() * length(alphabet))::integer, 1),
+      ''
+    )
+      into candidate
+      from generate_series(1, 6);
+    if not exists (select 1 from public.ingressos where pedido_id = candidate) then
+      return candidate;
+    end if;
+  end loop;
+  raise exception using errcode = 'P0001', message = 'ORDER_ID_GENERATION_FAILED';
+end;
+$$;
+
+create or replace function public.create_helpdesk_credential(
+  p_payload jsonb,
+  p_ticket_type text,
+  p_operator text,
+  p_reason text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  buyer public.compradores;
+  ticket public.ingressos;
+  participant_result jsonb;
+  normalized_email text := lower(btrim(coalesce(p_payload->>'email', '')));
+  buyer_created boolean := false;
+begin
+  if p_ticket_type not in ('GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON') then
+    raise exception using errcode = 'P0001', message = 'INVALID_TICKET_TYPE';
+  end if;
+  if length(btrim(coalesce(p_reason, ''))) < 5 then
+    raise exception using errcode = 'P0001', message = 'REASON_REQUIRED';
+  end if;
+
+  select *
+    into buyer
+    from public.compradores
+   where email_normalized = normalized_email
+   for update;
+
+  if buyer.id is null then
+    insert into public.compradores (nome, email, documento, telefone)
+    values (
+      btrim(p_payload->>'nome_completo'),
+      normalized_email,
+      private.normalize_cpf(coalesce(p_payload->>'cpf', '')),
+      coalesce(p_payload->>'telefone', '')
+    )
+    on conflict (email_normalized) do nothing
+    returning * into buyer;
+    buyer_created := buyer.id is not null;
+    if buyer.id is null then
+      select *
+        into buyer
+        from public.compradores
+       where email_normalized = normalized_email
+       for update;
+    end if;
+  end if;
+
+  insert into public.ingressos (
+    comprador_id,
+    pedido_id,
+    tipo_ingresso,
+    status,
+    status_webhook,
+    origem
+  ) values (
+    buyer.id,
+    private.unique_helpdesk_order_id(),
+    p_ticket_type,
+    'Pendente',
+    'pendente',
+    'helpdesk'
+  )
+  returning * into ticket;
+
+  participant_result := private.create_participant_for_ticket(
+    ticket.id,
+    p_payload || jsonb_build_object('termsAccepted', true),
+    'helpdesk:' || coalesce(nullif(btrim(p_operator), ''), 'nao identificado')
+  );
+
+  return participant_result || jsonb_build_object(
+    'pedidoId', ticket.pedido_id,
+    'tipoIngresso', ticket.tipo_ingresso,
+    'buyerCreated', buyer_created,
+    'buyerId', buyer.id
+  );
+end;
+$$;
+
+create or replace function public.delete_pending_ticket(
+  p_ticket_id text,
+  p_actor text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  ticket public.ingressos;
+begin
+  select *
+    into ticket
+    from public.ingressos
+   where id = p_ticket_id
+   for update;
+
+  if ticket.id is null then
+    raise exception using errcode = 'P0001', message = 'TICKET_NOT_FOUND';
+  end if;
+  if ticket.participante_id is not null or ticket.inac_id is not null then
+    raise exception using errcode = 'P0001', message = 'TICKET_IS_CREDENTIALLED';
+  end if;
+
+  insert into public.webhooks_log (
+    ingresso_id,
+    status,
+    method,
+    evento,
+    detalhe,
+    payload,
+    metadata
+  ) values (
+    ticket.id,
+    200,
+    'MANUAL',
+    'excluido_manual',
+    'Ingresso ' || ticket.pedido_id || ' (' || ticket.tipo_ingresso ||
+      ') excluido definitivamente.',
+    jsonb_build_object(
+      'acao', 'exclusao',
+      'pedido_id', ticket.pedido_id,
+      'tipo', ticket.tipo_ingresso,
+      'actor', p_actor
+    )::text,
+    jsonb_build_object('actor', p_actor, 'snapshot', to_jsonb(ticket))
+  );
+
+  delete from public.ingressos where id = ticket.id;
+  return jsonb_build_object(
+    'success', true,
+    'removed_participante', false,
+    'inac_id_present', false,
+    'inac_deleted', false
+  );
+end;
+$$;
+
+create or replace function public.helpdesk_search(p_query text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with input as (
+    select
+      lower(btrim(coalesce(p_query, ''))) as query,
+      regexp_replace(coalesce(p_query, ''), '\D', '', 'g') as digits
+  ),
+  buyer_matches as (
+    select c.id, row_number() over (order by c.created_at, c.id) as position
+      from public.compradores c
+      cross join input x
+     where lower(c.nome) like '%' || x.query || '%'
+        or lower(c.email) like '%' || x.query || '%'
+        or (
+          length(x.digits) >= 3
+          and (
+            private.normalize_cpf(c.documento) like '%' || x.digits || '%'
+            or regexp_replace(c.telefone, '\D', '', 'g') like '%' || x.digits || '%'
+          )
+        )
+     order by c.created_at, c.id
+     limit 40
+  ),
+  ticket_matches as (
+    select i.id, i.comprador_id, row_number() over (order by i.created_at, i.id) as position
+      from public.ingressos i
+      left join public.participantes p on p.id = i.participante_id
+      cross join input x
+     where lower(coalesce(p.nome_completo, '')) like '%' || x.query || '%'
+        or lower(coalesce(p.email, '')) like '%' || x.query || '%'
+        or lower(i.pedido_id) like '%' || x.query || '%'
+        or (
+          length(x.digits) >= 3
+          and (
+            coalesce(p.cpf_normalized, '') like '%' || x.digits || '%'
+            or regexp_replace(coalesce(p.telefone, ''), '\D', '', 'g')
+              like '%' || x.digits || '%'
+          )
+        )
+     order by i.created_at, i.id
+     limit 100
+  ),
+  buyer_order as (
+    select id, min(position) as position
+      from (
+        select id, position from buyer_matches
+        union all
+        select comprador_id, 40 + position from ticket_matches
+      ) matches
+     group by id
+     order by min(position)
+     limit 25
+  ),
+  origin_events as (
+    select distinct on (w.ingresso_id)
+      w.ingresso_id,
+      w.evento,
+      coalesce(w.metadata->>'operador', '') as operador
+    from public.webhooks_log w
+    join public.ingressos i on i.id = w.ingresso_id
+    join buyer_order bo on bo.id = i.comprador_id
+    where w.evento in (
+      'helpdesk_novo_credenciamento',
+      'helpdesk_credenciamento',
+      'checkin_manual_admin',
+      'api_credenciamento'
+    )
+    order by w.ingresso_id, w.created_at
+  ),
+  tickets as (
+    select
+      i.*,
+      p.id as part_id,
+      p.nome_completo,
+      p.email as participant_email,
+      p.cpf,
+      p.telefone as participant_phone,
+      p.nome_empresa,
+      p.profissao,
+      bm.id is not null as buyer_match,
+      tm.id is not null as ticket_match,
+      case
+        when oe.evento = 'helpdesk_novo_credenciamento'
+          then 'Criado do zero no balcão'
+        when oe.evento = 'helpdesk_credenciamento'
+          then 'Check-in feito no balcão'
+        when oe.evento = 'checkin_manual_admin'
+          then 'Check-in feito à mão no admin'
+        when oe.evento = 'api_credenciamento'
+          then 'Check-in feito pela API externa'
+        when i.origem = 'cortesia' then 'Ingresso de cortesia'
+        when i.origem = 'reconciliacao' then 'Ingresso criado na reconciliação'
+        when i.origem = 'api-externa' then 'Ingresso criado pela API externa'
+        when i.origem = 'helpdesk' then 'Ingresso criado no balcão'
+        when p.id is not null then 'Preenchido pela própria pessoa'
+        else ''
+      end ||
+      case
+        when oe.operador <> '' and oe.evento is not null then ' por ' || oe.operador
+        else ''
+      end as origem_info
+    from public.ingressos i
+    join buyer_order bo on bo.id = i.comprador_id
+    left join public.participantes p on p.id = i.participante_id
+    left join buyer_matches bm on bm.id = i.comprador_id
+    left join ticket_matches tm on tm.id = i.id
+    left join origin_events oe on oe.ingresso_id = i.id
+  ),
+  buyers as (
+    select
+      c.*,
+      bo.position,
+      bm.id is not null as buyer_match
+    from buyer_order bo
+    join public.compradores c on c.id = bo.id
+    left join buyer_matches bm on bm.id = c.id
+  )
+  select jsonb_build_object(
+    'ok', true,
+    'compradores',
+    coalesce(
+      jsonb_agg(
+        jsonb_build_object(
+          'id', b.id,
+          'nome', b.nome,
+          'email', b.email,
+          'documento', b.documento,
+          'telefone', b.telefone,
+          'match_comprador', b.buyer_match,
+          'total_ingressos', (select count(*) from tickets t where t.comprador_id = b.id),
+          'ingressos_encontrados', (
+            select count(*) from tickets t
+             where t.comprador_id = b.id and (t.buyer_match or t.ticket_match)
+          ),
+          'ingressos', coalesce((
+            select jsonb_agg(
+              jsonb_build_object(
+                'id', t.id,
+                'pedido_id', t.pedido_id,
+                'tipo_ingresso', t.tipo_ingresso,
+                'status', t.status,
+                'credenciado', t.inac_id is not null,
+                'tem_qr', t.inac_qr is not null and t.inac_qr <> '',
+                'status_webhook', t.status_webhook,
+                'origem', t.origem,
+                'match', t.buyer_match or t.ticket_match,
+                'origem_info', t.origem_info,
+                'participante', case
+                  when t.part_id is null then null
+                  else jsonb_build_object(
+                    'id', t.part_id,
+                    'nome_completo', t.nome_completo,
+                    'email', t.participant_email,
+                    'cpf', t.cpf,
+                    'telefone', t.participant_phone,
+                    'empresa', coalesce(nullif(t.nome_empresa, ''), t.profissao, '')
+                  )
+                end
+              )
+              order by t.created_at, t.id
+            )
+            from tickets t
+            where t.comprador_id = b.id
+          ), '[]'::jsonb)
+        )
+        order by b.position
+      ),
+      '[]'::jsonb
+    )
+  )
+  from buyers b;
+$$;
+
 create or replace function public.register_courtesy(
   p_token text,
   p_payload jsonb
@@ -408,7 +753,9 @@ create or replace function public.process_guru_order(
   p_email text,
   p_buyer jsonb,
   p_items jsonb,
-  p_payload jsonb
+  p_payload jsonb,
+  p_template_id text default '',
+  p_template_name text default 'Skip-Summit26-Send-Comprador'
 )
 returns jsonb
 language plpgsql
@@ -422,6 +769,9 @@ declare
   quantity integer;
   ticket_type text;
   total_tickets integer := 0;
+  dispatch public.disparos;
+  email_state text := 'sem_ingresso';
+  email_enqueued boolean := false;
 begin
   if exists (
     select 1 from public.pedidos_guru where transacao_id = p_transaction_id
@@ -499,6 +849,74 @@ begin
     end loop;
   end loop;
 
+  if total_tickets > 0 then
+    if coalesce(p_template_id, '') = '' then
+      email_state := 'sem_template';
+    elsif buyer.acesso_status in ('na_fila', 'enviando', 'enviado') then
+      email_state := 'ja_enviado';
+    else
+      select *
+        into dispatch
+        from public.disparos
+       where cluster = 'guru'
+       for update;
+
+      if dispatch.id is null then
+        insert into public.disparos (
+          template_id,
+          template_nome,
+          cluster,
+          nome,
+          audience,
+          total,
+          status
+        ) values (
+          p_template_id,
+          coalesce(nullif(p_template_name, ''), 'Guru - acesso automatico'),
+          'guru',
+          'Guru - acesso automatico',
+          'compradores',
+          0,
+          'em_andamento'
+        )
+        returning * into dispatch;
+      end if;
+
+      update public.disparos
+         set template_id = p_template_id,
+             template_nome = coalesce(nullif(p_template_name, ''), template_nome),
+             total = total + 1,
+             status = 'em_andamento'
+       where id = dispatch.id;
+
+      insert into public.envios (
+        disparo_id,
+        comprador_id,
+        nome,
+        email,
+        status
+      ) values (
+        dispatch.id,
+        buyer.id,
+        buyer.nome,
+        buyer.email,
+        'na_fila'
+      );
+
+      update public.compradores
+         set acesso_status = 'na_fila',
+             acesso_disparo_id = dispatch.id,
+             acesso_template_id = p_template_id,
+             acesso_tentativas = 0,
+             acesso_erro = null,
+             acesso_claim = null
+       where id = buyer.id;
+
+      email_state := 'enfileirado';
+      email_enqueued := true;
+    end if;
+  end if;
+
   insert into public.pedidos_guru (
     transacao_id,
     status,
@@ -513,7 +931,7 @@ begin
     lower(btrim(p_email)),
     buyer.id,
     total_tickets,
-    case when total_tickets > 0 then 'pendente' else 'sem_ingresso' end,
+    email_state,
     p_payload
   );
 
@@ -523,7 +941,9 @@ begin
     'comprador_id', buyer.id,
     'ingressos', total_tickets,
     'nome', buyer.nome,
-    'email', buyer.email
+    'email', buyer.email,
+    'email_status', email_state,
+    'email_enfileirado', email_enqueued
   );
 end;
 $$;

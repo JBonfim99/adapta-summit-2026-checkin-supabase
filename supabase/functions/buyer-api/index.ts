@@ -1,16 +1,13 @@
 import { adminDb, buyerToken, rpc } from '../_shared/db.ts'
 import { ApiError, handler, json, routePath } from '../_shared/http.ts'
-import {
-  createParticipantViewToken,
-  requireOperationalWrite,
-} from '../_shared/operations.ts'
+import { createParticipantViewToken, requireOperationalWrite } from '../_shared/operations.ts'
 
 async function tickets(req: Request) {
   const token = buyerToken(req)
   const result = await rpc<{
     buyer: { id: string; nome: string; email: string }
     tickets: Array<Record<string, unknown>>
-  }>('get_buyer_tickets', { p_token: token })
+  }>('get_buyer_tickets', { p_token: token }, { retryTransient: true })
 
   const items = result.tickets.map((ticket) => ({
     ...ticket,

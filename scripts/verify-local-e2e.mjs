@@ -15,10 +15,15 @@ async function parseEnv(path) {
   )
 }
 
-const frontend = await parseEnv('.env.local')
+const frontend = await parseEnv(
+  process.env.E2E_USE_LOAD_ENV === 'true' ? '.env.load.local' : '.env.local',
+)
 const functions = await parseEnv('supabase/.env.local')
-const supabaseUrl = frontend.VITE_SUPABASE_URL
-const publishableKey = frontend.VITE_SUPABASE_PUBLISHABLE_KEY
+const supabaseUrl = process.env.SUPABASE_URL ?? frontend.VITE_SUPABASE_URL ?? frontend.SUPABASE_URL
+const publishableKey =
+  process.env.SUPABASE_PUBLISHABLE_KEY ??
+  frontend.VITE_SUPABASE_PUBLISHABLE_KEY ??
+  frontend.SUPABASE_PUBLISHABLE_KEY
 const functionsUrl = `${supabaseUrl}/functions/v1`
 
 if (!['127.0.0.1', 'localhost', '::1'].includes(new URL(supabaseUrl).hostname)) {
@@ -163,10 +168,14 @@ if (!insights.perfil || !insights.ia?.por_tipo || !insights.ferramentas) {
 }
 
 const linkRunId = String(Date.now())
-const adminTicket = await adminRequest('Ingresso para validade de links', '/backend/v1/admin/tickets', {
-  method: 'POST',
-  body: JSON.stringify({ comprador_id: 'e2e-buyer', tipo_ingresso: 'GOLD' }),
-})
+const adminTicket = await adminRequest(
+  'Ingresso para validade de links',
+  '/backend/v1/admin/tickets',
+  {
+    method: 'POST',
+    body: JSON.stringify({ comprador_id: 'e2e-buyer', tipo_ingresso: 'GOLD' }),
+  },
+)
 const adminInvite = await adminRequest(
   'Convite administrativo de 30 dias',
   `/backend/v1/admin/ticket/${adminTicket.id}/invite-link`,
@@ -176,18 +185,22 @@ const adminInviteDays = (new Date(adminInvite.expiresAt).getTime() - Date.now())
 if (adminInviteDays < 29 || adminInviteDays > 31) {
   throw new Error('Convite administrativo: validade diferente de 30 dias')
 }
-await adminRequest('Credenciamento para link de visualizacao', '/backend/v1/admin/participant/create', {
-  method: 'POST',
-  body: JSON.stringify({
-    ingresso_id: adminTicket.id,
-    nome_completo: 'Visualizacao E2E',
-    email: `visualizacao.${linkRunId}@adapta.test`,
-    cpf: cpfFor(linkRunId),
-    telefone: '11966665555',
-    tem_empresa: false,
-    profissao: 'Teste E2E',
-  }),
-})
+await adminRequest(
+  'Credenciamento para link de visualizacao',
+  '/backend/v1/admin/participant/create',
+  {
+    method: 'POST',
+    body: JSON.stringify({
+      ingresso_id: adminTicket.id,
+      nome_completo: 'Visualizacao E2E',
+      email: `visualizacao.${linkRunId}@adapta.test`,
+      cpf: cpfFor(linkRunId),
+      telefone: '11966665555',
+      tem_empresa: false,
+      profissao: 'Teste E2E',
+    }),
+  },
+)
 const viewLink = await request(
   'Link de visualizacao de 60 dias',
   'buyer-api',
@@ -203,18 +216,14 @@ if (viewDays < 59 || viewDays > 61) {
   throw new Error('Link de visualizacao: validade diferente de 60 dias')
 }
 
-const courtesy = await adminRequest(
-  'Criacao de cortesia',
-  '/backend/v1/admin/cortesias/create',
-  {
-    method: 'POST',
-    body: JSON.stringify({
-      anfitriao: 'E2E Local',
-      tipo_ingresso: 'GOLD',
-      limite: 2,
-    }),
-  },
-)
+const courtesy = await adminRequest('Criacao de cortesia', '/backend/v1/admin/cortesias/create', {
+  method: 'POST',
+  body: JSON.stringify({
+    anfitriao: 'E2E Local',
+    tipo_ingresso: 'GOLD',
+    limite: 2,
+  }),
+})
 const courtesyInfo = await request(
   'Consulta publica de cortesia',
   'public-api',
@@ -231,14 +240,16 @@ const imported = await adminRequest(
   {
     method: 'POST',
     body: JSON.stringify({
-      rows: [{
-        nome: 'Importado E2E',
-        email: importedEmail,
-        qtd_gold: 1,
-        qtd_platinum: 1,
-        qtd_palestrantes: 1,
-        qtd_hackathon: 1,
-      }],
+      rows: [
+        {
+          nome: 'Importado E2E',
+          email: importedEmail,
+          qtd_gold: 1,
+          qtd_platinum: 1,
+          qtd_palestrantes: 1,
+          qtd_hackathon: 1,
+        },
+      ],
       enviar_email: true,
     }),
   },
@@ -246,35 +257,27 @@ const imported = await adminRequest(
 if (imported.imported !== 4 || imported.email?.queued !== 1) {
   throw new Error(`Importacao: resultado inesperado ${JSON.stringify(imported)}`)
 }
-const reconciled = await adminRequest(
-  'Reconciliacao',
-  '/backend/v1/admin/reconciliar-ingressos',
-  {
-    method: 'POST',
-    body: JSON.stringify({
-      rows: [{ nome: 'Importado E2E', email: importedEmail, ingressos_esperado: 4 }],
-    }),
-  },
-)
+const reconciled = await adminRequest('Reconciliacao', '/backend/v1/admin/reconciliar-ingressos', {
+  method: 'POST',
+  body: JSON.stringify({
+    rows: [{ nome: 'Importado E2E', email: importedEmail, ingressos_esperado: 4 }],
+  }),
+})
 if (reconciled.classificacoes?.ok !== 1) {
   throw new Error(`Reconciliacao: resultado inesperado ${JSON.stringify(reconciled)}`)
 }
 
-const emailDispatch = await adminRequest(
-  'Fila de e-mail',
-  '/backend/v1/admin/dispatch/enqueue',
-  {
-    method: 'POST',
-    body: JSON.stringify({
-      cluster: 'individual',
-      audience: 'compradores',
-      recipient_id: 'e2e-buyer',
-      nome: 'E2E e-mail',
-      template_id: 'd-local-e2e-template',
-      template_nome: 'Template E2E',
-    }),
-  },
-)
+const emailDispatch = await adminRequest('Fila de e-mail', '/backend/v1/admin/dispatch/enqueue', {
+  method: 'POST',
+  body: JSON.stringify({
+    cluster: 'individual',
+    audience: 'compradores',
+    recipient_id: 'e2e-buyer',
+    nome: 'E2E e-mail',
+    template_id: 'd-local-e2e-template',
+    template_nome: 'Template E2E',
+  }),
+})
 const whatsappDispatch = await adminRequest(
   'Fila de WhatsApp',
   '/backend/v1/admin/whatsapp/enqueue',
@@ -387,10 +390,10 @@ if (!buyerResend.success || !participantResend.success) {
 const guru = await request('Webhook Guru', 'public-api', '/backend/v1/webhooks/guru', {
   method: 'POST',
   body: JSON.stringify({
-    id: `guru-e2e-${runId}`,
+    payment: { marketplace_id: `guru-e2e-${runId}` },
     status: 'approved',
     contact: { name: 'Guru E2E', email: `guru.${runId}@adapta.test` },
-    items: [{ name: 'Adapta Summit GOLD', quantity: 1 }],
+    items: [{ name: 'Adapta Summit GOLD', qty: 1 }],
   }),
 })
 const guruDuplicate = await request(
@@ -400,10 +403,10 @@ const guruDuplicate = await request(
   {
     method: 'POST',
     body: JSON.stringify({
-      id: `guru-e2e-${runId}`,
+      payment: { marketplace_id: `guru-e2e-${runId}` },
       status: 'approved',
       contact: { name: 'Guru E2E', email: `guru.${runId}@adapta.test` },
-      items: [{ name: 'Adapta Summit GOLD', quantity: 1 }],
+      items: [{ name: 'Adapta Summit GOLD', qty: 1 }],
     }),
   },
 )

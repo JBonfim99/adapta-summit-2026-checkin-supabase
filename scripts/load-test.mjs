@@ -1,3 +1,5 @@
+import { Agent as HttpAgent, request as httpRequest } from 'node:http'
+import { Agent as HttpsAgent, request as httpsRequest } from 'node:https'
 import { createClient } from '@supabase/supabase-js'
 
 const required = (name) => {
@@ -14,11 +16,18 @@ const functionsUrl =
 const ticketCount = Number(process.env.LOAD_TICKETS ?? 10_000)
 const readConcurrency = Number(process.env.LOAD_READS ?? 500)
 const writeConcurrency = Number(process.env.LOAD_WRITES ?? 100)
+const httpSockets = Number(process.env.LOAD_HTTP_SOCKETS ?? 128)
 const keepData = process.env.LOAD_KEEP_DATA === 'true'
 const ticketsPerBuyer = Math.ceil(ticketCount / readConcurrency)
 const runId = `${Date.now()}${Math.random().toString(36).slice(2, 8)}`
 const db = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false },
+})
+const httpAgent = new HttpAgent({ keepAlive: true, maxSockets: httpSockets })
+const httpsAgent = new HttpsAgent({
+  keepAlive: true,
+  maxSockets: httpSockets,
+  rejectUnauthorized: process.env.NODE_TLS_REJECT_UNAUTHORIZED !== '0',
 })
 
 const chunks = (items, size = 100) => {
@@ -50,13 +59,43 @@ function percentile(values, p) {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0
 }
 
+function sendHttp(url, options) {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url)
+    const secure = parsedUrl.protocol === 'https:'
+    const request = (secure ? httpsRequest : httpRequest)(
+      parsedUrl,
+      {
+        method: options.method ?? 'GET',
+        headers: options.headers,
+        agent: secure ? httpsAgent : httpAgent,
+      },
+      (response) => {
+        const chunks = []
+        response.on('data', (chunk) => chunks.push(chunk))
+        response.on('end', () => {
+          const status = response.statusCode ?? 0
+          resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            text: Buffer.concat(chunks).toString('utf8'),
+          })
+        })
+      },
+    )
+    request.on('error', reject)
+    if (options.body) request.write(options.body)
+    request.end()
+  })
+}
+
 async function call(functionName, path, options = {}) {
   const started = performance.now()
   const attempts = options.method && options.method !== 'GET' ? 1 : 3
   let lastResult
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(`${functionsUrl}/${functionName}${path}`, {
+      const response = await sendHttp(`${functionsUrl}/${functionName}${path}`, {
         ...options,
         headers: {
           apikey: publishableKey,
@@ -64,12 +103,11 @@ async function call(functionName, path, options = {}) {
           ...(options.headers ?? {}),
         },
       })
-      const payload = await response.text()
       lastResult = {
         ok: response.ok,
         status: response.status,
         duration: performance.now() - started,
-        payload,
+        payload: response.text,
       }
       if (response.status < 500 || attempt === attempts) return lastResult
     } catch (error) {
@@ -88,11 +126,14 @@ async function call(functionName, path, options = {}) {
 
 async function cleanup(ticketIds, participantIds, buyerIds) {
   for (const batch of chunks(ticketIds)) {
-    await db.from('ingressos').update({
-      participante_id: null,
-      status: 'Pendente',
-      preenchido_em: null,
-    }).in('id', batch)
+    await db
+      .from('ingressos')
+      .update({
+        participante_id: null,
+        status: 'Pendente',
+        preenchido_em: null,
+      })
+      .in('id', batch)
   }
   for (const batch of chunks(participantIds)) {
     if (batch.length) await db.from('participantes').delete().in('id', batch)
@@ -171,10 +212,20 @@ async function main() {
     console.log({
       reads: reads.length,
       readFailures: readFailures.length,
-      readP95Ms: Math.round(percentile(reads.map((result) => result.duration), 0.95)),
+      readP95Ms: Math.round(
+        percentile(
+          reads.map((result) => result.duration),
+          0.95,
+        ),
+      ),
       writes: writes.length,
       writeFailures: writeFailures.length,
-      writeP95Ms: Math.round(percentile(writes.map((result) => result.duration), 0.95)),
+      writeP95Ms: Math.round(
+        percentile(
+          writes.map((result) => result.duration),
+          0.95,
+        ),
+      ),
     })
     if (readFailures.length) {
       console.log(
