@@ -31,6 +31,7 @@ import AdminReconciliar from '@/pages/admin/Reconciliar'
 import AdminApi from '@/pages/admin/Api'
 import AdminDispatch from '@/pages/admin/Disparo'
 import AdminDispatchWhatsApp from '@/pages/admin/DisparoWhatsApp'
+import AdminFailover from '@/pages/admin/Failover'
 import Helpdesk from '@/pages/helpdesk/Index'
 
 function PreCredenciamentoRedirect() {
@@ -81,6 +82,7 @@ const App = () => (
               <Route path="insights" element={<AdminInsights />} />
               <Route path="disparo" element={<AdminDispatch />} />
               <Route path="disparo-whatsapp" element={<AdminDispatchWhatsApp />} />
+              <Route path="failover" element={<AdminFailover />} />
               <Route path="logs" element={<AdminLogs />} />
               <Route path="envios" element={<Navigate to="/admin/logs" replace />} />
             </Route>

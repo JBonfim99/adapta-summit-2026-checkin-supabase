@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { auditIntegration } from './audit.ts'
+import { requireExternalEffectsEnabled } from './operations.ts'
 import {
   inacEndpoint,
   inacHttpMethod,
@@ -27,6 +28,7 @@ export async function callInac(
   participant: InacParticipant,
   overrides: Record<string, unknown> = {},
 ): Promise<InacResult> {
+  await requireExternalEffectsEnabled(db)
   const payload = makeInacPayload(operation, ticket, participant, overrides)
   const mode = Deno.env.get('INAC_MODE') ?? 'mock'
   const canaryEmail = (Deno.env.get('INAC_CANARY_EMAIL') ?? '').toLowerCase()

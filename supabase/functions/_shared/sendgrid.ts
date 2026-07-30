@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { auditIntegration } from './audit.ts'
+import { requireExternalEffectsEnabled } from './operations.ts'
 
 interface SendEmailInput {
   to: string
@@ -54,6 +55,7 @@ export function configuredSendGridTemplates() {
 }
 
 export async function sendEmail(db: SupabaseClient, input: SendEmailInput) {
+  await requireExternalEffectsEnabled(db)
   const apiKey = Deno.env.get('SENDGRID_API_KEY') ?? ''
   const mode = Deno.env.get('SENDGRID_MODE') ?? (apiKey ? 'live' : 'mock')
   const fromEmail = Deno.env.get('SENDGRID_FROM_EMAIL') ?? ''

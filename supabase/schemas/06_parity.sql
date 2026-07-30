@@ -975,6 +975,16 @@ as $$
 declare
   claim_id text := encode(extensions.gen_random_bytes(16), 'hex');
 begin
+  if not exists (
+    select 1
+      from public.system_state
+     where singleton
+       and mode = 'active'
+       and external_effects_enabled
+  ) then
+    return;
+  end if;
+
   return query
   with candidates as (
     select e.id
@@ -1172,6 +1182,16 @@ as $$
 declare
   claim_id text := encode(extensions.gen_random_bytes(16), 'hex');
 begin
+  if not exists (
+    select 1
+      from public.system_state
+     where singleton
+       and mode = 'active'
+       and external_effects_enabled
+  ) then
+    return;
+  end if;
+
   return query
   with candidates as (
     select c.id

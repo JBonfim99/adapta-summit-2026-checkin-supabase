@@ -5,7 +5,7 @@ import {
   listBotConversaFlows,
   sendBotConversa,
 } from './botconversa.ts'
-import { auditEvent, requireOperationalWrite } from './operations.ts'
+import { auditEvent, requireExternalEffectsEnabled, requireOperationalWrite } from './operations.ts'
 import { configuredSendGridTemplates } from './sendgrid.ts'
 
 type AnyRow = Record<string, any>
@@ -24,15 +24,17 @@ async function paged<T = AnyRow>(
 
 async function sendgridTemplates() {
   const key = Deno.env.get('SENDGRID_API_KEY') ?? ''
-  if (!key) {
+  const mode = Deno.env.get('SENDGRID_MODE') ?? (key ? 'live' : 'mock')
+  if (mode === 'mock' || !key) {
     const templates = configuredSendGridTemplates()
     return json({
       templates,
-      mock: (Deno.env.get('SENDGRID_MODE') ?? 'mock') === 'mock',
+      mock: mode === 'mock',
       error: templates.length ? undefined : 'SENDGRID_API_KEY nao configurada',
     })
   }
   try {
+    await requireExternalEffectsEnabled()
     const response = await fetch(
       'https://api.sendgrid.com/v3/templates?generations=dynamic&page_size=200',
       { headers: { Authorization: `Bearer ${key}` } },
@@ -55,8 +57,11 @@ async function sendgridTemplates() {
 
 async function sendgridPreview(templateId: string) {
   const key = Deno.env.get('SENDGRID_API_KEY') ?? ''
+  const mode = Deno.env.get('SENDGRID_MODE') ?? (key ? 'live' : 'mock')
+  if (mode === 'mock') return json({ html: '', mock: true })
   if (!key) return json({ html: '', error: 'SENDGRID_API_KEY nao configurada' })
   try {
+    await requireExternalEffectsEnabled()
     const response = await fetch(`https://api.sendgrid.com/v3/templates/${templateId}`, {
       headers: { Authorization: `Bearer ${key}` },
     })

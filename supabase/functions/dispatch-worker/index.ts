@@ -2,10 +2,7 @@ import { adminDb } from '../_shared/db.ts'
 import { handler, json } from '../_shared/http.ts'
 import { sendEmail } from '../_shared/sendgrid.ts'
 import { sendBotConversa } from '../_shared/botconversa.ts'
-import {
-  createParticipantViewToken,
-  requireOperationalWrite,
-} from '../_shared/operations.ts'
+import { createParticipantViewToken, requireExternalEffectsEnabled } from '../_shared/operations.ts'
 
 type AnyRow = Record<string, any>
 
@@ -32,6 +29,7 @@ async function ensureBuyerToken(buyerId: string) {
     .limit(1)
     .maybeSingle()
   if (existing?.token) return existing.token
+  await requireExternalEffectsEnabled(db)
   const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
   const { error } = await db.from('tokens_acesso').insert({
     comprador_id: buyerId,
@@ -50,12 +48,14 @@ async function ensureParticipantToken(participantId: string) {
     .eq('id', participantId)
     .single()
   if (error) throw error
+  await requireExternalEffectsEnabled(db)
   return (await createParticipantViewToken(db, participant.ingresso_id)).token
 }
 
 async function processEmailDelivery(delivery: AnyRow, dispatch: AnyRow) {
   const db = adminDb()
   try {
+    await requireExternalEffectsEnabled(db)
     const token = delivery.comprador_id
       ? await ensureBuyerToken(delivery.comprador_id)
       : await ensureParticipantToken(delivery.participante_id)
@@ -67,7 +67,10 @@ async function processEmailDelivery(delivery: AnyRow, dispatch: AnyRow) {
       subject: dispatch.template_nome || 'Adapta Summit 2026',
       html: `<p><a href="${appUrl}/${path}?token=${encodeURIComponent(token)}">Acessar</a></p>`,
       dynamicData: {
-        firstname: String(delivery.nome ?? '').trim().split(/\s+/)[0] || delivery.nome,
+        firstname:
+          String(delivery.nome ?? '')
+            .trim()
+            .split(/\s+/)[0] || delivery.nome,
         nome: delivery.nome,
         token,
         access_url: `${appUrl}/${path}?token=${encodeURIComponent(token)}`,
@@ -96,6 +99,7 @@ async function processEmailDelivery(delivery: AnyRow, dispatch: AnyRow) {
     return true
   } catch (error) {
     const message = error instanceof Error ? error.message : 'SEND_FAILED'
+    if (message === 'EXTERNAL_EFFECTS_DISABLED') throw error
     await db.rpc('complete_email_dispatch', {
       p_delivery_id: delivery.id,
       p_success: false,
@@ -149,13 +153,10 @@ async function processEmailBatch() {
 async function processWhatsappBuyer(row: AnyRow) {
   const db = adminDb()
   try {
+    await requireExternalEffectsEnabled(db)
     const token = row.token || (await ensureBuyerToken(row.buyer_id))
     const [{ data: buyer }, { data: ticket }] = await Promise.all([
-      db
-        .from('compradores')
-        .select('documento')
-        .eq('id', row.buyer_id)
-        .single(),
+      db.from('compradores').select('documento').eq('id', row.buyer_id).single(),
       db
         .from('ingressos')
         .select('pedido_id')
@@ -184,6 +185,7 @@ async function processWhatsappBuyer(row: AnyRow) {
     })
     return result.success
   } catch (error) {
+    if (error instanceof Error && error.message === 'EXTERNAL_EFFECTS_DISABLED') throw error
     await db.rpc('complete_whatsapp_dispatch', {
       p_buyer_id: row.buyer_id,
       p_success: false,
@@ -202,9 +204,7 @@ async function processWhatsappBatch() {
   if (!buyers?.length) return { claimed: 0, sent: 0, failed: 0 }
   const results: boolean[] = []
   for (let index = 0; index < buyers.length; index += 10) {
-    results.push(
-      ...(await Promise.all(buyers.slice(index, index + 10).map(processWhatsappBuyer))),
-    )
+    results.push(...(await Promise.all(buyers.slice(index, index + 10).map(processWhatsappBuyer))))
   }
   return {
     claimed: buyers.length,
@@ -216,7 +216,20 @@ async function processWhatsappBatch() {
 Deno.serve((req) =>
   handler(req, async () => {
     if (!workerAuthorized(req)) return json({ error: 'WORKER_ACCESS_DENIED' }, 401)
-    await requireOperationalWrite()
+    try {
+      await requireExternalEffectsEnabled()
+    } catch (error) {
+      if (error instanceof Error && error.message === 'EXTERNAL_EFFECTS_DISABLED') {
+        return json({
+          success: true,
+          paused: true,
+          reason: 'EXTERNAL_EFFECTS_DISABLED',
+          email: { claimed: 0, sent: 0, failed: 0 },
+          whatsapp: { claimed: 0, sent: 0, failed: 0 },
+        })
+      }
+      throw error
+    }
     const startedAt = new Date().toISOString()
     const [email, whatsapp] = await Promise.all([processEmailBatch(), processWhatsappBatch()])
     const completedAt = new Date().toISOString()

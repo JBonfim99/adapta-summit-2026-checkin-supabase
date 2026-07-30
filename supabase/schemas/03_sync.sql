@@ -14,6 +14,71 @@ as $$
   );
 $$;
 
+create or replace function public.claim_sync_lease(
+  p_token text,
+  p_ttl_seconds integer default 25
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  affected_rows integer := 0;
+begin
+  if btrim(coalesce(p_token, '')) = '' then
+    return false;
+  end if;
+
+  update public.system_state
+     set sync_lease_token = p_token,
+         sync_lease_until = now() + make_interval(
+           secs => least(greatest(coalesce(p_ttl_seconds, 25), 5), 55)
+         )
+   where singleton
+     and (
+       sync_lease_until is null
+       or sync_lease_until <= now()
+       or sync_lease_token = p_token
+     );
+  get diagnostics affected_rows = row_count;
+  return affected_rows > 0;
+end;
+$$;
+
+create or replace function public.release_sync_lease(p_token text)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  update public.system_state
+     set sync_lease_token = null,
+         sync_lease_until = null
+   where singleton
+     and sync_lease_token = p_token;
+$$;
+
+create or replace function public.record_sync_poll(
+  p_backlog integer,
+  p_error text default null
+)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  update public.system_state
+     set last_sync_poll_at = case when p_error is null then now() else last_sync_poll_at end,
+         last_reconciled_at = case
+           when p_error is null and greatest(coalesce(p_backlog, 0), 0) = 0 then now()
+           else last_reconciled_at
+         end,
+         sync_outbox_backlog = greatest(coalesce(p_backlog, 0), 0),
+         last_sync_error = nullif(left(coalesce(p_error, ''), 2000), '')
+   where singleton;
+$$;
+
 create or replace function public.apply_sync_event(p_event jsonb)
 returns jsonb
 language plpgsql
@@ -715,14 +780,250 @@ exception
 end;
 $$;
 
+create or replace function public.finalize_sync_bootstrap(p_run_id uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  bootstrap public.sync_bootstrap_runs;
+  staged public.sync_bootstrap_rows;
+  table_name text;
+  expected_count integer;
+  actual_count integer;
+  applied_count integer := 0;
+  collection_names constant text[] := array[
+    'compradores',
+    'ingressos',
+    'participantes',
+    'tokens_acesso',
+    'links_participante',
+    'webhooks_log',
+    'disparos',
+    'envios',
+    'pedidos_guru',
+    'disparos_wa',
+    'cortesias'
+  ];
+  pre_ticket_order constant text[] := array[
+    'compradores',
+    'disparos',
+    'disparos_wa',
+    'cortesias'
+  ];
+  post_ticket_order constant text[] := array[
+    'participantes',
+    'tokens_acesso',
+    'links_participante',
+    'envios',
+    'pedidos_guru',
+    'webhooks_log'
+  ];
+begin
+  select * into bootstrap
+    from public.sync_bootstrap_runs
+   where id = p_run_id
+   for update;
+
+  if bootstrap.id is null then
+    raise exception using errcode = 'P0001', message = 'BOOTSTRAP_RUN_NOT_FOUND';
+  end if;
+  if bootstrap.state <> 'ready' then
+    raise exception using errcode = 'P0001', message = 'BOOTSTRAP_NOT_READY';
+  end if;
+  if (select mode from public.system_state where singleton) <> 'standby'
+     or (select pocketbase_writes_blocked from public.system_state where singleton) then
+    raise exception using errcode = 'P0001', message = 'SYNC_DISABLED';
+  end if;
+
+  foreach table_name in array collection_names
+  loop
+    expected_count := coalesce((bootstrap.counts->>table_name)::integer, 0);
+    select count(*) into actual_count
+      from public.sync_bootstrap_rows r
+     where r.run_id = p_run_id
+       and r.source_table = table_name;
+    if actual_count <> expected_count then
+      raise exception using
+        errcode = 'P0001',
+        message = format(
+          'BOOTSTRAP_COUNT_MISMATCH:%s:%s:%s',
+          table_name,
+          expected_count,
+          actual_count
+        );
+    end if;
+  end loop;
+
+  update public.sync_bootstrap_runs
+     set state = 'applying',
+         error = null
+   where id = p_run_id;
+  update public.system_state
+     set bootstrap_state = 'applying',
+         external_effects_enabled = false,
+         last_sync_error = null
+   where singleton;
+
+  set constraints all deferred;
+  perform set_config('app.sync_apply', 'true', true);
+
+  delete from public.envios;
+  delete from public.links_participante;
+  delete from public.tokens_acesso;
+  delete from public.webhooks_log;
+  delete from public.pedidos_guru;
+  delete from public.cortesias;
+  delete from public.participantes;
+  delete from public.ingressos;
+  delete from public.compradores;
+  delete from public.disparos;
+  delete from public.disparos_wa;
+  delete from public.sync_tombstones
+   where source_table = any(collection_names);
+
+  foreach table_name in array pre_ticket_order
+  loop
+    for staged in
+      select *
+        from public.sync_bootstrap_rows
+       where run_id = p_run_id
+         and source_table = table_name
+       order by record_id
+    loop
+      perform public.apply_sync_event(
+        jsonb_build_object(
+          'event_id', format('bootstrap:%s:final:%s:%s', p_run_id, table_name, staged.record_id),
+          'table', staged.source_table,
+          'record_id', staged.record_id,
+          'operation', 'update',
+          'source_updated_at', staged.source_updated_at,
+          'payload', staged.payload
+        )
+      );
+      applied_count := applied_count + 1;
+    end loop;
+  end loop;
+
+  for staged in
+    select *
+      from public.sync_bootstrap_rows
+     where run_id = p_run_id
+       and source_table = 'ingressos'
+     order by record_id
+  loop
+    perform public.apply_sync_event(
+      jsonb_build_object(
+        'event_id', format('bootstrap:%s:ticket-stage:%s', p_run_id, staged.record_id),
+        'table', staged.source_table,
+        'record_id', staged.record_id,
+        'operation', 'update',
+        'source_updated_at', staged.source_updated_at,
+        'payload', staged.payload || jsonb_build_object(
+          'status', 'Pendente',
+          'participante_id', '',
+          'preenchido_em', ''
+        )
+      )
+    );
+    applied_count := applied_count + 1;
+  end loop;
+
+  foreach table_name in array post_ticket_order
+  loop
+    for staged in
+      select *
+        from public.sync_bootstrap_rows
+       where run_id = p_run_id
+         and source_table = table_name
+       order by record_id
+    loop
+      perform public.apply_sync_event(
+        jsonb_build_object(
+          'event_id', format('bootstrap:%s:final:%s:%s', p_run_id, table_name, staged.record_id),
+          'table', staged.source_table,
+          'record_id', staged.record_id,
+          'operation', 'update',
+          'source_updated_at', staged.source_updated_at,
+          'payload', staged.payload
+        )
+      );
+      applied_count := applied_count + 1;
+    end loop;
+  end loop;
+
+  for staged in
+    select *
+      from public.sync_bootstrap_rows
+     where run_id = p_run_id
+       and source_table = 'ingressos'
+     order by record_id
+  loop
+    perform public.apply_sync_event(
+      jsonb_build_object(
+        'event_id', format('bootstrap:%s:ticket-final:%s', p_run_id, staged.record_id),
+        'table', staged.source_table,
+        'record_id', staged.record_id,
+        'operation', 'update',
+        'source_updated_at', staged.source_updated_at,
+        'payload', staged.payload
+      )
+    );
+    applied_count := applied_count + 1;
+  end loop;
+
+  update public.sync_bootstrap_runs
+     set state = 'completed',
+         applied_at = now(),
+         error = null
+   where id = p_run_id;
+  update public.system_state
+     set bootstrap_state = 'completed',
+         last_reconciled_at = now(),
+         last_sync_error = null,
+         metadata = jsonb_set(metadata, '{bootstrap_counts}', bootstrap.counts, true)
+   where singleton;
+
+  return jsonb_build_object(
+    'run_id', p_run_id,
+    'state', 'completed',
+    'counts', bootstrap.counts,
+    'applied_events', applied_count
+  );
+exception
+  when others then
+    update public.sync_bootstrap_runs
+       set state = 'failed',
+           error = left(sqlerrm, 2000)
+     where id = p_run_id;
+    update public.system_state
+       set bootstrap_state = 'failed',
+           last_sync_error = left(sqlerrm, 2000),
+           external_effects_enabled = false
+     where singleton;
+    return jsonb_build_object(
+      'run_id', p_run_id,
+      'state', 'failed',
+      'error', sqlerrm
+    );
+end;
+$$;
+
 create or replace view public.sync_health
 with (security_invoker = true)
 as
 select
   s.mode,
+  s.external_effects_enabled,
   s.pocketbase_writes_blocked,
+  s.last_sync_poll_at,
   s.last_sync_event_at,
-  extract(epoch from (now() - s.last_sync_event_at))::integer as lag_seconds,
+  s.last_reconciled_at,
+  s.sync_outbox_backlog,
+  s.bootstrap_state,
+  s.last_sync_error,
+  extract(epoch from (now() - s.last_sync_poll_at))::integer as lag_seconds,
   count(*) filter (where e.state = 'failed') as failed_events,
   count(*) filter (where e.state = 'received') as pending_events,
   max(e.applied_at) as last_applied_at
@@ -731,5 +1032,11 @@ left join public.sync_events e on true
 where s.singleton
 group by
   s.mode,
+  s.external_effects_enabled,
   s.pocketbase_writes_blocked,
-  s.last_sync_event_at;
+  s.last_sync_poll_at,
+  s.last_sync_event_at,
+  s.last_reconciled_at,
+  s.sync_outbox_backlog,
+  s.bootstrap_state,
+  s.last_sync_error;

@@ -28,11 +28,12 @@ flowchart LR
   Functions --> SendGrid["SendGrid"]
   Functions --> BotConversa["BotConversa"]
   Cron["pg_cron"] --> Worker["dispatch-worker"]
+  Cron --> Pull["sync-pull"]
   Worker --> SendGrid
   Worker --> BotConversa
   PocketBase["PocketBase primario"] --> Outbox["sync_outbox"]
-  Outbox --> Ingest["sync-ingest com HMAC"]
-  Ingest --> Database
+  Pull -->|"HMAC, até 100 por página"| Outbox
+  Pull --> Database
 ```
 
 O navegador nao recebe `service_role` e nao acessa tabelas diretamente. Todas
@@ -87,6 +88,7 @@ supabase functions deploy helpdesk-api
 supabase functions deploy admin-api
 supabase functions deploy sync-ingest
 supabase functions deploy dispatch-worker
+supabase functions deploy sync-pull
 ```
 
 Configure os secrets listados em `supabase/.env.example` com

@@ -8,6 +8,7 @@ import { callInac } from '../_shared/inac.ts'
 import { auditEvent, requireOperationalWrite } from '../_shared/operations.ts'
 import { handleAdminDataParity } from '../_shared/admin-data-parity.ts'
 import { handleAdminDispatchParity } from '../_shared/admin-dispatch-parity.ts'
+import { setSkipWriteBlock } from '../_shared/skip-sync.ts'
 
 const collections = new Set([
   'compradores',
@@ -845,11 +846,12 @@ async function systemHealth() {
   return json({
     ...health,
     healthy:
-      health.mode === 'standby' &&
+      health.bootstrap_state === 'completed' &&
       (health.failed_events ?? 0) === 0 &&
       (health.pending_events ?? 0) === 0 &&
+      (health.sync_outbox_backlog ?? 0) === 0 &&
       health.lag_seconds != null &&
-      health.lag_seconds < 60,
+      health.lag_seconds < 90,
     counts: {
       compradores: buyers.count ?? 0,
       ingressos: tickets.count ?? 0,
@@ -858,6 +860,133 @@ async function systemHealth() {
       links_participante: links.count ?? 0,
     },
   })
+}
+
+function providerModes() {
+  const sendgridKey = Deno.env.get('SENDGRID_API_KEY') ?? ''
+  const botconversaKey = Deno.env.get('BOTCONVERSA_API_KEY') ?? ''
+  return {
+    sendgrid: Deno.env.get('SENDGRID_MODE') ?? (sendgridKey ? 'live' : 'mock'),
+    botconversa:
+      Deno.env.get('BOTCONVERSA_MODE') ??
+      (botconversaKey || Deno.env.get('BOTCONVERSA_CATCH_URL') ? 'live' : 'mock'),
+    inac: Deno.env.get('INAC_MODE') ?? 'mock',
+  }
+}
+
+async function systemFailover() {
+  const db = adminDb()
+  const [{ data: health, error }, { data: bootstrap }, { data: audit }] = await Promise.all([
+    db.from('sync_health').select('*').single(),
+    db
+      .from('sync_bootstrap_runs')
+      .select(
+        'id,state,source_cursor,counts,current_collection,next_cursor,preview_completed_at,applied_at,error,created_at,updated_at',
+      )
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    db
+      .from('system_state_audit')
+      .select('id,user_id,action,reason,created_at')
+      .order('created_at', { ascending: false })
+      .limit(20),
+  ])
+  if (error) throw error
+  const syncReady =
+    health.bootstrap_state === 'completed' &&
+    health.last_sync_poll_at != null &&
+    health.lag_seconds != null &&
+    health.lag_seconds < 90 &&
+    health.last_reconciled_at != null &&
+    Date.now() - new Date(health.last_reconciled_at).getTime() < 15 * 60 * 1000 &&
+    !health.last_sync_error &&
+    (health.failed_events ?? 0) === 0 &&
+    (health.pending_events ?? 0) === 0 &&
+    (health.sync_outbox_backlog ?? 0) === 0
+
+  return json({
+    health,
+    bootstrap,
+    provider_modes: providerModes(),
+    worker: {
+      configured: Boolean(Deno.env.get('DISPATCH_WORKER_SECRET')),
+      paused: health.mode !== 'active' || health.external_effects_enabled !== true,
+    },
+    readiness: {
+      sync_ready: syncReady,
+      can_activate: health.mode === 'standby' && syncReady,
+      can_enable_external_effects:
+        health.mode === 'active' && health.pocketbase_writes_blocked === true && syncReady,
+    },
+    audit: audit ?? [],
+  })
+}
+
+async function changeSystemMode(req: Request, userId: string) {
+  const input = await body<{
+    mode?: 'standby' | 'active' | 'maintenance'
+    confirmation?: string
+    reason?: string
+  }>(req)
+  const mode = input.mode ?? 'standby'
+  if (mode !== 'standby' && mode !== 'active') {
+    throw new ApiError(400, 'INVALID_SYSTEM_MODE')
+  }
+  const reason = String(input.reason ?? '').trim()
+  if (!reason) throw new ApiError(400, 'MODE_CHANGE_REASON_REQUIRED')
+
+  if (mode === 'active') {
+    if (input.confirmation !== 'ATIVAR FALLBACK') {
+      throw new ApiError(409, 'FALLBACK_CONFIRMATION_REQUIRED')
+    }
+    await setSkipWriteBlock(true, reason)
+    try {
+      const state = await rpc('set_system_mode', {
+        p_mode: 'active',
+        p_user_id: userId,
+        p_pocketbase_writes_blocked: true,
+        p_reason: reason,
+      })
+      return json({ success: true, state })
+    } catch (error) {
+      try {
+        await setSkipWriteBlock(false, 'rollback: Supabase activation failed')
+      } catch (_) {
+        // The safe failure mode is to leave the primary blocked.
+      }
+      throw error
+    }
+  }
+
+  const state = await rpc('set_system_mode', {
+    p_mode: mode,
+    p_user_id: userId,
+    p_pocketbase_writes_blocked: mode === 'maintenance',
+    p_reason: reason,
+  })
+  if (mode === 'standby') {
+    await setSkipWriteBlock(false, reason)
+  }
+  return json({ success: true, state })
+}
+
+async function changeExternalEffects(req: Request, userId: string) {
+  const input = await body<{
+    enabled?: boolean
+    confirmation?: string
+    reason?: string
+  }>(req)
+  const enabled = input.enabled === true
+  const reason = String(input.reason ?? '').trim()
+  if (enabled && !reason) throw new ApiError(400, 'EXTERNAL_EFFECTS_REASON_REQUIRED')
+  const state = await rpc('set_external_effects', {
+    p_enabled: enabled,
+    p_user_id: userId,
+    p_confirmation: String(input.confirmation ?? ''),
+    p_reason: reason,
+  })
+  return json({ success: true, state, provider_modes: providerModes() })
 }
 
 async function activateFallback(req: Request, userId: string) {
@@ -869,20 +998,33 @@ async function activateFallback(req: Request, userId: string) {
   const { data: health, error } = await db.from('sync_health').select('*').single()
   if (error) throw error
   if (
-    health.last_sync_event_at == null ||
+    health.bootstrap_state !== 'completed' ||
+    health.last_sync_poll_at == null ||
     health.lag_seconds == null ||
-    health.lag_seconds >= 60 ||
+    health.lag_seconds >= 90 ||
+    (health.sync_outbox_backlog ?? 0) > 0 ||
     (health.failed_events ?? 0) > 0 ||
     (health.pending_events ?? 0) > 0
   ) {
     throw new ApiError(409, 'SYNC_NOT_READY_FOR_FAILOVER', health)
   }
-  const state = await rpc('set_system_mode', {
-    p_mode: 'active',
-    p_user_id: userId,
-    p_pocketbase_writes_blocked: true,
-  })
-  return json({ success: true, state, previousHealth: health })
+  await setSkipWriteBlock(true, 'Fallback activated from compatibility endpoint')
+  try {
+    const state = await rpc('set_system_mode', {
+      p_mode: 'active',
+      p_user_id: userId,
+      p_pocketbase_writes_blocked: true,
+      p_reason: 'Fallback activated from compatibility endpoint',
+    })
+    return json({ success: true, state, previousHealth: health })
+  } catch (error) {
+    try {
+      await setSkipWriteBlock(false, 'rollback: compatibility activation failed')
+    } catch (_) {
+      // Leaving the primary blocked is safer than enabling both writers.
+    }
+    throw error
+  }
 }
 
 Deno.serve((req) =>
@@ -904,6 +1046,17 @@ Deno.serve((req) =>
     if (req.method === 'GET' && path === '/backend/v1/admin/insights') return insights()
     if (req.method === 'GET' && path === '/backend/v1/admin/system/health') {
       return systemHealth()
+    }
+    if (req.method === 'GET' && path === '/backend/v1/admin/system/failover') {
+      return systemFailover()
+    }
+    if (req.method === 'POST' && path === '/backend/v1/admin/system/mode') {
+      if (auth.profile.role !== 'admin') throw new ApiError(403, 'ADMIN_REQUIRED')
+      return changeSystemMode(req, auth.user.id)
+    }
+    if (req.method === 'POST' && path === '/backend/v1/admin/system/external-effects') {
+      if (auth.profile.role !== 'admin') throw new ApiError(403, 'ADMIN_REQUIRED')
+      return changeExternalEffects(req, auth.user.id)
     }
     if (req.method === 'POST' && path === '/backend/v1/admin/system/activate') {
       if (auth.profile.role !== 'admin') throw new ApiError(403, 'ADMIN_REQUIRED')

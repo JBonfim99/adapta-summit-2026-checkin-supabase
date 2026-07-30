@@ -1,59 +1,70 @@
 # Runbook de failover
 
-Objetivo: ativar o fallback em ate 5 minutos, com atraso de replicacao abaixo
-de 60 segundos.
+Objetivo: manter o Supabase atualizado com atraso inferior a 60 segundos e
+ativar o fallback sem duplicar escritas ou comunicações.
 
-## Pre-condicoes
+## Operação normal
 
-- Vercel e Supabase em producao, mas dominio ainda apontando para o primario.
-- `system_state.mode = standby`.
-- `sync_control.block_writes = false` no PocketBase.
-- `sync_control.delivery_paused = false` no PocketBase.
-- INAC em `canary` aprovada e secrets de producao configurados.
-- Ultima reconciliacao sem IDs ausentes ou extras.
+- O Skip é o sistema principal e continua aceitando escritas.
+- O Supabase permanece com `mode=standby`.
+- `external_effects_enabled` permanece `false`.
+- SendGrid, BotConversa e INAC permanecem em `mock` até uma decisão operacional
+  explícita.
+- O Supabase Cron chama `sync-pull` a cada 30 segundos.
+- O `dispatch-worker` pode continuar agendado, mas retorna sem reservar filas
+  enquanto as comunicações estiverem bloqueadas.
 
-## Ativacao
+## Bootstrap inicial
 
-1. Interrompa atividades operacionais no admin e helpdesk primarios.
-2. Confirme que `sync_outbox` nao possui `pending`, `delivering` ou `error`.
-3. Execute `pnpm reconcile:pocketbase` com as credenciais de producao.
-4. Consulte `GET /backend/v1/admin/system/health`.
-5. Exija `failed_events=0`, `pending_events=0` e `lag_seconds<60`.
-6. No PocketBase, defina `sync_control.block_writes=true`.
-7. Chame `POST /backend/v1/admin/system/activate` com:
+1. No Dashboard do Skip, clique em **Sincronizar Supabase**.
+2. Aguarde a prévia terminar. O Skip somente serve páginas de até 100 registros;
+   todo o staging é feito no Supabase.
+3. Confira as contagens das 11 coleções.
+4. Digite `IMPORTAR PARA O SUPABASE` e confirme.
+5. Aguarde o bootstrap, a reprodução do outbox e a reconciliação.
+6. Em **Sistema → Failover** no Admin do Supabase, confirme:
+   - bootstrap `completed`;
+   - backlog zero;
+   - nenhum evento pendente ou com erro;
+   - última consulta há menos de 90 segundos;
+   - reconciliação há menos de 15 minutos.
 
-```json
-{ "pocketbase_writes_blocked": true }
-```
+O bootstrap não altera o modo do sistema e não libera comunicação externa.
 
-8. Troque o dominio publico para o projeto Vercel.
-9. Valide login do comprador, lista de ingressos, formulario, QR, helpdesk,
-   dashboard e uma submissao canario.
-10. Registre horario, operador, ultimo evento e resultado no incidente.
+## Ativação do fallback
 
-## Depois da ativacao
+1. Abra **Sistema → Failover** no Admin do Supabase.
+2. Informe o motivo, digite `ATIVAR FALLBACK` e confirme.
+3. O `admin-api` bloqueia primeiro as escritas no Skip.
+4. Somente depois desse bloqueio e das verificações de saúde, o Supabase muda
+   para `active`.
+5. Valide login, ingressos, formulário, QR code, helpdesk e Dashboard.
+6. Troque o domínio público apenas depois da validação operacional.
 
-- Nao reabra escrita no PocketBase.
-- Nao replique dados do Supabase de volta ao PocketBase.
-- Dados novos pertencem ao Supabase.
-- Mantenha `system_state.mode=active`.
-- Monitore erros de INAC, SendGrid e Functions.
+As comunicações ainda permanecem desabilitadas depois da ativação.
 
-## Abortagem
+## Habilitação de comunicações
 
-Antes do passo 6, corrija a sincronizacao e repita a reconciliacao. Entre os
-passos 6 e 7, reabra o PocketBase somente se o Supabase ainda nao foi ativado.
-Depois do passo 7, trate qualquer problema no Supabase; nao volte o dominio ao
-PocketBase sem um plano explicito de dados.
+1. Mantenha SendGrid, BotConversa e INAC em `mock` durante a validação.
+2. Altere os modos dos provedores somente pelo Dashboard/CLI do Supabase.
+3. Confirme no Admin:
+   - Supabase `active`;
+   - Skip bloqueado para escrita;
+   - outbox drenado;
+   - sincronização saudável;
+   - reconciliação recente.
+4. Informe o motivo, digite `HABILITAR COMUNICACOES` e confirme.
+5. Faça um envio canário e monitore `integration_attempts`.
 
-## Ensaio
+O botão **Desabilitar comunicações** é de emergência e permanece disponível
+enquanto os efeitos estiverem habilitados.
 
-Executar ate 30/07/2026:
+## Retorno ao standby
 
-- snapshot e importacao;
-- outbox e reconciliacao;
-- bloqueio de escrita;
-- ativacao;
-- troca de dominio;
-- validacao das telas criticas;
-- registro de RTO e RPO observados.
+1. Desabilite as comunicações.
+2. Confirme que não há operação externa em andamento.
+3. No Admin, selecione **Voltar ao standby**.
+4. O `admin-api` desabilita os efeitos e libera as escritas no Skip.
+
+Não replique dados produzidos no Supabase ativo de volta ao Skip sem um plano
+explícito de merge e reconciliação.

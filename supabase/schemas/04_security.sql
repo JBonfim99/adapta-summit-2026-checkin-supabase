@@ -12,10 +12,13 @@ alter table public.cortesias enable row level security;
 alter table public.cron_health enable row level security;
 alter table public.admin_profiles enable row level security;
 alter table public.system_state enable row level security;
+alter table public.system_state_audit enable row level security;
 alter table public.integration_attempts enable row level security;
 alter table public.ticket_operation_claims enable row level security;
 alter table public.sync_events enable row level security;
 alter table public.sync_tombstones enable row level security;
+alter table public.sync_bootstrap_runs enable row level security;
+alter table public.sync_bootstrap_rows enable row level security;
 
 revoke all on all tables in schema public from public, anon, authenticated;
 revoke all on all sequences in schema public from public, anon, authenticated;
@@ -48,6 +51,13 @@ with check (true);
 
 create policy system_state_service_role
 on public.system_state
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy system_state_audit_service_role
+on public.system_state_audit
 for all
 to service_role
 using (true)
@@ -160,6 +170,20 @@ with check (true);
 
 create policy sync_tombstones_service_role
 on public.sync_tombstones
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy sync_bootstrap_runs_service_role
+on public.sync_bootstrap_runs
+for all
+to service_role
+using (true)
+with check (true);
+
+create policy sync_bootstrap_rows_service_role
+on public.sync_bootstrap_rows
 for all
 to service_role
 using (true)

@@ -339,10 +339,18 @@ create table public.system_state (
   singleton boolean primary key default true check (singleton),
   mode text not null default 'standby'
     check (mode in ('standby', 'active', 'maintenance')),
+  external_effects_enabled boolean not null default false,
   activated_at timestamptz,
   activated_by uuid references auth.users (id) on delete set null,
+  last_sync_poll_at timestamptz,
   last_sync_event_at timestamptz,
   last_reconciled_at timestamptz,
+  sync_outbox_backlog integer not null default 0 check (sync_outbox_backlog >= 0),
+  bootstrap_state text not null default 'not_started'
+    check (bootstrap_state in ('not_started', 'collecting', 'ready', 'applying', 'completed', 'failed')),
+  last_sync_error text,
+  sync_lease_token text,
+  sync_lease_until timestamptz,
   pocketbase_writes_blocked boolean not null default false,
   metadata jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now()
@@ -352,6 +360,19 @@ insert into public.system_state (singleton) values (true)
 on conflict (singleton) do nothing;
 
 create index system_state_activated_by_idx on public.system_state (activated_by);
+
+create table public.system_state_audit (
+  id bigint generated always as identity primary key,
+  user_id uuid references auth.users (id) on delete set null,
+  action text not null,
+  previous_state jsonb not null,
+  new_state jsonb not null,
+  reason text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create index system_state_audit_created_at_idx
+  on public.system_state_audit (created_at desc, id desc);
 
 create table public.integration_attempts (
   id bigint generated always as identity primary key,
@@ -453,6 +474,55 @@ create table public.sync_tombstones (
 create index sync_tombstones_event_id_idx
   on public.sync_tombstones (event_id);
 
+create table public.sync_bootstrap_runs (
+  id uuid primary key default gen_random_uuid(),
+  state text not null default 'collecting'
+    check (state in ('collecting', 'ready', 'applying', 'completed', 'failed')),
+  source_cursor jsonb not null default '{}'::jsonb,
+  counts jsonb not null default '{}'::jsonb,
+  current_collection text,
+  next_cursor text,
+  preview_completed_at timestamptz,
+  applied_at timestamptz,
+  error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index sync_bootstrap_runs_active_idx
+  on public.sync_bootstrap_runs ((true))
+  where state in ('collecting', 'ready', 'applying');
+create index sync_bootstrap_runs_created_at_idx
+  on public.sync_bootstrap_runs (created_at desc, id);
+
+create table public.sync_bootstrap_rows (
+  run_id uuid not null
+    references public.sync_bootstrap_runs (id) on delete cascade,
+  source_table text not null check (
+    source_table in (
+      'compradores',
+      'ingressos',
+      'participantes',
+      'tokens_acesso',
+      'links_participante',
+      'webhooks_log',
+      'disparos',
+      'envios',
+      'pedidos_guru',
+      'disparos_wa',
+      'cortesias'
+    )
+  ),
+  record_id text not null,
+  payload jsonb not null,
+  source_updated_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  primary key (run_id, source_table, record_id)
+);
+
+create index sync_bootstrap_rows_table_idx
+  on public.sync_bootstrap_rows (run_id, source_table, record_id);
+
 create trigger compradores_set_updated_at
 before update on public.compradores
 for each row execute function private.set_updated_at();
@@ -507,4 +577,8 @@ for each row execute function private.set_updated_at();
 
 create trigger system_state_set_updated_at
 before update on public.system_state
+for each row execute function private.set_updated_at();
+
+create trigger sync_bootstrap_runs_set_updated_at
+before update on public.sync_bootstrap_runs
 for each row execute function private.set_updated_at();

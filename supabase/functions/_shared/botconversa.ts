@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0'
 import { auditIntegration } from './audit.ts'
+import { requireExternalEffectsEnabled } from './operations.ts'
 
 export interface WhatsAppRecipient {
   buyerId: string
@@ -47,10 +48,12 @@ async function botRequest(path: string, init: RequestInit = {}) {
 }
 
 export async function listBotConversaFlows() {
+  await requireExternalEffectsEnabled()
   return botRequest('/flows/')
 }
 
 export async function listBotConversaCustomFields() {
+  await requireExternalEffectsEnabled()
   return botRequest('/custom_fields/')
 }
 
@@ -75,11 +78,10 @@ function mappedValue(
 }
 
 export async function sendBotConversa(db: SupabaseClient, input: WhatsAppRecipient) {
+  await requireExternalEffectsEnabled(db)
   const mode =
     Deno.env.get('BOTCONVERSA_MODE') ??
-    (Deno.env.get('BOTCONVERSA_API_KEY') || Deno.env.get('BOTCONVERSA_CATCH_URL')
-      ? 'live'
-      : 'mock')
+    (Deno.env.get('BOTCONVERSA_API_KEY') || Deno.env.get('BOTCONVERSA_CATCH_URL') ? 'live' : 'mock')
   const phone = phoneDigits(input.telefone)
   const started = performance.now()
   const idempotencyKey = `whatsapp:${input.dispatchId}:${input.buyerId}`

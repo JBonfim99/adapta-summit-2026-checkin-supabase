@@ -12,6 +12,7 @@ import {
   Gift,
   Scale,
   Webhook,
+  ShieldCheck,
 } from 'lucide-react'
 import { WhatsAppIcon } from '@/components/WhatsAppIcon'
 import { cn } from '@/lib/utils'
@@ -34,6 +35,7 @@ export function AdminLayout() {
     { name: 'Insights', path: '/admin/insights', icon: BarChart3 },
     { name: 'Disparo', path: '/admin/disparo', icon: Mail },
     { name: 'Disparo WhatsApp', path: '/admin/disparo-whatsapp', icon: WhatsAppIcon },
+    { name: 'Sistema / Failover', path: '/admin/failover', icon: ShieldCheck },
     { name: 'Logs', path: '/admin/logs', icon: Send },
   ]
 

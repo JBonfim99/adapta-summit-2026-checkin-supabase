@@ -5,7 +5,9 @@ import { ApiError } from './http.ts'
 export const ticketTypes = ['GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON'] as const
 
 export function normalizeEmail(value: unknown) {
-  return String(value ?? '').trim().toLowerCase()
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
 }
 
 export function cpfDigits(value: unknown) {
@@ -49,6 +51,18 @@ export async function requireOperationalWrite(db = adminDb()) {
   if (data.mode !== 'active') throw new ApiError(503, 'FALLBACK_STANDBY')
 }
 
+export async function requireExternalEffectsEnabled(db = adminDb()) {
+  const { data, error } = await db
+    .from('system_state')
+    .select('mode,external_effects_enabled')
+    .eq('singleton', true)
+    .single()
+  if (error) throw error
+  if (data.mode !== 'active' || data.external_effects_enabled !== true) {
+    throw new ApiError(503, 'EXTERNAL_EFFECTS_DISABLED')
+  }
+}
+
 export async function auditEvent(
   db: SupabaseClient,
   input: {
@@ -79,11 +93,7 @@ export function nextRetryDate(attempts: number) {
   return new Date(Date.now() + seconds * 1000).toISOString()
 }
 
-export async function createParticipantViewToken(
-  db: SupabaseClient,
-  ticketId: string,
-  days = 60,
-) {
+export async function createParticipantViewToken(db: SupabaseClient, ticketId: string, days = 60) {
   const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
   const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
   const { error } = await db.from('links_participante').insert({

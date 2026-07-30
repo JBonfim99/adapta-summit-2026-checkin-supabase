@@ -3,9 +3,32 @@ migrate(
     const outbox = new Collection({
       type: 'base',
       name: 'sync_outbox',
+      listRule: null,
+      viewRule: null,
+      createRule: null,
+      updateRule: null,
+      deleteRule: null,
       fields: [
         { type: 'text', name: 'event_id', required: true },
-        { type: 'text', name: 'source_table', required: true },
+        {
+          type: 'select',
+          name: 'source_table',
+          required: true,
+          maxSelect: 1,
+          values: [
+            'compradores',
+            'ingressos',
+            'participantes',
+            'tokens_acesso',
+            'links_participante',
+            'webhooks_log',
+            'disparos',
+            'envios',
+            'pedidos_guru',
+            'disparos_wa',
+            'cortesias',
+          ],
+        },
         { type: 'text', name: 'record_id', required: true },
         {
           type: 'select',
@@ -21,19 +44,16 @@ migrate(
           name: 'state',
           required: true,
           maxSelect: 1,
-          values: ['pending', 'delivering', 'delivered', 'error'],
+          values: ['pending', 'delivered'],
         },
-        { type: 'number', name: 'attempts' },
-        { type: 'text', name: 'last_error' },
-        { type: 'date', name: 'next_attempt_at' },
         { type: 'date', name: 'delivered_at' },
         { type: 'autodate', name: 'created', onCreate: true },
         { type: 'autodate', name: 'updated', onCreate: true, onUpdate: true },
       ],
       indexes: [
-        'CREATE UNIQUE INDEX `idx_sync_outbox_event` ON `sync_outbox` (`event_id`)',
-        'CREATE INDEX `idx_sync_outbox_queue` ON `sync_outbox` (`state`, `next_attempt_at`, `created`)',
-        'CREATE INDEX `idx_sync_outbox_record` ON `sync_outbox` (`source_table`, `record_id`, `created`)',
+        'CREATE UNIQUE INDEX idx_sync_outbox_event ON sync_outbox (event_id)',
+        'CREATE INDEX idx_sync_outbox_queue ON sync_outbox (state, created, id)',
+        'CREATE INDEX idx_sync_outbox_record ON sync_outbox (source_table, record_id, created)',
       ],
     })
     app.save(outbox)
@@ -41,10 +61,15 @@ migrate(
     const control = new Collection({
       type: 'base',
       name: 'sync_control',
+      listRule: null,
+      viewRule: null,
+      createRule: null,
+      updateRule: null,
+      deleteRule: null,
       fields: [
         { type: 'bool', name: 'block_writes' },
-        { type: 'bool', name: 'delivery_paused' },
         { type: 'text', name: 'note' },
+        { type: 'date', name: 'last_triggered_at' },
         { type: 'autodate', name: 'created', onCreate: true },
         { type: 'autodate', name: 'updated', onCreate: true, onUpdate: true },
       ],
@@ -53,7 +78,6 @@ migrate(
 
     const record = new Record(control)
     record.set('block_writes', false)
-    record.set('delivery_paused', false)
     record.set('note', 'Supabase standby initialized')
     app.save(record)
   },
