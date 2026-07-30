@@ -186,6 +186,13 @@ select is(
   'Guru transaction is idempotent'
 );
 
+-- These parity checks intentionally exercise a live worker claim. The production
+-- claim functions require both failover controls to be explicitly enabled.
+update public.system_state
+   set mode = 'active',
+       external_effects_enabled = true
+ where singleton;
+
 insert into public.disparos (
   id,
   template_id,
