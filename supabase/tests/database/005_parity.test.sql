@@ -262,6 +262,12 @@ select lives_ok(
   'WhatsApp delivery can be completed'
 );
 
+-- Imports are only accepted while the fallback is safely in standby.
+update public.system_state
+   set mode = 'standby',
+       external_effects_enabled = false
+ where singleton;
+
 select is(
   public.apply_sync_event(
     '{
