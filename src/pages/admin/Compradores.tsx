@@ -197,8 +197,7 @@ export default function AdminCompradores() {
     loadData()
   }, [page, search, filterStatus])
 
-  useRealtime('compradores', () => loadData())
-  useRealtime('ingressos', () => loadData())
+  useRealtime(['compradores', 'ingressos'], () => loadData())
 
   const handleOpenCreate = () => {
     setEditingId(null)

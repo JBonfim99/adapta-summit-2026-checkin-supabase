@@ -44,6 +44,56 @@ select ok(
   'buyer invitations expire in 24 hours'
 );
 
+insert into public.compradores (id, nome, email)
+values ('buyer_admin_access_link', 'Admin Access Link', 'admin.access.link@example.com');
+
+create temporary table admin_access_link as
+select public.create_admin_buyer_access_link(
+  'buyer_admin_access_link',
+  now() + interval '60 days'
+) as value;
+
+select is(
+  (select length(value->>'token') from admin_access_link),
+  64,
+  'an admin access link has a 32-byte token'
+);
+
+select is(
+  (select value->>'email' from admin_access_link),
+  'admin.access.link@example.com',
+  'an admin access link returns the buyer email'
+);
+
+select is(
+  (
+    select count(*)::integer
+      from public.tokens_acesso
+     where comprador_id = 'buyer_admin_access_link'
+  ),
+  1,
+  'an admin access link persists one token'
+);
+
+select ok(
+  exists (
+    select 1
+      from public.webhooks_log
+     where evento = 'admin_link_acesso'
+       and metadata->>'comprador_id' = 'buyer_admin_access_link'
+  ),
+  'an admin access link records an audit event'
+);
+
+select throws_ok(
+  $$
+    select public.create_admin_buyer_access_link('buyer_missing', now() + interval '60 days')
+  $$,
+  'P0001',
+  'BUYER_NOT_FOUND',
+  'an admin access link rejects an unknown buyer'
+);
+
 select lives_ok(
   $$
     select public.submit_participant(

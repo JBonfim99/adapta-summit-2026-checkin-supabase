@@ -6,18 +6,26 @@ import { supabase } from '@/lib/supabase/client'
  * to the underlying tables.
  */
 export function useRealtime<TRecord = Record<string, unknown>>(
-  collectionName: string,
+  collectionNames: string | string[],
   callback: (data: { action: 'refresh'; record?: TRecord }) => void,
   enabled: boolean = true,
 ) {
   const callbackRef = useRef(callback)
   callbackRef.current = callback
+  const collectionKey = Array.isArray(collectionNames)
+    ? [...collectionNames].sort().join(',')
+    : collectionNames
 
   useEffect(() => {
     if (!enabled) return
 
     let disposed = false
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined
     const refresh = () => callbackRef.current({ action: 'refresh' })
+    const refreshSoon = () => {
+      if (refreshTimer) clearTimeout(refreshTimer)
+      refreshTimer = setTimeout(refresh, 200)
+    }
     window.addEventListener('focus', refresh)
 
     const channel = supabase.channel('admin:operations', {
@@ -34,19 +42,19 @@ export function useRealtime<TRecord = Record<string, unknown>>(
               (payload as Record<string, unknown>)?.table_name ??
               '',
           )
-          if (!changedTable || changedTable === collectionName) refresh()
+          const names = collectionKey.split(',')
+          if (!changedTable || names.includes(changedTable)) refreshSoon()
         })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') refresh()
-        })
+        .subscribe()
     })
 
     return () => {
       disposed = true
+      if (refreshTimer) clearTimeout(refreshTimer)
       window.removeEventListener('focus', refresh)
       void supabase.removeChannel(channel)
     }
-  }, [collectionName, enabled])
+  }, [collectionKey, enabled])
 }
 
 export default useRealtime

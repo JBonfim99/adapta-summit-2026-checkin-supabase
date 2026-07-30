@@ -502,27 +502,13 @@ async function inviteLink(ticketId: string) {
 async function buyerAccessLink(buyerId: string) {
   const db = adminDb()
   await requireOperationalWrite(db)
-  const { data: buyer } = await db
-    .from('compradores')
-    .select('id,nome,email')
-    .eq('id', buyerId)
-    .maybeSingle()
-  if (!buyer) throw new ApiError(404, 'BUYER_NOT_FOUND')
-  const token = crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
   const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString()
-  await db.from('tokens_acesso').insert({ comprador_id: buyerId, token, expira_em: expiresAt })
-  await auditEvent(db, {
-    evento: 'admin_link_acesso',
-    method: 'ADMIN',
-    detalhe: `Link de acesso gerado no admin para ${buyer.nome} (${buyer.email})`,
-    payload: { comprador_id: buyer.id, expira_em: expiresAt },
-  })
-  return json({
-    token,
-    email: buyer.email,
-    nome: buyer.nome,
-    expira_em: expiresAt,
-  })
+  return json(
+    await rpc<Record<string, unknown>>('create_admin_buyer_access_link', {
+      p_buyer_id: buyerId,
+      p_expires_at: expiresAt,
+    }),
+  )
 }
 
 async function deleteBuyer(buyerId: string) {
