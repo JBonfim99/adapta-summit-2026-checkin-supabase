@@ -1,90 +1,20 @@
-create or replace function private.json_timestamp(
-  p_payload jsonb,
-  p_primary_key text,
-  p_fallback timestamptz
+-- Migration unit 1: schema_changes
+-- Transaction mode: transactional
+-- Boundary reason: default
+
+SET check_function_bodies = false;
+
+ALTER TABLE public.sync_bootstrap_rows
+  DROP CONSTRAINT sync_bootstrap_rows_source_table_check;
+
+CREATE OR REPLACE FUNCTION public.apply_sync_event (
+  p_event jsonb
 )
-returns timestamptz
-language sql
-immutable
-set search_path = ''
-as $$
-  select coalesce(
-    nullif(p_payload->>p_primary_key, '')::timestamptz,
-    p_fallback
-  );
-$$;
-
-create or replace function public.claim_sync_lease(
-  p_token text,
-  p_ttl_seconds integer default 25
-)
-returns boolean
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  affected_rows integer := 0;
-begin
-  if btrim(coalesce(p_token, '')) = '' then
-    return false;
-  end if;
-
-  update public.system_state
-     set sync_lease_token = p_token,
-         sync_lease_until = now() + make_interval(
-           secs => least(greatest(coalesce(p_ttl_seconds, 25), 5), 55)
-         )
-   where singleton
-     and (
-       sync_lease_until is null
-       or sync_lease_until <= now()
-       or sync_lease_token = p_token
-     );
-  get diagnostics affected_rows = row_count;
-  return affected_rows > 0;
-end;
-$$;
-
-create or replace function public.release_sync_lease(p_token text)
-returns void
-language sql
-security definer
-set search_path = ''
-as $$
-  update public.system_state
-     set sync_lease_token = null,
-         sync_lease_until = null
-   where singleton
-     and sync_lease_token = p_token;
-$$;
-
-create or replace function public.record_sync_poll(
-  p_backlog integer,
-  p_error text default null
-)
-returns void
-language sql
-security definer
-set search_path = ''
-as $$
-  update public.system_state
-     set last_sync_poll_at = case when p_error is null then now() else last_sync_poll_at end,
-         last_reconciled_at = case
-           when p_error is null and greatest(coalesce(p_backlog, 0), 0) = 0 then now()
-           else last_reconciled_at
-         end,
-         sync_outbox_backlog = greatest(coalesce(p_backlog, 0), 0),
-         last_sync_error = nullif(left(coalesce(p_error, ''), 2000), '')
-   where singleton;
-$$;
-
-create or replace function public.apply_sync_event(p_event jsonb)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
 declare
   v_event_id text := p_event->>'event_id';
   v_table text := p_event->>'table';
@@ -781,14 +711,557 @@ exception
      where event_id = v_event_id;
     raise;
 end;
-$$;
+$function$;
 
-create or replace function public.finalize_sync_bootstrap(p_run_id uuid)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
+CREATE OR REPLACE FUNCTION public.claim_email_dispatch_batch (
+  p_limit integer DEFAULT 1000
+)
+  RETURNS SETOF public.envios
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  claim_id text := encode(extensions.gen_random_bytes(16), 'hex');
+begin
+  if not exists (
+    select 1
+      from public.system_state
+     where singleton
+       and mode = 'active'
+       and external_effects_enabled
+  ) then
+    return;
+  end if;
+
+  return query
+  with candidates as (
+    select e.id
+      from public.envios e
+       where e.status in ('na_fila', 'erro')
+         and e.tentativas < 5
+         and coalesce(e.proxima_tentativa_em, '-infinity'::timestamptz) <= now()
+     order by e.created_at, e.id
+     for update skip locked
+     limit least(greatest(p_limit, 1), 1000)
+  )
+  update public.envios e
+     set status = 'enviando',
+         claim = claim_id,
+         tentativas = e.tentativas + 1,
+         erro = null
+    from candidates c
+   where e.id = c.id
+  returning e.*;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_ticket_operation (
+  p_ticket_id text,
+  p_operation text,
+  p_actor     text,
+  p_payload   jsonb DEFAULT '{}'::jsonb
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  ticket public.ingressos;
+  participant public.participantes;
+  claim public.ticket_operation_claims;
+  normalized_email text;
+  normalized_cpf text;
+begin
+  if p_operation not in ('edit', 'change_type', 'delete') then
+    raise exception using errcode = 'P0001', message = 'INVALID_OPERATION';
+  end if;
+
+  update public.ticket_operation_claims
+     set state = 'expired'
+   where ingresso_id = p_ticket_id
+     and state = 'claimed'
+     and expires_at <= now();
+
+  select *
+    into ticket
+    from public.ingressos
+   where id = p_ticket_id
+   for update;
+
+  if ticket.id is null then
+    raise exception using errcode = 'P0001', message = 'TICKET_NOT_FOUND';
+  end if;
+  if ticket.participante_id is null then
+    raise exception using errcode = 'P0001', message = 'TICKET_NOT_CREDENTIALLED';
+  end if;
+
+  select *
+    into participant
+    from public.participantes
+   where id = ticket.participante_id;
+
+  if participant.id is null then
+    raise exception using errcode = 'P0001', message = 'PARTICIPANT_NOT_FOUND';
+  end if;
+
+  if p_operation = 'edit' then
+    normalized_email := lower(btrim(coalesce(p_payload->>'email', participant.email)));
+    normalized_cpf := private.normalize_cpf(coalesce(p_payload->>'cpf', participant.cpf));
+    if exists (
+      select 1
+        from public.participantes p
+       where p.email_normalized = normalized_email
+         and p.id <> participant.id
+    ) then
+      raise exception using errcode = 'P0001', message = 'EMAIL_ALREADY_USED';
+    end if;
+    if exists (
+      select 1
+        from public.participantes p
+       where p.cpf_normalized = normalized_cpf
+         and p.id <> participant.id
+    ) then
+      raise exception using errcode = 'P0001', message = 'CPF_ALREADY_USED';
+    end if;
+  end if;
+
+  insert into public.ticket_operation_claims (
+    ingresso_id,
+    operation,
+    actor,
+    expected_updated_at,
+    payload
+  ) values (
+    ticket.id,
+    p_operation,
+    p_actor,
+    ticket.updated_at,
+    p_payload
+  )
+  returning * into claim;
+
+  return jsonb_build_object(
+    'claimId', claim.id,
+    'ticket', to_jsonb(ticket),
+    'participant', to_jsonb(participant)
+  );
+exception
+  when unique_violation then
+    raise exception using errcode = 'P0001', message = 'TICKET_OPERATION_IN_PROGRESS';
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_whatsapp_dispatch_batch (
+  p_limit integer DEFAULT 60
+)
+  RETURNS TABLE (
+    buyer_id    text,
+    nome        text,
+    email       text,
+    telefone    text,
+    dispatch_id text,
+    flow        text,
+    mapping     jsonb,
+    token       text,
+    attempt     integer
+  )
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  claim_id text := encode(extensions.gen_random_bytes(16), 'hex');
+begin
+  if not exists (
+    select 1
+      from public.system_state
+     where singleton
+       and mode = 'active'
+       and external_effects_enabled
+  ) then
+    return;
+  end if;
+
+  return query
+  with candidates as (
+    select c.id
+      from public.compradores c
+       where c.wa_status in ('na_fila', 'erro')
+         and c.wa_tentativas < 5
+     order by c.created_at, c.id
+     for update skip locked
+     limit least(greatest(p_limit, 1), 100)
+  ),
+  claimed as (
+    update public.compradores c
+       set wa_status = 'enviando',
+           wa_claim = claim_id,
+           wa_tentativas = c.wa_tentativas + 1,
+           wa_erro = null
+      from candidates x
+     where c.id = x.id
+    returning c.*
+  )
+  select
+    c.id,
+    c.nome,
+    c.email,
+    c.telefone,
+    c.wa_disparo_id,
+      d.flow,
+      d.mapping,
+      coalesce(t.token, ''),
+      c.wa_tentativas
+  from claimed c
+  join public.disparos_wa d on d.id = c.wa_disparo_id
+  left join lateral (
+    select ta.token
+      from public.tokens_acesso ta
+     where ta.comprador_id = c.id
+       and ta.usado = false
+       and ta.expira_em > now()
+     order by ta.created_at desc
+     limit 1
+  ) t on true;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.complete_ticket_operation (
+  p_claim_id        uuid,
+  p_success         boolean,
+  p_provider_result jsonb   DEFAULT '{}'::jsonb
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  claim public.ticket_operation_claims;
+  ticket public.ingressos;
+  participant public.participantes;
+  participant_id text;
+begin
+  select *
+    into claim
+    from public.ticket_operation_claims
+   where id = p_claim_id
+   for update;
+
+  if claim.id is null or claim.state <> 'claimed' then
+    raise exception using errcode = 'P0001', message = 'INVALID_OPERATION_CLAIM';
+  end if;
+  if claim.expires_at <= now() then
+    update public.ticket_operation_claims set state = 'expired' where id = claim.id;
+    raise exception using errcode = 'P0001', message = 'OPERATION_CLAIM_EXPIRED';
+  end if;
+
+  if not p_success then
+    update public.ticket_operation_claims
+       set state = 'failed',
+           result = p_provider_result,
+           completed_at = now()
+     where id = claim.id;
+    return jsonb_build_object('success', false, 'claimId', claim.id);
+  end if;
+
+  select *
+    into ticket
+    from public.ingressos
+   where id = claim.ingresso_id
+   for update;
+
+  if ticket.updated_at <> claim.expected_updated_at then
+    update public.ticket_operation_claims
+       set state = 'failed',
+           result = jsonb_build_object('error', 'STALE_TICKET'),
+           completed_at = now()
+     where id = claim.id;
+    raise exception using errcode = 'P0001', message = 'STALE_TICKET';
+  end if;
+
+  select *
+    into participant
+    from public.participantes
+   where id = ticket.participante_id;
+
+  if claim.operation = 'edit' then
+    update public.participantes
+       set nome_completo = coalesce(claim.payload->>'nome_completo', nome_completo),
+           email = coalesce(claim.payload->>'email', email),
+           cpf = coalesce(claim.payload->>'cpf', cpf),
+           telefone = coalesce(claim.payload->>'telefone', telefone),
+           tem_empresa = case
+             when claim.payload ? 'tem_empresa'
+               then (claim.payload->>'tem_empresa')::boolean
+             else tem_empresa
+           end,
+           nome_empresa = coalesce(claim.payload->>'nome_empresa', nome_empresa),
+           cargo = coalesce(claim.payload->>'cargo', cargo),
+           profissao = coalesce(
+             claim.payload->>'profissao',
+             claim.payload->>'empresa',
+             profissao
+           ),
+           nicho = coalesce(claim.payload->>'nicho', nicho),
+           num_funcionarios = coalesce(
+             claim.payload->>'num_funcionarios',
+             num_funcionarios
+           ),
+           faturamento_anual = coalesce(
+             claim.payload->>'faturamento_anual',
+             faturamento_anual
+           ),
+           areas_ajuda = case
+             when jsonb_typeof(claim.payload->'areas_ajuda') = 'array'
+               then claim.payload->'areas_ajuda'
+             else areas_ajuda
+           end,
+           expectativa_aprendizado = coalesce(
+             claim.payload->>'expectativa_aprendizado',
+             expectativa_aprendizado
+           ),
+           expectativa_experiencia = coalesce(
+             claim.payload->>'expectativa_experiencia',
+             expectativa_experiencia
+           ),
+           ia_uso_diario = case
+             when claim.payload ? 'ia_uso_diario'
+               then nullif(claim.payload->>'ia_uso_diario', '')::integer
+             else ia_uso_diario
+           end,
+           ia_profundidade = case
+             when claim.payload ? 'ia_profundidade'
+               then nullif(claim.payload->>'ia_profundidade', '')::integer
+             else ia_profundidade
+           end,
+           ia_ferramentas = coalesce(claim.payload->>'ia_ferramentas', ia_ferramentas),
+           ia_desafio = coalesce(claim.payload->>'ia_desafio', ia_desafio)
+     where id = ticket.participante_id;
+  elsif claim.operation = 'change_type' then
+    if claim.payload->>'tipo' not in ('GOLD', 'PLATINUM', 'PALESTRANTES', 'HACKATHON') then
+      raise exception using errcode = 'P0001', message = 'INVALID_TICKET_TYPE';
+    end if;
+    update public.ingressos
+       set tipo_ingresso = claim.payload->>'tipo'
+     where id = ticket.id;
+  elsif claim.operation = 'delete' then
+    participant_id := ticket.participante_id;
+    select *
+      into participant
+      from public.participantes
+     where id = participant_id;
+
+    update public.ticket_operation_claims
+       set state = 'completed',
+           result = p_provider_result,
+           completed_at = now()
+     where id = claim.id;
+
+    insert into public.webhooks_log (
+      ingresso_id,
+      status,
+      method,
+      evento,
+      detalhe,
+      payload,
+      metadata
+    ) values (
+      ticket.id,
+      200,
+      'MANUAL',
+      'excluido_manual',
+      'Ingresso ' || ticket.pedido_id || ' (' || ticket.tipo_ingresso ||
+        ') excluido definitivamente.',
+      jsonb_build_object(
+        'acao', 'exclusao',
+        'pedido_id', ticket.pedido_id,
+        'tipo', ticket.tipo_ingresso,
+        'participante', participant.nome_completo,
+        'inac_id', coalesce(ticket.inac_id, ''),
+        'inac_deleted', ticket.inac_id is not null,
+        'actor', claim.actor
+      )::text,
+      jsonb_build_object(
+        'actor', claim.actor,
+        'claim_id', claim.id,
+        'snapshot', to_jsonb(ticket) || jsonb_build_object('participante', to_jsonb(participant)),
+        'provider_result', p_provider_result
+      )
+    );
+
+    update public.ingressos
+       set participante_id = null,
+           status = 'Pendente',
+           preenchido_em = null,
+           status_webhook = 'pendente',
+           inac_id = null,
+           inac_qr = null
+     where id = ticket.id;
+    delete from public.participantes where id = participant_id;
+    delete from public.ingressos where id = ticket.id;
+
+    return jsonb_build_object(
+      'success', true,
+      'claimId', claim.id,
+      'removed_participante', participant_id is not null,
+      'inac_id_present', ticket.inac_id is not null,
+      'snapshot', to_jsonb(ticket)
+    );
+  end if;
+
+  update public.ticket_operation_claims
+     set state = 'completed',
+         result = p_provider_result,
+         completed_at = now()
+   where id = claim.id;
+
+  insert into public.webhooks_log (
+    ingresso_id,
+    status,
+    method,
+    evento,
+    detalhe,
+    payload,
+    metadata
+  ) values (
+    ticket.id,
+    200,
+    case when claim.actor like 'helpdesk:%' then 'HELPDESK' else 'MANUAL' end,
+    case
+      when claim.actor like 'helpdesk:%' and claim.operation = 'edit'
+        then 'helpdesk_edicao'
+      when claim.actor like 'helpdesk:%' and claim.operation = 'change_type'
+        then 'helpdesk_tipo_alterado'
+      when claim.operation = 'edit' then 'editado_manual'
+      when claim.operation = 'change_type' then 'tipo_alterado'
+      else 'ticket_' || claim.operation
+    end,
+    case
+      when claim.operation = 'edit'
+        then 'Ingresso ' || ticket.pedido_id || ' - dados editados por ' || claim.actor
+      when claim.operation = 'change_type'
+        then 'Ingresso ' || ticket.pedido_id || ' - tipo alterado de ' ||
+          ticket.tipo_ingresso || ' para ' || coalesce(claim.payload->>'tipo', '') ||
+          ' por ' || claim.actor
+      else 'Operacao concluida por ' || claim.actor
+    end,
+    jsonb_build_object(
+      'acao', claim.operation,
+      'pedido_id', ticket.pedido_id,
+      'actor', claim.actor,
+      'antes', case
+        when claim.operation = 'edit' then to_jsonb(participant)
+        else jsonb_build_object('tipo', ticket.tipo_ingresso)
+      end,
+      'depois', claim.payload
+    )::text,
+    jsonb_build_object(
+      'actor', claim.actor,
+      'claim_id', claim.id,
+      'payload', claim.payload,
+      'provider_result', p_provider_result
+    )
+  );
+
+  return jsonb_build_object('success', true, 'claimId', claim.id);
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.consume_buyer_token (
+  p_token text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  buyer public.compradores;
+begin
+  buyer := private.buyer_for_token(p_token);
+
+  return jsonb_build_object(
+    'id', buyer.id,
+    'nome', buyer.nome,
+    'email', buyer.email,
+    'token', p_token
+  );
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.create_participant_link (
+  p_buyer_token text,
+  p_ticket_id   text,
+  p_expires_at  timestamp with time zone DEFAULT (now() + '1 day'::interval)
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  buyer public.compradores;
+  ticket public.ingressos;
+  link public.links_participante;
+begin
+  buyer := private.buyer_for_token(p_buyer_token);
+
+  select *
+    into ticket
+    from public.ingressos
+   where id = p_ticket_id
+     and comprador_id = buyer.id
+   for update;
+
+  if ticket.id is null then
+    raise exception using errcode = 'P0001', message = 'TICKET_NOT_FOUND';
+  end if;
+  if ticket.status <> 'Pendente' or ticket.participante_id is not null then
+    raise exception using errcode = 'P0001', message = 'TICKET_ALREADY_CREDENTIALLED';
+  end if;
+
+  insert into public.links_participante (ingresso_id, token, expira_em)
+  values (ticket.id, encode(extensions.gen_random_bytes(32), 'hex'), p_expires_at)
+  returning * into link;
+
+  return jsonb_build_object(
+    'token', link.token,
+    'expiresAt', link.expira_em,
+    'ticketId', ticket.id
+  );
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.credential_ticket (
+  p_ticket_id text,
+  p_payload   jsonb,
+  p_actor     text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+begin
+  return private.create_participant_for_ticket(
+    p_ticket_id,
+    p_payload || jsonb_build_object('termsAccepted', true),
+    p_actor
+  );
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.finalize_sync_bootstrap (
+  p_run_id uuid
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
 declare
   bootstrap public.sync_bootstrap_runs;
   staged public.sync_bootstrap_rows;
@@ -1142,35 +1615,220 @@ exception
       'error', sqlerrm
     );
 end;
-$$;
+$function$;
 
-create or replace view public.sync_health
-with (security_invoker = true)
-as
-select
-  s.mode,
-  s.external_effects_enabled,
-  s.pocketbase_writes_blocked,
-  s.last_sync_poll_at,
-  s.last_sync_event_at,
-  s.last_reconciled_at,
-  s.sync_outbox_backlog,
-  s.bootstrap_state,
-  s.last_sync_error,
-  extract(epoch from (now() - s.last_sync_poll_at))::integer as lag_seconds,
-  count(*) filter (where e.state = 'failed') as failed_events,
-  count(*) filter (where e.state = 'received') as pending_events,
-  max(e.applied_at) as last_applied_at
-from public.system_state s
-left join public.sync_events e on true
-where s.singleton
-group by
-  s.mode,
-  s.external_effects_enabled,
-  s.pocketbase_writes_blocked,
-  s.last_sync_poll_at,
-  s.last_sync_event_at,
-  s.last_reconciled_at,
-  s.sync_outbox_backlog,
-  s.bootstrap_state,
-  s.last_sync_error;
+CREATE OR REPLACE FUNCTION public.get_buyer_tickets (
+  p_token text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  buyer public.compradores;
+  tickets jsonb;
+begin
+  buyer := private.buyer_for_token(p_token);
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', i.id,
+        'pedido_id', i.pedido_id,
+        'type', i.tipo_ingresso,
+        'tipo_ingresso', i.tipo_ingresso,
+        'status', i.status,
+        'participantName', p.nome_completo,
+        'participantEmail', p.email,
+        'participantCpf', p.cpf,
+        'participante_id', i.participante_id,
+        'inac_id', i.inac_id,
+        'inac_qr', i.inac_qr,
+        'pendingLink', active_link.token
+      )
+      order by i.created_at desc, i.id desc
+    ),
+    '[]'::jsonb
+  )
+  into tickets
+  from public.ingressos i
+  left join public.participantes p on p.id = i.participante_id
+  left join lateral (
+    select lp.token
+      from public.links_participante lp
+     where lp.ingresso_id = i.id
+       and lp.usado = false
+       and lp.expira_em > now()
+     order by lp.created_at desc
+     limit 1
+  ) active_link on true
+  where i.comprador_id = buyer.id;
+
+  return jsonb_build_object('buyer', jsonb_build_object(
+    'id', buyer.id,
+    'nome', buyer.nome,
+    'email', buyer.email
+  ), 'tickets', tickets);
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_participant_link (
+  p_token text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  result jsonb;
+begin
+  select jsonb_build_object(
+    'id', i.id,
+    'pedido_id', i.pedido_id,
+    'tipo_ingresso', i.tipo_ingresso,
+    'status', i.status,
+    'comprador', jsonb_build_object(
+      'id', c.id,
+      'nome', c.nome,
+      'email', c.email
+    ),
+    'used', lp.usado,
+    'expiresAt', lp.expira_em
+  )
+  into result
+  from public.links_participante lp
+  join public.ingressos i on i.id = lp.ingresso_id
+  join public.compradores c on c.id = i.comprador_id
+  where lp.token = p_token
+    and lp.usado = false
+    and lp.expira_em > now();
+
+  if result is null then
+    raise exception using errcode = 'P0001', message = 'INVALID_OR_EXPIRED_LINK';
+  end if;
+
+  return result;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_system_mode (
+  p_mode                      text,
+  p_user_id                   uuid,
+  p_pocketbase_writes_blocked boolean DEFAULT false,
+  p_reason                    text    DEFAULT ''::text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  state public.system_state;
+  previous_state public.system_state;
+begin
+  if p_mode not in ('standby', 'active', 'maintenance') then
+    raise exception using errcode = 'P0001', message = 'INVALID_SYSTEM_MODE';
+  end if;
+  if not exists (
+    select 1
+      from public.admin_profiles ap
+     where ap.user_id = p_user_id
+       and ap.active
+       and ap.role = 'admin'
+  ) then
+    raise exception using errcode = '42501', message = 'ADMIN_REQUIRED';
+  end if;
+
+  select * into previous_state
+    from public.system_state
+   where singleton
+   for update;
+
+  if p_mode = 'active' then
+    if not p_pocketbase_writes_blocked then
+      raise exception using errcode = 'P0001', message = 'POCKETBASE_WRITES_MUST_BE_BLOCKED';
+    end if;
+    if previous_state.bootstrap_state <> 'completed'
+       or previous_state.sync_outbox_backlog <> 0
+       or previous_state.last_sync_error is not null
+       or previous_state.last_sync_poll_at is null
+       or previous_state.last_sync_poll_at < now() - interval '90 seconds'
+       or previous_state.last_reconciled_at is null
+       or previous_state.last_reconciled_at < now() - interval '15 minutes'
+       or exists (
+         select 1
+           from public.sync_events
+          where state in ('received', 'failed')
+       ) then
+      raise exception using errcode = 'P0001', message = 'SYNC_NOT_READY_FOR_FAILOVER';
+    end if;
+  end if;
+
+  update public.system_state
+     set mode = p_mode,
+         external_effects_enabled = false,
+         activated_at = case when p_mode = 'active' then now() else activated_at end,
+         activated_by = case when p_mode = 'active' then p_user_id else activated_by end,
+         pocketbase_writes_blocked = p_pocketbase_writes_blocked
+   where singleton
+   returning * into state;
+
+  insert into public.system_state_audit (
+    user_id,
+    action,
+    previous_state,
+    new_state,
+    reason
+  ) values (
+    p_user_id,
+    'mode_changed',
+    to_jsonb(previous_state),
+    to_jsonb(state),
+    btrim(coalesce(p_reason, ''))
+  );
+
+  return to_jsonb(state);
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.submit_participant (
+  p_link_token text,
+  p_payload    jsonb
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  link public.links_participante;
+  result jsonb;
+begin
+  select *
+    into link
+    from public.links_participante
+   where token = p_link_token
+   for update;
+
+  if link.id is null or link.usado or link.expira_em <= now() then
+    raise exception using errcode = 'P0001', message = 'INVALID_OR_EXPIRED_LINK';
+  end if;
+
+  result := private.create_participant_for_ticket(
+    link.ingresso_id,
+    p_payload,
+    'participant'
+  );
+
+  update public.links_participante
+     set usado = true
+   where id = link.id;
+
+  return result;
+end;
+$function$;
+
+ALTER TABLE public.sync_bootstrap_rows
+  ADD CONSTRAINT sync_bootstrap_rows_source_table_check CHECK (source_table = ANY (ARRAY['compradores'::text, 'ingressos'::text, 'participantes'::text]));

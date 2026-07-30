@@ -4,19 +4,7 @@ import { skipSyncRequest } from '../_shared/skip-sync.ts'
 
 type AnyRow = Record<string, any>
 
-const collections = [
-  'compradores',
-  'ingressos',
-  'participantes',
-  'tokens_acesso',
-  'links_participante',
-  'webhooks_log',
-  'disparos',
-  'envios',
-  'pedidos_guru',
-  'disparos_wa',
-  'cortesias',
-] as const
+const collections = ['compradores', 'ingressos', 'participantes'] as const
 
 type CollectionName = (typeof collections)[number]
 
@@ -298,7 +286,13 @@ async function runAction(action: string) {
   try {
     if (action === 'preview_bootstrap') {
       const run = await beginBootstrap()
-      return { bootstrap: await advanceBootstrap(run) }
+      const bootstrap = await advanceBootstrap(run)
+      const { error: stateError } = await db
+        .from('system_state')
+        .update({ last_sync_error: null })
+        .eq('singleton', true)
+      if (stateError) throw stateError
+      return { bootstrap }
     }
     if (action === 'apply_bootstrap') {
       const { data: run, error } = await db

@@ -15,7 +15,8 @@ Skip “Adapta Summit 2026”.
    - `SKIP_SYNC_HMAC_SECRET`: mesmo segredo HMAC.
    - `SYNC_PULL_WORKER_SECRET`: segredo usado pelo Supabase Cron.
 
-O Skip só grava eventos pequenos no `sync_outbox` e serve páginas de até 100
-registros. O bootstrap e a aplicação dos eventos são executados pelo Supabase.
+O Skip só grava eventos pequenos de `compradores`, `ingressos` e `participantes`
+no `sync_outbox` e serve essas três coleções em páginas de até 100 registros.
+O bootstrap e a aplicação dos eventos são executados pelo Supabase.
 O endpoint `/backend/v1/sync/control` é a única forma remota de bloquear ou
 liberar as escritas operacionais do Skip durante o failover.

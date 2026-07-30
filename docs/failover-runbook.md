@@ -19,7 +19,7 @@ ativar o fallback sem duplicar escritas ou comunicações.
 1. No Dashboard do Skip, clique em **Sincronizar Supabase**.
 2. Aguarde a prévia terminar. O Skip somente serve páginas de até 100 registros;
    todo o staging é feito no Supabase.
-3. Confira as contagens das 11 coleções.
+3. Confira as contagens de `compradores`, `ingressos` e `participantes`.
 4. Digite `IMPORTAR PARA O SUPABASE` e confirme.
 5. Aguarde o bootstrap, a reprodução do outbox e a reconciliação.
 6. Em **Sistema → Failover** no Admin do Supabase, confirme:

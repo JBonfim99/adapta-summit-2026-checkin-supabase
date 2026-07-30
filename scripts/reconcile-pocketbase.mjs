@@ -7,11 +7,9 @@ const required = (name) => {
 }
 
 const pocketBaseUrl = required('POCKETBASE_URL')
-const supabase = createClient(
-  required('SUPABASE_URL'),
-  required('SUPABASE_SERVICE_ROLE_KEY'),
-  { auth: { persistSession: false, autoRefreshToken: false } },
-)
+const supabase = createClient(required('SUPABASE_URL'), required('SUPABASE_SERVICE_ROLE_KEY'), {
+  auth: { persistSession: false, autoRefreshToken: false },
+})
 
 async function authenticate() {
   const email = required('POCKETBASE_ADMIN_EMAIL')
@@ -63,19 +61,7 @@ async function supabaseRecords(name) {
 
 async function main() {
   const token = await authenticate()
-  const names = [
-    'compradores',
-    'ingressos',
-    'participantes',
-    'tokens_acesso',
-    'links_participante',
-    'webhooks_log',
-    'disparos',
-    'envios',
-    'pedidos_guru',
-    'disparos_wa',
-    'cortesias',
-  ]
+  const names = ['compradores', 'ingressos', 'participantes']
   let failed = false
   for (const name of names) {
     const [source, target] = await Promise.all([

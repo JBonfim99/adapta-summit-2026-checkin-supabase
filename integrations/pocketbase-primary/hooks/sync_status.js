@@ -22,17 +22,25 @@ routerAdd('GET', '/backend/v1/sync/status', (e) => {
   }
 
   const control = $app.findFirstRecordByFilter('sync_control', "id != ''")
+  const pendingCoreFilter =
+    "state = 'pending' && (source_table = 'compradores' || source_table = 'ingressos' || source_table = 'participantes')"
+  const pendingCoreExpression = $dbx.and(
+    $dbx.hashExp({ state: 'pending' }),
+    $dbx.in('source_table', 'compradores', 'ingressos', 'participantes'),
+  )
   let cursor = {}
   try {
-    const latest = $app.findFirstRecordByFilter('sync_outbox', "state = 'pending'", '-created,-id')
-    cursor = {
-      created: latest.getString('created'),
-      id: latest.id,
-      event_id: latest.getString('event_id'),
+    const latest = $app.findRecordsByFilter('sync_outbox', pendingCoreFilter, '-created,-id', 1, 0)
+    if (latest.length > 0) {
+      cursor = {
+        created: latest[0].getString('created'),
+        id: latest[0].id,
+        event_id: latest[0].getString('event_id'),
+      }
     }
   } catch (_) {}
   return e.json(200, {
-    backlog: $app.countRecords('sync_outbox', "state = 'pending'"),
+    backlog: $app.countRecords('sync_outbox', pendingCoreExpression),
     block_writes: control.getBool('block_writes'),
     cursor: cursor,
   })

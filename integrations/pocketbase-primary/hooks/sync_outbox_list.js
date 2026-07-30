@@ -23,14 +23,14 @@ routerAdd('GET', '/backend/v1/sync/outbox', (e) => {
 
   const rawLimit = Number(e.request.url.query().get('limit') || 100)
   const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.trunc(rawLimit), 1), 100) : 100
-  const records = $app.findRecordsByFilter(
-    'sync_outbox',
-    "state = 'pending'",
-    'created,id',
-    limit,
-    0,
+  const pendingCoreFilter =
+    "state = 'pending' && (source_table = 'compradores' || source_table = 'ingressos' || source_table = 'participantes')"
+  const pendingCoreExpression = $dbx.and(
+    $dbx.hashExp({ state: 'pending' }),
+    $dbx.in('source_table', 'compradores', 'ingressos', 'participantes'),
   )
-  const backlog = $app.countRecords('sync_outbox', "state = 'pending'")
+  const records = $app.findRecordsByFilter('sync_outbox', pendingCoreFilter, 'created,id', limit, 0)
+  const backlog = $app.countRecords('sync_outbox', pendingCoreExpression)
   return e.json(200, {
     backlog: backlog,
     events: records.map((record) => ({

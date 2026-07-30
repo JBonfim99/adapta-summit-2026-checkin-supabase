@@ -21,19 +21,7 @@ routerAdd('GET', '/backend/v1/sync/snapshot', (e) => {
     return e.unauthorizedError('SYNC_SIGNATURE_INVALID')
   }
 
-  const allowed = [
-    'compradores',
-    'ingressos',
-    'participantes',
-    'tokens_acesso',
-    'links_participante',
-    'webhooks_log',
-    'disparos',
-    'envios',
-    'pedidos_guru',
-    'disparos_wa',
-    'cortesias',
-  ]
+  const allowed = ['compradores', 'ingressos', 'participantes']
   const query = e.request.url.query()
   const collection = query.get('collection') || ''
   if (allowed.indexOf(collection) === -1) return e.badRequestError('SYNC_COLLECTION_INVALID')

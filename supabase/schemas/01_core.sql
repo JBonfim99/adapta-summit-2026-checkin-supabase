@@ -502,15 +502,7 @@ create table public.sync_bootstrap_rows (
     source_table in (
       'compradores',
       'ingressos',
-      'participantes',
-      'tokens_acesso',
-      'links_participante',
-      'webhooks_log',
-      'disparos',
-      'envios',
-      'pedidos_guru',
-      'disparos_wa',
-      'cortesias'
+      'participantes'
     )
   ),
   record_id text not null,

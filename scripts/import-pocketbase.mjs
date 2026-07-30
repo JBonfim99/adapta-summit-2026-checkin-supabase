@@ -90,27 +90,15 @@ async function count(table) {
 
 async function main() {
   const token = await authenticate()
-  const names = [
-    'compradores',
-    'ingressos',
-    'participantes',
-    'tokens_acesso',
-    'links_participante',
-    'webhooks_log',
-    'disparos',
-    'envios',
-    'pedidos_guru',
-    'disparos_wa',
-    'cortesias',
-  ]
+  const names = ['compradores', 'ingressos', 'participantes']
   const snapshot = Object.fromEntries(
     await Promise.all(names.map(async (name) => [name, await fetchCollection(name, token)])),
   )
 
-  await apply(snapshot.compradores.map((row) => event('compradores', row)), 'compradores')
-  await apply(snapshot.disparos.map((row) => event('disparos', row)), 'disparos')
-  await apply(snapshot.disparos_wa.map((row) => event('disparos_wa', row)), 'disparos_wa')
-  await apply(snapshot.cortesias.map((row) => event('cortesias', row)), 'cortesias')
+  await apply(
+    snapshot.compradores.map((row) => event('compradores', row)),
+    'compradores',
+  )
   await apply(
     snapshot.ingressos.map((row) =>
       event('ingressos', row, 'ticket-stage', {
@@ -121,16 +109,14 @@ async function main() {
     ),
     'ingressos stage',
   )
-  await apply(snapshot.participantes.map((row) => event('participantes', row)), 'participantes')
+  await apply(
+    snapshot.participantes.map((row) => event('participantes', row)),
+    'participantes',
+  )
   await apply(
     snapshot.ingressos.map((row) => event('ingressos', row, 'ticket-final')),
     'ingressos final',
   )
-  await apply(snapshot.tokens_acesso.map((row) => event('tokens_acesso', row)), 'tokens')
-  await apply(snapshot.links_participante.map((row) => event('links_participante', row)), 'links')
-  await apply(snapshot.envios.map((row) => event('envios', row)), 'envios')
-  await apply(snapshot.pedidos_guru.map((row) => event('pedidos_guru', row)), 'guru')
-  await apply(snapshot.webhooks_log.map((row) => event('webhooks_log', row)), 'logs')
 
   const verification = {}
   for (const name of names) {
@@ -140,9 +126,7 @@ async function main() {
     }
   }
   console.table(verification)
-  const mismatch = Object.values(verification).some(
-    (value) => value.pocketbase !== value.supabase,
-  )
+  const mismatch = Object.values(verification).some((value) => value.pocketbase !== value.supabase)
   if (mismatch) throw new Error('Import count mismatch')
 }
 

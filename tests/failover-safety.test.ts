@@ -46,8 +46,85 @@ describe('failover external-effects gate', () => {
 
   it('keeps the empty Skip poll to indexed outbox reads', () => {
     const hook = source('integrations/pocketbase-primary/hooks/sync_outbox_list.js')
-    expect(hook).toContain(`"state = 'pending'"`)
+    expect(hook).toContain(`state = 'pending'`)
+    expect(hook).toContain(`source_table = 'compradores'`)
+    expect(hook).toContain(`source_table = 'ingressos'`)
+    expect(hook).toContain(`source_table = 'participantes'`)
     expect(hook).toContain(`'created,id'`)
+  })
+
+  it('limits Skip snapshots and lifecycle outbox hooks to the participant core', () => {
+    const core = ['compradores', 'ingressos', 'participantes']
+    const excluded = [
+      'tokens_acesso',
+      'links_participante',
+      'webhooks_log',
+      'disparos',
+      'envios',
+      'pedidos_guru',
+      'disparos_wa',
+      'cortesias',
+    ]
+    const paths = [
+      'integrations/pocketbase-primary/hooks/sync_snapshot.js',
+      'integrations/pocketbase-primary/hooks/sync_outbox_create.js',
+      'integrations/pocketbase-primary/hooks/sync_outbox_update.js',
+      'integrations/pocketbase-primary/hooks/sync_outbox_delete.js',
+    ]
+
+    for (const path of paths) {
+      const hook = source(path)
+      for (const collection of core) expect(hook).toContain(`'${collection}'`)
+      for (const collection of excluded) expect(hook).not.toContain(`'${collection}'`)
+    }
+  })
+
+  it('limits Supabase pull and Skip backlog reporting to the same three collections', () => {
+    const edgeFunction = source('supabase/functions/sync-pull/index.ts')
+    const collectionBlock = edgeFunction.slice(
+      edgeFunction.indexOf('const collections = ['),
+      edgeFunction.indexOf('] as const') + '] as const'.length,
+    )
+    expect(collectionBlock).toContain(`'compradores'`)
+    expect(collectionBlock).toContain(`'ingressos'`)
+    expect(collectionBlock).toContain(`'participantes'`)
+    expect(collectionBlock).not.toContain(`'tokens_acesso'`)
+    expect(collectionBlock).not.toContain(`'envios'`)
+
+    for (const path of [
+      'integrations/pocketbase-primary/hooks/sync_outbox_list.js',
+      'integrations/pocketbase-primary/hooks/sync_status.js',
+    ]) {
+      const hook = source(path)
+      expect(hook).toContain(`source_table = 'compradores'`)
+      expect(hook).toContain(`source_table = 'ingressos'`)
+      expect(hook).toContain(`source_table = 'participantes'`)
+      expect(hook).not.toContain(`source_table = 'tokens_acesso'`)
+      expect(hook).not.toContain(`source_table = 'envios'`)
+    }
+
+    const status = source('integrations/pocketbase-primary/hooks/sync_status.js')
+    expect(status).toContain(`findRecordsByFilter(`)
+    expect(status).not.toContain(`findFirstRecordByFilter('sync_outbox'`)
+    expect(status).toContain(`$dbx.in('source_table', 'compradores', 'ingressos', 'participantes')`)
+    expect(status).toContain(`countRecords('sync_outbox', pendingCoreExpression)`)
+
+    const outbox = source('integrations/pocketbase-primary/hooks/sync_outbox_list.js')
+    expect(outbox).toContain(
+      `$dbx.in('source_table', 'compradores', 'ingressos', 'participantes')`,
+    )
+    expect(outbox).toContain(`countRecords('sync_outbox', pendingCoreExpression)`)
+  })
+
+  it('retires pending events from the eight excluded collections without touching business rows', () => {
+    const migration = source(
+      'integrations/pocketbase-primary/migrations/0046_reduce_supabase_sync_scope.js',
+    )
+    expect(migration).toContain(`source_table != 'compradores'`)
+    expect(migration).toContain(`source_table != 'ingressos'`)
+    expect(migration).toContain(`source_table != 'participantes'`)
+    expect(migration).toContain(`set('state', 'delivered')`)
+    expect(migration).not.toMatch(/delete|remove/i)
   })
 
   it('allows only Skip superusers to trigger bootstrap or pull-now', () => {
