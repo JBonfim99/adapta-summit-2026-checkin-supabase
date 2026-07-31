@@ -266,8 +266,8 @@ select
     "id": "ticket_reduced_sync",
     "comprador_id": "buyer_reduced_sync",
     "pedido_id": "REDUCED-001",
-    "status": "Pré-Credenciado",
-    "participante_id": "participant_reduced_sync",
+    "status": "Pendente",
+    "participante_id": "",
     "preenchido_em": "2030-01-01T11:30:00Z",
     "tipo_ingresso": "PLATINUM",
     "status_webhook": "erro",
@@ -341,6 +341,12 @@ select is(
   (select result->'counts' from reduced_sync_result),
   '{"compradores":1,"ingressos":1,"participantes":1}'::jsonb,
   'bootstrap result exposes only the three core counts'
+);
+
+select is(
+  (select (result->>'repaired_participant_links')::integer from reduced_sync_result),
+  1,
+  'bootstrap repairs a missing reverse participant link from the participant relation'
 );
 
 select is(

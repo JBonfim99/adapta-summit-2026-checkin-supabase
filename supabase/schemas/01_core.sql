@@ -123,7 +123,7 @@ create table public.participantes (
 
 create unique index participantes_email_unique
   on public.participantes (email_normalized);
-create unique index participantes_cpf_unique
+create index participantes_cpf_idx
   on public.participantes (cpf_normalized);
 create index participantes_busca_nome_idx
   on public.participantes using gin (to_tsvector('simple', nome_completo));

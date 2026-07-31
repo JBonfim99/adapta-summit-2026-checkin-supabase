@@ -1,9 +1,19 @@
-create or replace function private.buyer_for_token(p_token text)
-returns public.compradores
-language plpgsql
-security definer
-set search_path = ''
-as $$
+-- Migration unit 1: schema_changes
+-- Transaction mode: transactional
+-- Boundary reason: default
+
+SET check_function_bodies = false;
+
+DROP INDEX public.participantes_cpf_unique;
+
+CREATE OR REPLACE FUNCTION private.buyer_for_token (
+  p_token text
+)
+  RETURNS public.compradores
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
 declare
   result public.compradores;
 begin
@@ -21,225 +31,18 @@ begin
 
   return result;
 end;
-$$;
+$function$;
 
-create or replace function public.consume_buyer_token(p_token text)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  buyer public.compradores;
-begin
-  buyer := private.buyer_for_token(p_token);
-
-  return jsonb_build_object(
-    'id', buyer.id,
-    'nome', buyer.nome,
-    'email', buyer.email,
-    'token', p_token
-  );
-end;
-$$;
-
-create or replace function public.get_buyer_tickets(p_token text)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  buyer public.compradores;
-  tickets jsonb;
-begin
-  buyer := private.buyer_for_token(p_token);
-
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'id', i.id,
-        'pedido_id', i.pedido_id,
-        'type', i.tipo_ingresso,
-        'tipo_ingresso', i.tipo_ingresso,
-        'status', i.status,
-        'participantName', p.nome_completo,
-        'participantEmail', p.email,
-        'participantCpf', p.cpf,
-        'participante_id', i.participante_id,
-        'inac_id', i.inac_id,
-        'inac_qr', i.inac_qr,
-        'pendingLink', active_link.token
-      )
-      order by i.created_at desc, i.id desc
-    ),
-    '[]'::jsonb
-  )
-  into tickets
-  from public.ingressos i
-  left join public.participantes p on p.id = i.participante_id
-  left join lateral (
-    select lp.token
-      from public.links_participante lp
-     where lp.ingresso_id = i.id
-       and lp.usado = false
-       and lp.expira_em > now()
-     order by lp.created_at desc
-     limit 1
-  ) active_link on true
-  where i.comprador_id = buyer.id;
-
-  return jsonb_build_object('buyer', jsonb_build_object(
-    'id', buyer.id,
-    'nome', buyer.nome,
-    'email', buyer.email
-  ), 'tickets', tickets);
-end;
-$$;
-
-create or replace function public.create_admin_buyer_access_link(
-  p_buyer_id text,
-  p_expires_at timestamptz
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  buyer public.compradores;
-  access_token text;
-begin
-  select id, nome, email
-    into buyer
-    from public.compradores
-   where id = p_buyer_id;
-
-  if buyer.id is null then
-    raise exception using errcode = 'P0001', message = 'BUYER_NOT_FOUND';
-  end if;
-
-  access_token := encode(extensions.gen_random_bytes(32), 'hex');
-
-  insert into public.tokens_acesso (comprador_id, token, expira_em)
-  values (buyer.id, access_token, p_expires_at);
-
-  insert into public.webhooks_log (
-    evento,
-    method,
-    status,
-    detalhe,
-    payload,
-    metadata
-  ) values (
-    'admin_link_acesso',
-    'ADMIN',
-    200,
-    format('Link de acesso gerado no admin para %s (%s)', buyer.nome, buyer.email),
-    jsonb_build_object('comprador_id', buyer.id, 'expira_em', p_expires_at)::text,
-    jsonb_build_object('comprador_id', buyer.id, 'expira_em', p_expires_at)
-  );
-
-  return jsonb_build_object(
-    'token', access_token,
-    'email', buyer.email,
-    'nome', buyer.nome,
-    'expira_em', p_expires_at
-  );
-end;
-$$;
-
-create or replace function public.create_participant_link(
-  p_buyer_token text,
+CREATE OR REPLACE FUNCTION private.create_participant_for_ticket (
   p_ticket_id text,
-  p_expires_at timestamptz default (now() + interval '1 day')
+  p_payload   jsonb,
+  p_actor     text
 )
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  buyer public.compradores;
-  ticket public.ingressos;
-  link public.links_participante;
-begin
-  buyer := private.buyer_for_token(p_buyer_token);
-
-  select *
-    into ticket
-    from public.ingressos
-   where id = p_ticket_id
-     and comprador_id = buyer.id
-   for update;
-
-  if ticket.id is null then
-    raise exception using errcode = 'P0001', message = 'TICKET_NOT_FOUND';
-  end if;
-  if ticket.status <> 'Pendente' or ticket.participante_id is not null then
-    raise exception using errcode = 'P0001', message = 'TICKET_ALREADY_CREDENTIALLED';
-  end if;
-
-  insert into public.links_participante (ingresso_id, token, expira_em)
-  values (ticket.id, encode(extensions.gen_random_bytes(32), 'hex'), p_expires_at)
-  returning * into link;
-
-  return jsonb_build_object(
-    'token', link.token,
-    'expiresAt', link.expira_em,
-    'ticketId', ticket.id
-  );
-end;
-$$;
-
-create or replace function public.get_participant_link(p_token text)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  result jsonb;
-begin
-  select jsonb_build_object(
-    'id', i.id,
-    'pedido_id', i.pedido_id,
-    'tipo_ingresso', i.tipo_ingresso,
-    'status', i.status,
-    'comprador', jsonb_build_object(
-      'id', c.id,
-      'nome', c.nome,
-      'email', c.email
-    ),
-    'used', lp.usado,
-    'expiresAt', lp.expira_em
-  )
-  into result
-  from public.links_participante lp
-  join public.ingressos i on i.id = lp.ingresso_id
-  join public.compradores c on c.id = i.comprador_id
-  where lp.token = p_token
-    and lp.usado = false
-    and lp.expira_em > now();
-
-  if result is null then
-    raise exception using errcode = 'P0001', message = 'INVALID_OR_EXPIRED_LINK';
-  end if;
-
-  return result;
-end;
-$$;
-
-create or replace function private.create_participant_for_ticket(
-  p_ticket_id text,
-  p_payload jsonb,
-  p_actor text
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
 declare
   ticket public.ingressos;
   participant_id text := private.new_text_id();
@@ -364,75 +167,19 @@ begin
     'pedidoId', ticket.pedido_id
   );
 end;
-$$;
+$function$;
 
-create or replace function public.submit_participant(
-  p_link_token text,
-  p_payload jsonb
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  link public.links_participante;
-  result jsonb;
-begin
-  select *
-    into link
-    from public.links_participante
-   where token = p_link_token
-   for update;
-
-  if link.id is null or link.usado or link.expira_em <= now() then
-    raise exception using errcode = 'P0001', message = 'INVALID_OR_EXPIRED_LINK';
-  end if;
-
-  result := private.create_participant_for_ticket(
-    link.ingresso_id,
-    p_payload,
-    'participant'
-  );
-
-  update public.links_participante
-     set usado = true
-   where id = link.id;
-
-  return result;
-end;
-$$;
-
-create or replace function public.credential_ticket(
-  p_ticket_id text,
-  p_payload jsonb,
-  p_actor text
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
-begin
-  return private.create_participant_for_ticket(
-    p_ticket_id,
-    p_payload || jsonb_build_object('termsAccepted', true),
-    p_actor
-  );
-end;
-$$;
-
-create or replace function public.claim_ticket_operation(
+CREATE OR REPLACE FUNCTION public.claim_ticket_operation (
   p_ticket_id text,
   p_operation text,
-  p_actor text,
-  p_payload jsonb default '{}'::jsonb
+  p_actor     text,
+  p_payload   jsonb DEFAULT '{}'::jsonb
 )
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
 declare
   ticket public.ingressos;
   participant public.participantes;
@@ -517,18 +264,18 @@ exception
   when unique_violation then
     raise exception using errcode = 'P0001', message = 'TICKET_OPERATION_IN_PROGRESS';
 end;
-$$;
+$function$;
 
-create or replace function public.complete_ticket_operation(
-  p_claim_id uuid,
-  p_success boolean,
-  p_provider_result jsonb default '{}'::jsonb
+CREATE OR REPLACE FUNCTION public.complete_ticket_operation (
+  p_claim_id        uuid,
+  p_success         boolean,
+  p_provider_result jsonb   DEFAULT '{}'::jsonb
 )
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
 declare
   claim public.ticket_operation_claims;
   ticket public.ingressos;
@@ -759,19 +506,199 @@ begin
 
   return jsonb_build_object('success', true, 'claimId', claim.id);
 end;
-$$;
+$function$;
 
-create or replace function public.set_system_mode(
-  p_mode text,
-  p_user_id uuid,
-  p_pocketbase_writes_blocked boolean default false,
-  p_reason text default ''
+CREATE OR REPLACE FUNCTION public.consume_buyer_token (
+  p_token text
 )
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  buyer public.compradores;
+begin
+  buyer := private.buyer_for_token(p_token);
+
+  return jsonb_build_object(
+    'id', buyer.id,
+    'nome', buyer.nome,
+    'email', buyer.email,
+    'token', p_token
+  );
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.create_participant_link (
+  p_buyer_token text,
+  p_ticket_id   text,
+  p_expires_at  timestamp with time zone DEFAULT (now() + '1 day'::interval)
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  buyer public.compradores;
+  ticket public.ingressos;
+  link public.links_participante;
+begin
+  buyer := private.buyer_for_token(p_buyer_token);
+
+  select *
+    into ticket
+    from public.ingressos
+   where id = p_ticket_id
+     and comprador_id = buyer.id
+   for update;
+
+  if ticket.id is null then
+    raise exception using errcode = 'P0001', message = 'TICKET_NOT_FOUND';
+  end if;
+  if ticket.status <> 'Pendente' or ticket.participante_id is not null then
+    raise exception using errcode = 'P0001', message = 'TICKET_ALREADY_CREDENTIALLED';
+  end if;
+
+  insert into public.links_participante (ingresso_id, token, expira_em)
+  values (ticket.id, encode(extensions.gen_random_bytes(32), 'hex'), p_expires_at)
+  returning * into link;
+
+  return jsonb_build_object(
+    'token', link.token,
+    'expiresAt', link.expira_em,
+    'ticketId', ticket.id
+  );
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.credential_ticket (
+  p_ticket_id text,
+  p_payload   jsonb,
+  p_actor     text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+begin
+  return private.create_participant_for_ticket(
+    p_ticket_id,
+    p_payload || jsonb_build_object('termsAccepted', true),
+    p_actor
+  );
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_buyer_tickets (
+  p_token text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  buyer public.compradores;
+  tickets jsonb;
+begin
+  buyer := private.buyer_for_token(p_token);
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', i.id,
+        'pedido_id', i.pedido_id,
+        'type', i.tipo_ingresso,
+        'tipo_ingresso', i.tipo_ingresso,
+        'status', i.status,
+        'participantName', p.nome_completo,
+        'participantEmail', p.email,
+        'participantCpf', p.cpf,
+        'participante_id', i.participante_id,
+        'inac_id', i.inac_id,
+        'inac_qr', i.inac_qr,
+        'pendingLink', active_link.token
+      )
+      order by i.created_at desc, i.id desc
+    ),
+    '[]'::jsonb
+  )
+  into tickets
+  from public.ingressos i
+  left join public.participantes p on p.id = i.participante_id
+  left join lateral (
+    select lp.token
+      from public.links_participante lp
+     where lp.ingresso_id = i.id
+       and lp.usado = false
+       and lp.expira_em > now()
+     order by lp.created_at desc
+     limit 1
+  ) active_link on true
+  where i.comprador_id = buyer.id;
+
+  return jsonb_build_object('buyer', jsonb_build_object(
+    'id', buyer.id,
+    'nome', buyer.nome,
+    'email', buyer.email
+  ), 'tickets', tickets);
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.get_participant_link (
+  p_token text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
+declare
+  result jsonb;
+begin
+  select jsonb_build_object(
+    'id', i.id,
+    'pedido_id', i.pedido_id,
+    'tipo_ingresso', i.tipo_ingresso,
+    'status', i.status,
+    'comprador', jsonb_build_object(
+      'id', c.id,
+      'nome', c.nome,
+      'email', c.email
+    ),
+    'used', lp.usado,
+    'expiresAt', lp.expira_em
+  )
+  into result
+  from public.links_participante lp
+  join public.ingressos i on i.id = lp.ingresso_id
+  join public.compradores c on c.id = i.comprador_id
+  where lp.token = p_token
+    and lp.usado = false
+    and lp.expira_em > now();
+
+  if result is null then
+    raise exception using errcode = 'P0001', message = 'INVALID_OR_EXPIRED_LINK';
+  end if;
+
+  return result;
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.set_system_mode (
+  p_mode                      text,
+  p_user_id                   uuid,
+  p_pocketbase_writes_blocked boolean DEFAULT false,
+  p_reason                    text    DEFAULT ''::text
+)
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
 declare
   state public.system_state;
   previous_state public.system_state;
@@ -807,8 +734,8 @@ begin
        or previous_state.last_reconciled_at < now() - interval '15 minutes'
        or exists (
          select 1
-           from public.sync_events sync_event
-          where sync_event.state in ('received', 'failed')
+           from public.sync_events
+          where state in ('received', 'failed')
        ) then
       raise exception using errcode = 'P0001', message = 'SYNC_NOT_READY_FOR_FAILOVER';
     end if;
@@ -839,82 +766,43 @@ begin
 
   return to_jsonb(state);
 end;
-$$;
+$function$;
 
-create or replace function public.set_external_effects(
-  p_enabled boolean,
-  p_user_id uuid,
-  p_confirmation text default '',
-  p_reason text default ''
+CREATE OR REPLACE FUNCTION public.submit_participant (
+  p_link_token text,
+  p_payload    jsonb
 )
-returns jsonb
-language plpgsql
-security definer
-set search_path = ''
-as $$
+  RETURNS jsonb
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO ''
+  AS $function$
 declare
-  state public.system_state;
-  previous_state public.system_state;
+  link public.links_participante;
+  result jsonb;
 begin
-  if not exists (
-    select 1
-      from public.admin_profiles ap
-     where ap.user_id = p_user_id
-       and ap.active
-       and ap.role = 'admin'
-  ) then
-    raise exception using errcode = '42501', message = 'ADMIN_REQUIRED';
-  end if;
-
-  select * into previous_state
-    from public.system_state
-   where singleton
+  select *
+    into link
+    from public.links_participante
+   where token = p_link_token
    for update;
 
-  if p_enabled then
-    if p_confirmation <> 'HABILITAR COMUNICACOES' then
-      raise exception using errcode = 'P0001', message = 'EXTERNAL_EFFECTS_CONFIRMATION_REQUIRED';
-    end if;
-    if btrim(coalesce(p_reason, '')) = '' then
-      raise exception using errcode = 'P0001', message = 'EXTERNAL_EFFECTS_REASON_REQUIRED';
-    end if;
-    if previous_state.mode <> 'active'
-       or not previous_state.pocketbase_writes_blocked
-       or previous_state.bootstrap_state <> 'completed'
-       or previous_state.sync_outbox_backlog <> 0
-       or previous_state.last_sync_error is not null
-       or previous_state.last_sync_poll_at is null
-       or previous_state.last_sync_poll_at < now() - interval '90 seconds'
-       or previous_state.last_reconciled_at is null
-       or previous_state.last_reconciled_at < now() - interval '15 minutes'
-       or exists (
-         select 1
-           from public.sync_events sync_event
-          where sync_event.state in ('received', 'failed')
-       ) then
-      raise exception using errcode = 'P0001', message = 'EXTERNAL_EFFECTS_PRECONDITIONS_FAILED';
-    end if;
+  if link.id is null or link.usado or link.expira_em <= now() then
+    raise exception using errcode = 'P0001', message = 'INVALID_OR_EXPIRED_LINK';
   end if;
 
-  update public.system_state
-     set external_effects_enabled = p_enabled
-   where singleton
-   returning * into state;
-
-  insert into public.system_state_audit (
-    user_id,
-    action,
-    previous_state,
-    new_state,
-    reason
-  ) values (
-    p_user_id,
-    case when p_enabled then 'external_effects_enabled' else 'external_effects_disabled' end,
-    to_jsonb(previous_state),
-    to_jsonb(state),
-    btrim(coalesce(p_reason, ''))
+  result := private.create_participant_for_ticket(
+    link.ingresso_id,
+    p_payload,
+    'participant'
   );
 
-  return to_jsonb(state);
+  update public.links_participante
+     set usado = true
+   where id = link.id;
+
+  return result;
 end;
-$$;
+$function$;
+
+CREATE INDEX participantes_cpf_idx ON public.participantes (cpf_normalized);

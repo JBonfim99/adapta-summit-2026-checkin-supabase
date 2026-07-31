@@ -19,6 +19,17 @@ select has_table('public', 'sync_tombstones', 'sync_tombstones exists');
 
 select has_column('public', 'compradores', 'email_normalized', 'buyer email is normalized');
 select has_column('public', 'participantes', 'cpf_normalized', 'participant CPF is normalized');
+select ok(
+  exists (
+    select 1
+      from pg_catalog.pg_class index_relation
+      join pg_catalog.pg_index index_definition
+        on index_definition.indexrelid = index_relation.oid
+     where index_relation.relname = 'participantes_cpf_idx'
+       and index_definition.indisunique = false
+  ),
+  'participant CPF lookup is indexed without rejecting duplicate source records'
+);
 select has_column('public', 'system_state', 'mode', 'system mode exists');
 
 select ok(

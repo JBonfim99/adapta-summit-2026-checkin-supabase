@@ -791,12 +791,12 @@ set search_path = ''
 as $$
 declare
   bootstrap public.sync_bootstrap_runs;
-  staged public.sync_bootstrap_rows;
   table_name text;
-  existing_id text;
   expected_count integer;
   actual_count integer;
   applied_count integer := 0;
+  affected_count integer := 0;
+  repaired_link_count integer := 0;
   collection_names constant text[] := array[
     'compradores',
     'ingressos',
@@ -867,8 +867,14 @@ begin
           where ticket.run_id = p_run_id
             and ticket.source_table = 'ingressos'
             and ticket.record_id = participant.payload->>'ingresso_id'
-            and coalesce(ticket.payload->>'participante_id', '') = participant.record_id
        )
+  ) or exists (
+    select 1
+      from public.sync_bootstrap_rows participant
+     where participant.run_id = p_run_id
+       and participant.source_table = 'participantes'
+     group by participant.payload->>'ingresso_id'
+    having count(*) > 1
   ) or exists (
     select 1
       from public.sync_bootstrap_rows ticket
@@ -888,6 +894,16 @@ begin
       errcode = 'P0001',
       message = 'BOOTSTRAP_PARTICIPANT_LINK_MISMATCH';
   end if;
+
+  select count(*) into repaired_link_count
+    from public.sync_bootstrap_rows participant
+    join public.sync_bootstrap_rows ticket
+      on ticket.run_id = p_run_id
+     and ticket.source_table = 'ingressos'
+     and ticket.record_id = participant.payload->>'ingresso_id'
+   where participant.run_id = p_run_id
+     and participant.source_table = 'participantes'
+     and coalesce(ticket.payload->>'participante_id', '') <> participant.record_id;
 
   update public.sync_bootstrap_runs
      set state = 'applying',
@@ -909,165 +925,306 @@ begin
      set participante_id = null,
          status = 'Pendente',
          preenchido_em = null;
-  update public.compradores set updated_at = '1970-01-01 00:00:00+00';
-  update public.ingressos set updated_at = '1970-01-01 00:00:00+00';
-  update public.participantes set updated_at = '1970-01-01 00:00:00+00';
 
-  for existing_id in
-    select participant.id
-      from public.participantes participant
-     where not exists (
-       select 1
-         from public.sync_bootstrap_rows staged_participant
-        where staged_participant.run_id = p_run_id
-          and staged_participant.source_table = 'participantes'
-          and staged_participant.record_id = participant.id
-     )
-  loop
-    perform public.apply_sync_event(
-      jsonb_build_object(
-        'event_id', format('bootstrap:%s:delete:participantes:%s', p_run_id, existing_id),
-        'table', 'participantes',
-        'record_id', existing_id,
-        'operation', 'delete',
-        'source_updated_at', bootstrap.created_at,
-        'payload', '{}'::jsonb
-      )
-    );
-    applied_count := applied_count + 1;
-  end loop;
+  delete from public.participantes participant
+   where not exists (
+     select 1
+       from public.sync_bootstrap_rows staged
+      where staged.run_id = p_run_id
+        and staged.source_table = 'participantes'
+        and staged.record_id = participant.id
+   );
+  get diagnostics affected_count = row_count;
+  applied_count := applied_count + affected_count;
 
-  for staged in
-    select *
-      from public.sync_bootstrap_rows
-     where run_id = p_run_id
-       and source_table = 'compradores'
-     order by record_id
-  loop
-    perform public.apply_sync_event(
-      jsonb_build_object(
-        'event_id', format('bootstrap:%s:final:compradores:%s', p_run_id, staged.record_id),
-        'table', staged.source_table,
-        'record_id', staged.record_id,
-        'operation', 'update',
-        'source_updated_at', staged.source_updated_at,
-        'payload', staged.payload
-      )
-    );
-    applied_count := applied_count + 1;
-  end loop;
+  insert into public.compradores (
+    id,
+    nome,
+    email,
+    documento,
+    uf,
+    cidade,
+    telefone,
+    acesso_status,
+    acesso_template_id,
+    acesso_enviado_em,
+    acesso_tentativas,
+    acesso_erro,
+    acesso_disparo_id,
+    acesso_claim,
+    wa_status,
+    wa_disparo_id,
+    wa_tentativas,
+    wa_erro,
+    wa_claim,
+    wa_enviado_em,
+    created_at,
+    updated_at
+  )
+  select
+    staged.record_id,
+    staged.payload->>'nome',
+    staged.payload->>'email',
+    coalesce(staged.payload->>'documento', ''),
+    coalesce(staged.payload->>'uf', ''),
+    coalesce(staged.payload->>'cidade', ''),
+    coalesce(staged.payload->>'telefone', ''),
+    nullif(staged.payload->>'acesso_status', ''),
+    nullif(staged.payload->>'acesso_template_id', ''),
+    nullif(staged.payload->>'acesso_enviado_em', '')::timestamptz,
+    coalesce(nullif(staged.payload->>'acesso_tentativas', '')::integer, 0),
+    nullif(staged.payload->>'acesso_erro', ''),
+    nullif(staged.payload->>'acesso_disparo_id', ''),
+    nullif(staged.payload->>'acesso_claim', ''),
+    nullif(staged.payload->>'wa_status', ''),
+    nullif(staged.payload->>'wa_disparo_id', ''),
+    coalesce(nullif(staged.payload->>'wa_tentativas', '')::integer, 0),
+    nullif(staged.payload->>'wa_erro', ''),
+    nullif(staged.payload->>'wa_claim', ''),
+    nullif(staged.payload->>'wa_enviado_em', '')::timestamptz,
+    private.json_timestamp(staged.payload, 'created_at', staged.source_updated_at),
+    staged.source_updated_at
+  from public.sync_bootstrap_rows staged
+  where staged.run_id = p_run_id
+    and staged.source_table = 'compradores'
+  on conflict (id) do update set
+    nome = excluded.nome,
+    email = excluded.email,
+    documento = excluded.documento,
+    uf = excluded.uf,
+    cidade = excluded.cidade,
+    telefone = excluded.telefone,
+    acesso_status = excluded.acesso_status,
+    acesso_template_id = excluded.acesso_template_id,
+    acesso_enviado_em = excluded.acesso_enviado_em,
+    acesso_tentativas = excluded.acesso_tentativas,
+    acesso_erro = excluded.acesso_erro,
+    acesso_disparo_id = excluded.acesso_disparo_id,
+    acesso_claim = excluded.acesso_claim,
+    wa_status = excluded.wa_status,
+    wa_disparo_id = excluded.wa_disparo_id,
+    wa_tentativas = excluded.wa_tentativas,
+    wa_erro = excluded.wa_erro,
+    wa_claim = excluded.wa_claim,
+    wa_enviado_em = excluded.wa_enviado_em,
+    created_at = excluded.created_at,
+    updated_at = excluded.updated_at;
+  get diagnostics affected_count = row_count;
+  applied_count := applied_count + affected_count;
 
-  for staged in
-    select *
-      from public.sync_bootstrap_rows
-     where run_id = p_run_id
-       and source_table = 'ingressos'
-     order by record_id
-  loop
-    perform public.apply_sync_event(
-      jsonb_build_object(
-        'event_id', format('bootstrap:%s:ticket-stage:%s', p_run_id, staged.record_id),
-        'table', staged.source_table,
-        'record_id', staged.record_id,
-        'operation', 'update',
-        'source_updated_at', staged.source_updated_at,
-        'payload', staged.payload || jsonb_build_object(
-          'status', 'Pendente',
-          'participante_id', '',
-          'preenchido_em', ''
-        )
-      )
-    );
-    applied_count := applied_count + 1;
-  end loop;
+  insert into public.ingressos (
+    id,
+    comprador_id,
+    pedido_id,
+    status,
+    participante_id,
+    preenchido_em,
+    tipo_ingresso,
+    status_webhook,
+    inac_id,
+    inac_qr,
+    origem,
+    cortesia_id,
+    created_at,
+    updated_at
+  )
+  select
+    staged.record_id,
+    staged.payload->>'comprador_id',
+    staged.payload->>'pedido_id',
+    'Pendente',
+    null,
+    null,
+    coalesce(nullif(staged.payload->>'tipo_ingresso', ''), 'GOLD'),
+    coalesce(nullif(staged.payload->>'status_webhook', ''), 'pendente'),
+    nullif(staged.payload->>'inac_id', ''),
+    nullif(staged.payload->>'inac_qr', ''),
+    coalesce(nullif(staged.payload->>'origem', ''), 'pocketbase'),
+    nullif(staged.payload->>'cortesia_id', ''),
+    private.json_timestamp(staged.payload, 'created_at', staged.source_updated_at),
+    staged.source_updated_at
+  from public.sync_bootstrap_rows staged
+  where staged.run_id = p_run_id
+    and staged.source_table = 'ingressos'
+  on conflict (id) do update set
+    comprador_id = excluded.comprador_id,
+    pedido_id = excluded.pedido_id,
+    status = excluded.status,
+    participante_id = excluded.participante_id,
+    preenchido_em = excluded.preenchido_em,
+    tipo_ingresso = excluded.tipo_ingresso,
+    status_webhook = excluded.status_webhook,
+    inac_id = excluded.inac_id,
+    inac_qr = excluded.inac_qr,
+    origem = excluded.origem,
+    cortesia_id = excluded.cortesia_id,
+    created_at = excluded.created_at,
+    updated_at = excluded.updated_at;
+  get diagnostics affected_count = row_count;
+  applied_count := applied_count + affected_count;
 
-  for staged in
-    select *
-      from public.sync_bootstrap_rows
-     where run_id = p_run_id
-       and source_table = 'participantes'
-     order by record_id
-  loop
-    perform public.apply_sync_event(
-      jsonb_build_object(
-        'event_id', format('bootstrap:%s:final:participantes:%s', p_run_id, staged.record_id),
-        'table', staged.source_table,
-        'record_id', staged.record_id,
-        'operation', 'update',
-        'source_updated_at', staged.source_updated_at,
-        'payload', staged.payload
-      )
-    );
-    applied_count := applied_count + 1;
-  end loop;
+  insert into public.participantes (
+    id,
+    ingresso_id,
+    nome_completo,
+    email,
+    cpf,
+    telefone,
+    nome_empresa,
+    cargo,
+    nicho,
+    num_funcionarios,
+    faturamento_anual,
+    areas_ajuda,
+    expectativa_aprendizado,
+    expectativa_experiencia,
+    acesso_status,
+    acesso_disparo_id,
+    acesso_template_id,
+    acesso_enviado_em,
+    acesso_tentativas,
+    acesso_erro,
+    acesso_claim,
+    ia_uso_diario,
+    ia_profundidade,
+    ia_ferramentas,
+    ia_desafio,
+    tem_empresa,
+    profissao,
+    terms_accepted_at,
+    created_at,
+    updated_at
+  )
+  select
+    staged.record_id,
+    staged.payload->>'ingresso_id',
+    staged.payload->>'nome_completo',
+    staged.payload->>'email',
+    staged.payload->>'cpf',
+    coalesce(staged.payload->>'telefone', ''),
+    coalesce(staged.payload->>'nome_empresa', ''),
+    coalesce(staged.payload->>'cargo', ''),
+    coalesce(staged.payload->>'nicho', ''),
+    coalesce(staged.payload->>'num_funcionarios', ''),
+    coalesce(staged.payload->>'faturamento_anual', ''),
+    case
+      when jsonb_typeof(staged.payload->'areas_ajuda') = 'array'
+        then staged.payload->'areas_ajuda'
+      else '[]'::jsonb
+    end,
+    coalesce(staged.payload->>'expectativa_aprendizado', ''),
+    coalesce(staged.payload->>'expectativa_experiencia', ''),
+    nullif(staged.payload->>'acesso_status', ''),
+    nullif(staged.payload->>'acesso_disparo_id', ''),
+    nullif(staged.payload->>'acesso_template_id', ''),
+    nullif(staged.payload->>'acesso_enviado_em', '')::timestamptz,
+    coalesce(nullif(staged.payload->>'acesso_tentativas', '')::integer, 0),
+    nullif(staged.payload->>'acesso_erro', ''),
+    nullif(staged.payload->>'acesso_claim', ''),
+    nullif(staged.payload->>'ia_uso_diario', '')::integer,
+    nullif(staged.payload->>'ia_profundidade', '')::integer,
+    coalesce(staged.payload->>'ia_ferramentas', ''),
+    coalesce(staged.payload->>'ia_desafio', ''),
+    nullif(staged.payload->>'tem_empresa', '')::boolean,
+    coalesce(staged.payload->>'profissao', ''),
+    coalesce(
+      nullif(staged.payload->>'terms_accepted_at', '')::timestamptz,
+      staged.source_updated_at
+    ),
+    private.json_timestamp(staged.payload, 'created_at', staged.source_updated_at),
+    staged.source_updated_at
+  from public.sync_bootstrap_rows staged
+  where staged.run_id = p_run_id
+    and staged.source_table = 'participantes'
+  on conflict (id) do update set
+    ingresso_id = excluded.ingresso_id,
+    nome_completo = excluded.nome_completo,
+    email = excluded.email,
+    cpf = excluded.cpf,
+    telefone = excluded.telefone,
+    nome_empresa = excluded.nome_empresa,
+    cargo = excluded.cargo,
+    nicho = excluded.nicho,
+    num_funcionarios = excluded.num_funcionarios,
+    faturamento_anual = excluded.faturamento_anual,
+    areas_ajuda = excluded.areas_ajuda,
+    expectativa_aprendizado = excluded.expectativa_aprendizado,
+    expectativa_experiencia = excluded.expectativa_experiencia,
+    acesso_status = excluded.acesso_status,
+    acesso_disparo_id = excluded.acesso_disparo_id,
+    acesso_template_id = excluded.acesso_template_id,
+    acesso_enviado_em = excluded.acesso_enviado_em,
+    acesso_tentativas = excluded.acesso_tentativas,
+    acesso_erro = excluded.acesso_erro,
+    acesso_claim = excluded.acesso_claim,
+    ia_uso_diario = excluded.ia_uso_diario,
+    ia_profundidade = excluded.ia_profundidade,
+    ia_ferramentas = excluded.ia_ferramentas,
+    ia_desafio = excluded.ia_desafio,
+    tem_empresa = excluded.tem_empresa,
+    profissao = excluded.profissao,
+    terms_accepted_at = excluded.terms_accepted_at,
+    created_at = excluded.created_at,
+    updated_at = excluded.updated_at;
+  get diagnostics affected_count = row_count;
+  applied_count := applied_count + affected_count;
 
-  for existing_id in
-    select ticket.id
-      from public.ingressos ticket
-     where not exists (
-       select 1
-         from public.sync_bootstrap_rows staged_ticket
-        where staged_ticket.run_id = p_run_id
-          and staged_ticket.source_table = 'ingressos'
-          and staged_ticket.record_id = ticket.id
-     )
-  loop
-    perform public.apply_sync_event(
-      jsonb_build_object(
-        'event_id', format('bootstrap:%s:delete:ingressos:%s', p_run_id, existing_id),
-        'table', 'ingressos',
-        'record_id', existing_id,
-        'operation', 'delete',
-        'source_updated_at', bootstrap.created_at,
-        'payload', '{}'::jsonb
-      )
-    );
-    applied_count := applied_count + 1;
-  end loop;
+  delete from public.ingressos ticket
+   where not exists (
+     select 1
+       from public.sync_bootstrap_rows staged
+      where staged.run_id = p_run_id
+        and staged.source_table = 'ingressos'
+        and staged.record_id = ticket.id
+   );
+  get diagnostics affected_count = row_count;
+  applied_count := applied_count + affected_count;
 
-  for existing_id in
-    select buyer.id
-      from public.compradores buyer
-     where not exists (
-       select 1
-         from public.sync_bootstrap_rows staged_buyer
-        where staged_buyer.run_id = p_run_id
-          and staged_buyer.source_table = 'compradores'
-          and staged_buyer.record_id = buyer.id
-     )
-  loop
-    perform public.apply_sync_event(
-      jsonb_build_object(
-        'event_id', format('bootstrap:%s:delete:compradores:%s', p_run_id, existing_id),
-        'table', 'compradores',
-        'record_id', existing_id,
-        'operation', 'delete',
-        'source_updated_at', bootstrap.created_at,
-        'payload', '{}'::jsonb
-      )
-    );
-    applied_count := applied_count + 1;
-  end loop;
+  delete from public.compradores buyer
+   where not exists (
+     select 1
+       from public.sync_bootstrap_rows staged
+      where staged.run_id = p_run_id
+        and staged.source_table = 'compradores'
+        and staged.record_id = buyer.id
+   );
+  get diagnostics affected_count = row_count;
+  applied_count := applied_count + affected_count;
 
-  for staged in
-    select *
-      from public.sync_bootstrap_rows
-     where run_id = p_run_id
-       and source_table = 'ingressos'
-     order by record_id
-  loop
-    perform public.apply_sync_event(
-      jsonb_build_object(
-        'event_id', format('bootstrap:%s:ticket-final:%s', p_run_id, staged.record_id),
-        'table', staged.source_table,
-        'record_id', staged.record_id,
-        'operation', 'update',
-        'source_updated_at', staged.source_updated_at,
-        'payload', staged.payload
-      )
-    );
-    applied_count := applied_count + 1;
-  end loop;
+  update public.ingressos ticket
+     set comprador_id = staged.payload->>'comprador_id',
+         pedido_id = staged.payload->>'pedido_id',
+         status = case
+           when participant.record_id is null then 'Pendente'
+           else 'Pré-Credenciado'
+         end,
+         participante_id = participant.record_id,
+         preenchido_em = case
+           when participant.record_id is null then null
+           else nullif(staged.payload->>'preenchido_em', '')::timestamptz
+         end,
+         tipo_ingresso = coalesce(nullif(staged.payload->>'tipo_ingresso', ''), 'GOLD'),
+         status_webhook = coalesce(nullif(staged.payload->>'status_webhook', ''), 'pendente'),
+         inac_id = nullif(staged.payload->>'inac_id', ''),
+         inac_qr = nullif(staged.payload->>'inac_qr', ''),
+         origem = coalesce(nullif(staged.payload->>'origem', ''), 'pocketbase'),
+         cortesia_id = nullif(staged.payload->>'cortesia_id', ''),
+         created_at = private.json_timestamp(
+           staged.payload,
+           'created_at',
+           staged.source_updated_at
+         ),
+         updated_at = staged.source_updated_at
+    from public.sync_bootstrap_rows staged
+    left join public.sync_bootstrap_rows participant
+      on participant.run_id = staged.run_id
+     and participant.source_table = 'participantes'
+     and participant.payload->>'ingresso_id' = staged.record_id
+   where staged.run_id = p_run_id
+     and staged.source_table = 'ingressos'
+     and ticket.id = staged.record_id;
+  get diagnostics affected_count = row_count;
+  applied_count := applied_count + affected_count;
 
   foreach table_name in array collection_names
   loop
@@ -1123,7 +1280,8 @@ begin
     'run_id', p_run_id,
     'state', 'completed',
     'counts', bootstrap.counts,
-    'applied_events', applied_count
+    'applied_events', applied_count,
+    'repaired_participant_links', repaired_link_count
   );
 exception
   when others then
