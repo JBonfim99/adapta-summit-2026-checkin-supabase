@@ -788,6 +788,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = ''
+set statement_timeout = '30s'
 as $$
 declare
   bootstrap public.sync_bootstrap_runs;

@@ -34,6 +34,19 @@ interface OutboxAckThroughResponse {
   through_cursor: Record<string, unknown>
 }
 
+function errorMessage(error: unknown, fallback = 'SYNC_PULL_FAILED') {
+  if (error instanceof Error) return error.message
+  if (
+    error &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string'
+  ) {
+    return error.message
+  }
+  return fallback
+}
+
 function constantTimeEqual(left: string, right: string) {
   if (left.length !== right.length) return false
   let mismatch = 0
@@ -281,13 +294,10 @@ async function retireOutboxThrough(cursor: Record<string, unknown>) {
   if (!cursor?.created || !cursor?.id || !cursor?.event_id) {
     throw new Error('BOOTSTRAP_SOURCE_CURSOR_INVALID')
   }
-  return await skipSyncRequest<OutboxAckThroughResponse>(
-    '/backend/v1/sync/outbox/ack-through',
-    {
-      method: 'POST',
-      body: { cursor },
-    },
-  )
+  return await skipSyncRequest<OutboxAckThroughResponse>('/backend/v1/sync/outbox/ack-through', {
+    method: 'POST',
+    body: { cursor },
+  })
 }
 
 async function runAction(action: string) {
@@ -324,7 +334,15 @@ async function runAction(action: string) {
       const { data: result, error: finalizeError } = await db.rpc('finalize_sync_bootstrap', {
         p_run_id: run.id,
       })
-      if (finalizeError) throw finalizeError
+      if (finalizeError) {
+        console.error('BOOTSTRAP_APPLY_FAILED', finalizeError)
+        throw new ApiError(500, 'BOOTSTRAP_APPLY_FAILED', {
+          code: finalizeError.code,
+          message: finalizeError.message,
+          details: finalizeError.details,
+          hint: finalizeError.hint,
+        })
+      }
       if ((result as AnyRow)?.state !== 'completed') {
         throw new ApiError(409, 'BOOTSTRAP_APPLY_FAILED', result)
       }
@@ -359,8 +377,7 @@ async function runAction(action: string) {
     throw new ApiError(400, 'SYNC_ACTION_INVALID')
   } catch (error) {
     try {
-      const message = error instanceof Error ? error.message : 'SYNC_PULL_FAILED'
-      await recordPoll(0, message)
+      await recordPoll(0, errorMessage(error))
     } catch (_) {
       // Preserve the original failure.
     }

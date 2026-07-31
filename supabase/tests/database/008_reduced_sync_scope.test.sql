@@ -3,6 +3,19 @@ begin;
 set search_path = public, extensions;
 select no_plan();
 
+select ok(
+  exists (
+    select 1
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+      cross join lateral unnest(coalesce(p.proconfig, array[]::text[])) as config(value)
+     where n.nspname = 'public'
+       and p.proname = 'finalize_sync_bootstrap'
+       and config.value = 'statement_timeout=30s'
+  ),
+  'bootstrap finalize owns a bounded timeout long enough for the transactional import'
+);
+
 update public.system_state
    set mode = 'standby',
        external_effects_enabled = false,
