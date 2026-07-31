@@ -50,6 +50,6 @@ routerAdd(
     } catch (_) {}
     return e.json(200, response.json || { success: true })
   },
-  $apis.requireSuperuserAuth(),
+  $apis.requireAuth(),
   $apis.bodyLimit(8192),
 )

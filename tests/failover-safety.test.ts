@@ -127,10 +127,11 @@ describe('failover external-effects gate', () => {
     expect(migration).not.toMatch(/delete|remove/i)
   })
 
-  it('allows only Skip superusers to trigger bootstrap or pull-now', () => {
+  it('allows authenticated Skip dashboard admins to trigger bootstrap or pull-now', () => {
     const hook = source('integrations/pocketbase-primary/hooks/sync_trigger.js')
-    expect(hook).toContain('$apis.requireSuperuserAuth()')
-    expect(hook).not.toContain('$apis.requireAuth()')
+    expect(hook).toContain('$apis.requireAuth()')
+    expect(hook).not.toContain('$apis.requireSuperuserAuth()')
+    expect(hook).toContain('$apis.bodyLimit(8192)')
   })
 
   it('gates provider catalog reads when they are not mocked', () => {
