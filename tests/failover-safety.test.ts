@@ -53,6 +53,22 @@ describe('failover external-effects gate', () => {
     expect(hook).toContain(`'created,id'`)
   })
 
+  it('retires only outbox events already represented by a completed bootstrap snapshot', () => {
+    const hook = source(
+      'integrations/pocketbase-primary/hooks/sync_outbox_ack_through.js',
+    )
+    expect(hook).toContain(`'/backend/v1/sync/outbox/ack-through'`)
+    expect(hook).toContain(`cursorRecord.getString('created') !== created`)
+    expect(hook).toContain(`created < {:created}`)
+    expect(hook).toContain(`created = {:created} AND id <= {:id}`)
+    expect(hook).toContain(`state = 'delivered'`)
+    expect(hook).not.toMatch(/DELETE FROM sync_outbox/i)
+
+    const edgeFunction = source('supabase/functions/sync-pull/index.ts')
+    expect(edgeFunction).toContain('await retireOutboxThrough')
+    expect(edgeFunction).toContain('await recordPoll(retired.backlog)')
+  })
+
   it('limits Skip snapshots and lifecycle outbox hooks to the participant core', () => {
     const core = ['compradores', 'ingressos', 'participantes']
     const excluded = [

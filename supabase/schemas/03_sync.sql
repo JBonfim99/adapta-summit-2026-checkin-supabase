@@ -924,7 +924,8 @@ begin
   update public.ingressos
      set participante_id = null,
          status = 'Pendente',
-         preenchido_em = null;
+         preenchido_em = null
+   where true;
 
   delete from public.participantes participant
    where not exists (

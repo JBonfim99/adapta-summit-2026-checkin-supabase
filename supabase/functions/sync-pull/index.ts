@@ -28,6 +28,12 @@ interface OutboxResponse {
   backlog: number
 }
 
+interface OutboxAckThroughResponse {
+  acknowledged: number
+  backlog: number
+  through_cursor: Record<string, unknown>
+}
+
 function constantTimeEqual(left: string, right: string) {
   if (left.length !== right.length) return false
   let mismatch = 0
@@ -271,6 +277,19 @@ async function pullOutbox() {
   }
 }
 
+async function retireOutboxThrough(cursor: Record<string, unknown>) {
+  if (!cursor?.created || !cursor?.id || !cursor?.event_id) {
+    throw new Error('BOOTSTRAP_SOURCE_CURSOR_INVALID')
+  }
+  return await skipSyncRequest<OutboxAckThroughResponse>(
+    '/backend/v1/sync/outbox/ack-through',
+    {
+      method: 'POST',
+      body: { cursor },
+    },
+  )
+}
+
 async function runAction(action: string) {
   const db = adminDb()
   if (action === 'status') return statusPayload()
@@ -297,7 +316,7 @@ async function runAction(action: string) {
     if (action === 'apply_bootstrap') {
       const { data: run, error } = await db
         .from('sync_bootstrap_runs')
-        .select('id,state')
+        .select('id,state,source_cursor')
         .eq('state', 'ready')
         .maybeSingle()
       if (error) throw error
@@ -309,7 +328,9 @@ async function runAction(action: string) {
       if ((result as AnyRow)?.state !== 'completed') {
         throw new ApiError(409, 'BOOTSTRAP_APPLY_FAILED', result)
       }
-      return { bootstrap: result, incremental: await pullOutbox() }
+      const retired = await retireOutboxThrough(run.source_cursor)
+      await recordPoll(retired.backlog)
+      return { bootstrap: result, retired }
     }
     if (action === 'pull_now') {
       const { data: state, error } = await db
