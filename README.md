@@ -9,7 +9,7 @@ Supabase.
 - Login do comprador por magic link e token proprio.
 - Listagem, convite e visualizacao de ingressos.
 - Formulario do participante, QR code e integracao INAC.
-- Helpdesk com chave compartilhada e operador auditado.
+- Helpdesk com identificação do operador e auditoria das ações.
 - Supabase Auth para administradores.
 - Dashboard, compradores, participantes, logs e operacoes essenciais.
 - Importacao CSV, reconciliacao e criacao controlada de faltantes.

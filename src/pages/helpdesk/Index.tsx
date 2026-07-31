@@ -22,11 +22,9 @@ import { cn } from '@/lib/utils'
 import { classeTipoBalcao } from '@/lib/ticket-types'
 import {
   clearSession,
-  getKey,
   getOperador,
   hdBuscar,
   hdLogin,
-  HelpdeskAuthError,
   type HDComprador,
   type HDIngresso,
 } from '@/lib/helpdesk'
@@ -43,7 +41,6 @@ function LoginHelpdesk({
   onEntrar: () => void
   avisoInicial?: string
 }) {
-  const [senha, setSenha] = useState('')
   const [nome, setNome] = useState('')
   const [erro, setErro] = useState(avisoInicial || '')
   const [entrando, setEntrando] = useState(false)
@@ -52,10 +49,9 @@ function LoginHelpdesk({
     ev.preventDefault()
     setErro('')
     if (!nome.trim()) return setErro('Escreva o seu nome.')
-    if (!senha.trim()) return setErro('Digite a senha do balcão.')
     setEntrando(true)
     try {
-      await hdLogin(senha.trim(), nome.trim())
+      await hdLogin(nome.trim())
       onEntrar()
     } catch (e: any) {
       setErro(e.message)
@@ -84,20 +80,6 @@ function LoginHelpdesk({
               value={nome}
               onChange={(e) => setNome(e.target.value)}
               autoComplete="off"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="hd-senha" className="text-base font-semibold">
-              Senha do balcão
-            </Label>
-            <Input
-              id="hd-senha"
-              type="password"
-              className="h-14 text-lg"
-              placeholder="••••••••"
-              value={senha}
-              onChange={(e) => setSenha(e.target.value)}
             />
           </div>
 
@@ -312,7 +294,7 @@ function CardIngresso({
 // ------------------------------------------------------------------- página
 
 export default function Helpdesk() {
-  const [logado, setLogado] = useState(!!getKey())
+  const [logado, setLogado] = useState(!!getOperador())
   const [q, setQ] = useState('')
   const [buscando, setBuscando] = useState(false)
   const [buscou, setBuscou] = useState(false)
@@ -335,7 +317,6 @@ export default function Helpdesk() {
   useEffect(() => {
     if (!logado) return
     inputRef.current?.focus()
-    console.log(getKey())
   }, [logado])
 
   const sair = () => {
@@ -347,18 +328,7 @@ export default function Helpdesk() {
     setLogado(false)
   }
 
-  // Nada de erro sem explicação: se a senha for recusada no meio do
-  // atendimento, o motivo aparece na tela de entrada.
   const tratarErro = (e: any) => {
-    if (e instanceof HelpdeskAuthError) {
-      setMotivoSaida(
-        `${e.message} Se a senha do balcão foi trocada agora, peça a nova para o responsável.`,
-      )
-      setResultados([])
-      setBuscou(false)
-      setLogado(false)
-      return
-    }
     setErro(e?.message || 'Algo falhou e o sistema não recebeu o motivo. Chame o suporte.')
   }
 

@@ -21,7 +21,6 @@ interface FailoverStatus {
   health: {
     mode: 'standby' | 'active' | 'maintenance'
     external_effects_enabled: boolean
-    pocketbase_writes_blocked: boolean
     last_sync_poll_at: string | null
     last_sync_event_at: string | null
     last_reconciled_at: string | null
@@ -138,10 +137,6 @@ export default function AdminFailover() {
             <Badge variant={health.mode === 'active' ? 'destructive' : 'secondary'}>
               {health.mode}
             </Badge>
-            <p className="text-sm">
-              Skip bloqueado para escrita:{' '}
-              <strong>{health.pocketbase_writes_blocked ? 'sim' : 'não'}</strong>
-            </p>
             {health.mode === 'standby' ? (
               <Button
                 className="w-full gap-2"
@@ -285,8 +280,7 @@ export default function AdminFailover() {
           <AlertDialogHeader>
             <AlertDialogTitle>Ativar o fallback Supabase?</AlertDialogTitle>
             <AlertDialogDescription>
-              O servidor bloqueará as escritas no Skip antes de ativar o Supabase. As comunicações
-              continuarão desabilitadas.
+              A ativação não altera o Skip. As comunicações continuarão desabilitadas.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Input

@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest'
 const source = (path: string) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 
 describe('failover external-effects gate', () => {
+  it('never sends a write-control command to the Skip application', () => {
+    const adminApi = source('supabase/functions/admin-api/index.ts')
+    const skipSync = source('supabase/functions/_shared/skip-sync.ts')
+    expect(adminApi).not.toContain('setSkipWriteBlock')
+    expect(skipSync).not.toContain('/backend/v1/sync/control')
+  })
+
   it.each([
     'supabase/functions/_shared/sendgrid.ts',
     'supabase/functions/_shared/botconversa.ts',

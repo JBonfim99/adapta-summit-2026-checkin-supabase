@@ -1,4 +1,4 @@
-import { adminDb, requireHelpdesk, rpc } from '../_shared/db.ts'
+import { adminDb, rpc } from '../_shared/db.ts'
 import { ApiError, body, handler, json, routePath } from '../_shared/http.ts'
 import {
   dispatchCredentialToInac,
@@ -333,11 +333,7 @@ async function resendParticipant(ticketId: string, attendant: string) {
 
 Deno.serve((req) =>
   handler(req, async () => {
-    requireHelpdesk(req)
     const path = routePath(req, 'helpdesk-api')
-    if (req.method === 'POST' && path === '/backend/v1/helpdesk/login') {
-      return json({ ok: true })
-    }
     if (req.method === 'GET' && path === '/backend/v1/helpdesk/search') return search(req)
     if (req.method === 'POST' && path === '/backend/v1/helpdesk/credenciar') {
       return credential(req)

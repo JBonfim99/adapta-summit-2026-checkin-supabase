@@ -1,8 +1,6 @@
-// Cliente da area /helpdesk. A autenticacao usa uma senha compartilhada,
-// enviada somente para a Edge Function e auditada junto com o operador.
+// Cliente da area /helpdesk. O nome do operador acompanha as ações auditadas.
 import { backendPublicHeaders, backendUrl } from '@/lib/backend/client'
 
-const KEY_STORAGE = 'helpdesk_key'
 const OP_STORAGE = 'helpdesk_operador'
 
 export interface HDParticipante {
@@ -51,8 +49,6 @@ export interface HDPessoaForm {
   empresa: string
 }
 
-export class HelpdeskAuthError extends Error {}
-
 // Tempo máximo de espera. Ações que falam com a INAC podem demorar ~15s.
 const TIMEOUT_MS = 45000
 
@@ -84,18 +80,15 @@ export function avisosDe(res: any): string[] {
   return lista
 }
 
-export const getKey = () => localStorage.getItem(KEY_STORAGE) || ''
 export const getOperador = () => localStorage.getItem(OP_STORAGE) || ''
-export const saveSession = (key: string, operador: string) => {
-  localStorage.setItem(KEY_STORAGE, key)
+export const saveSession = (operador: string) => {
   localStorage.setItem(OP_STORAGE, operador)
 }
 export const clearSession = () => {
-  localStorage.removeItem(KEY_STORAGE)
   localStorage.removeItem(OP_STORAGE)
 }
 
-async function request(path: string, init: RequestInit = {}, key?: string): Promise<any> {
+async function request(path: string, init: RequestInit = {}): Promise<any> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
 
@@ -107,7 +100,6 @@ async function request(path: string, init: RequestInit = {}, key?: string): Prom
       headers: {
         'Content-Type': 'application/json',
         ...backendPublicHeaders(),
-        'X-Helpdesk-Key': key ?? getKey(),
         ...(init.headers || {}),
       },
     })
@@ -142,13 +134,6 @@ async function request(path: string, init: RequestInit = {}, key?: string): Prom
     }
   }
 
-  if (res.status === 401) {
-    clearSession()
-    throw new HelpdeskAuthError(
-      data?.message || 'A senha do balcão foi recusada pelo servidor. Entre de novo.',
-    )
-  }
-
   if (!res.ok) {
     const doServidor = data?.message || data?.error || (!jsonOk ? texto.slice(0, 200) : '')
     throw new Error(`${doServidor || motivoHttp(res.status)} (código ${res.status})`)
@@ -163,9 +148,8 @@ async function request(path: string, init: RequestInit = {}, key?: string): Prom
   return data
 }
 
-export async function hdLogin(senha: string, operador: string) {
-  await request('/backend/v1/helpdesk/login', { method: 'POST', body: '{}' }, senha)
-  saveSession(senha, operador)
+export async function hdLogin(operador: string) {
+  saveSession(operador)
 }
 
 export async function hdBuscar(q: string): Promise<HDComprador[]> {

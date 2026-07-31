@@ -129,12 +129,6 @@ if (
   throw new Error('Link do participante: dados do comprador incompletos')
 }
 
-await request('Login do helpdesk', 'helpdesk-api', '/backend/v1/helpdesk/login', {
-  method: 'POST',
-  headers: { 'X-Helpdesk-Key': functions.HELPDESK_KEY },
-  body: '{}',
-})
-
 const auth = createClient(supabaseUrl, publishableKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 })

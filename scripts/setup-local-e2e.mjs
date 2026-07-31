@@ -66,7 +66,6 @@ if (!['127.0.0.1', 'localhost', '::1'].includes(parsedUrl.hostname)) {
 }
 
 const appUrl = 'http://127.0.0.1:4173'
-const helpdeskKey = process.env.E2E_HELPDESK_KEY ?? 'HelpdeskLocal#2026'
 const syncSecret = process.env.E2E_SYNC_HMAC_SECRET ?? 'SyncLocalOnly#2026'
 const adminEmail = process.env.E2E_ADMIN_EMAIL ?? 'admin.local@adapta.test'
 const adminPassword = process.env.E2E_ADMIN_PASSWORD ?? 'AdminLocal#2026'
@@ -93,7 +92,6 @@ if (!preserveEnvFiles) {
       `SUPABASE_URL=${supabaseUrl}`,
       `SUPABASE_ANON_KEY=${publishableKey}`,
       `SUPABASE_SERVICE_ROLE_KEY=${serviceRoleKey}`,
-      `HELPDESK_KEY=${helpdeskKey}`,
       `SYNC_HMAC_SECRET=${syncSecret}`,
       'INAC_MODE=mock',
       'SENDGRID_MODE=mock',

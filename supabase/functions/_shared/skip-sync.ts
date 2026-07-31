@@ -55,10 +55,3 @@ export async function skipSyncRequest<T>(
   }
   return data as T
 }
-
-export function setSkipWriteBlock(blockWrites: boolean, reason: string) {
-  return skipSyncRequest<{ success: boolean; block_writes: boolean }>('/backend/v1/sync/control', {
-    method: 'POST',
-    body: { block_writes: blockWrites, reason },
-  })
-}

@@ -1,7 +1,7 @@
 # Runbook de failover
 
 Objetivo: manter o Supabase atualizado com atraso inferior a 60 segundos e
-ativar o fallback sem duplicar escritas ou comunicações.
+ativar o fallback sem controlar as escritas do Skip ou duplicar comunicações.
 
 ## Operação normal
 
@@ -35,9 +35,8 @@ O bootstrap não altera o modo do sistema e não libera comunicação externa.
 
 1. Abra **Sistema → Failover** no Admin do Supabase.
 2. Informe o motivo, digite `ATIVAR FALLBACK` e confirme.
-3. O `admin-api` bloqueia primeiro as escritas no Skip.
-4. Somente depois desse bloqueio e das verificações de saúde, o Supabase muda
-   para `active`.
+3. O `admin-api` não envia comandos ao Skip e muda o Supabase para `active`
+   somente após as verificações de saúde.
 5. Valide login, ingressos, formulário, QR code, helpdesk e Dashboard.
 6. Troque o domínio público apenas depois da validação operacional.
 
@@ -49,7 +48,6 @@ As comunicações ainda permanecem desabilitadas depois da ativação.
 2. Altere os modos dos provedores somente pelo Dashboard/CLI do Supabase.
 3. Confirme no Admin:
    - Supabase `active`;
-   - Skip bloqueado para escrita;
    - outbox drenado;
    - sincronização saudável;
    - reconciliação recente.
@@ -64,7 +62,7 @@ enquanto os efeitos estiverem habilitados.
 1. Desabilite as comunicações.
 2. Confirme que não há operação externa em andamento.
 3. No Admin, selecione **Voltar ao standby**.
-4. O `admin-api` desabilita os efeitos e libera as escritas no Skip.
+4. O `admin-api` desabilita os efeitos. O Skip não é alterado.
 
 Não replique dados produzidos no Supabase ativo de volta ao Skip sem um plano
 explícito de merge e reconciliação.

@@ -3,7 +3,7 @@ const configuredOrigin = Deno.env.get('APP_URL') ?? '*'
 export const corsHeaders = {
   'Access-Control-Allow-Origin': configuredOrigin,
   'Access-Control-Allow-Headers':
-    'authorization, apikey, content-type, x-api-key, x-buyer-token, x-helpdesk-key, x-sync-signature, x-sync-timestamp, x-worker-key',
+    'authorization, apikey, content-type, x-api-key, x-buyer-token, x-sync-signature, x-sync-timestamp, x-worker-key',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   Vary: 'Origin',
 }

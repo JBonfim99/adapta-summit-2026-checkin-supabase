@@ -795,9 +795,6 @@ begin
    for update;
 
   if p_mode = 'active' then
-    if not p_pocketbase_writes_blocked then
-      raise exception using errcode = 'P0001', message = 'POCKETBASE_WRITES_MUST_BE_BLOCKED';
-    end if;
     if previous_state.bootstrap_state <> 'completed'
        or previous_state.sync_outbox_backlog <> 0
        or previous_state.last_sync_error is not null
@@ -819,7 +816,7 @@ begin
          external_effects_enabled = false,
          activated_at = case when p_mode = 'active' then now() else activated_at end,
          activated_by = case when p_mode = 'active' then p_user_id else activated_by end,
-         pocketbase_writes_blocked = p_pocketbase_writes_blocked
+         pocketbase_writes_blocked = false
    where singleton
    returning * into state;
 
@@ -879,7 +876,6 @@ begin
       raise exception using errcode = 'P0001', message = 'EXTERNAL_EFFECTS_REASON_REQUIRED';
     end if;
     if previous_state.mode <> 'active'
-       or not previous_state.pocketbase_writes_blocked
        or previous_state.bootstrap_state <> 'completed'
        or previous_state.sync_outbox_backlog <> 0
        or previous_state.last_sync_error is not null

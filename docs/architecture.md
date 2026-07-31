@@ -6,7 +6,7 @@
 | ----------- | --------------------------------------- | ----------------- |
 | Publica     | Sem sessao                              | `public-api`      |
 | Comprador   | Token preservado do PocketBase          | `buyer-api`       |
-| Helpdesk    | `X-Helpdesk-Key` + operador             | `helpdesk-api`    |
+| Helpdesk    | Nome do operador (auditado)              | `helpdesk-api`    |
 | Admin       | JWT do Supabase Auth + `admin_profiles` | `admin-api`       |
 | Replicacao  | HMAC SHA-256 + janela de 5 minutos      | `sync-pull`       |
 | Worker      | `X-Worker-Key`, chamado pelo `pg_cron`  | `dispatch-worker` |
@@ -59,7 +59,6 @@ Nunca configurar no frontend:
 - `BOTCONVERSA_CATCH_URL`
 - `EXTERNAL_API_KEY`
 - `DISPATCH_WORKER_SECRET`
-- `HELPDESK_KEY`
 - `SYNC_HMAC_SECRET`
 - `SKIP_SYNC_HMAC_SECRET`
 - `SKIP_SYNC_BASE_URL`

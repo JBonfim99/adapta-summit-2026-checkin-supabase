@@ -77,17 +77,11 @@ await request(
 await request('invalid buyer token', 'buyer-api', '/backend/v1/buyer/tickets', 404, {
   headers: { Authorization: 'Bearer remote-smoke-invalid' },
 })
-await request('helpdesk login', 'helpdesk-api', '/backend/v1/helpdesk/login', 200, {
-  method: 'POST',
-  headers: { 'X-Helpdesk-Key': required(remote, 'HELPDESK_KEY') },
-  body: '{}',
-})
 await request(
   'helpdesk read',
   'helpdesk-api',
   '/backend/v1/helpdesk/search?q=remote-smoke-missing',
   200,
-  { headers: { 'X-Helpdesk-Key': required(remote, 'HELPDESK_KEY') } },
 )
 await request(
   'external API read',

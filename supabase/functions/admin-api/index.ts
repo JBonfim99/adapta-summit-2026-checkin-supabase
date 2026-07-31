@@ -8,7 +8,6 @@ import { callInac } from '../_shared/inac.ts'
 import { auditEvent, requireOperationalWrite } from '../_shared/operations.ts'
 import { handleAdminDataParity } from '../_shared/admin-data-parity.ts'
 import { handleAdminDispatchParity } from '../_shared/admin-dispatch-parity.ts'
-import { setSkipWriteBlock } from '../_shared/skip-sync.ts'
 
 const collections = new Set([
   'compradores',
@@ -916,8 +915,7 @@ async function systemFailover() {
     readiness: {
       sync_ready: syncReady,
       can_activate: health.mode === 'standby' && syncReady,
-      can_enable_external_effects:
-        health.mode === 'active' && health.pocketbase_writes_blocked === true && syncReady,
+      can_enable_external_effects: health.mode === 'active' && syncReady,
     },
     audit: audit ?? [],
   })
@@ -940,34 +938,21 @@ async function changeSystemMode(req: Request, userId: string) {
     if (input.confirmation !== 'ATIVAR FALLBACK') {
       throw new ApiError(409, 'FALLBACK_CONFIRMATION_REQUIRED')
     }
-    await setSkipWriteBlock(true, reason)
-    try {
-      const state = await rpc('set_system_mode', {
-        p_mode: 'active',
-        p_user_id: userId,
-        p_pocketbase_writes_blocked: true,
-        p_reason: reason,
-      })
-      return json({ success: true, state })
-    } catch (error) {
-      try {
-        await setSkipWriteBlock(false, 'rollback: Supabase activation failed')
-      } catch (_) {
-        // The safe failure mode is to leave the primary blocked.
-      }
-      throw error
-    }
+    const state = await rpc('set_system_mode', {
+      p_mode: 'active',
+      p_user_id: userId,
+      p_pocketbase_writes_blocked: false,
+      p_reason: reason,
+    })
+    return json({ success: true, state })
   }
 
   const state = await rpc('set_system_mode', {
     p_mode: mode,
     p_user_id: userId,
-    p_pocketbase_writes_blocked: mode === 'maintenance',
+    p_pocketbase_writes_blocked: false,
     p_reason: reason,
   })
-  if (mode === 'standby') {
-    await setSkipWriteBlock(false, reason)
-  }
   return json({ success: true, state })
 }
 
@@ -989,11 +974,7 @@ async function changeExternalEffects(req: Request, userId: string) {
   return json({ success: true, state, provider_modes: providerModes() })
 }
 
-async function activateFallback(req: Request, userId: string) {
-  const input = await body<{ pocketbase_writes_blocked?: boolean }>(req)
-  if (input.pocketbase_writes_blocked !== true) {
-    throw new ApiError(409, 'POCKETBASE_WRITE_BLOCK_CONFIRMATION_REQUIRED')
-  }
+async function activateFallback(_req: Request, userId: string) {
   const db = adminDb()
   const { data: health, error } = await db.from('sync_health').select('*').single()
   if (error) throw error
@@ -1008,23 +989,13 @@ async function activateFallback(req: Request, userId: string) {
   ) {
     throw new ApiError(409, 'SYNC_NOT_READY_FOR_FAILOVER', health)
   }
-  await setSkipWriteBlock(true, 'Fallback activated from compatibility endpoint')
-  try {
-    const state = await rpc('set_system_mode', {
-      p_mode: 'active',
-      p_user_id: userId,
-      p_pocketbase_writes_blocked: true,
-      p_reason: 'Fallback activated from compatibility endpoint',
-    })
-    return json({ success: true, state, previousHealth: health })
-  } catch (error) {
-    try {
-      await setSkipWriteBlock(false, 'rollback: compatibility activation failed')
-    } catch (_) {
-      // Leaving the primary blocked is safer than enabling both writers.
-    }
-    throw error
-  }
+  const state = await rpc('set_system_mode', {
+    p_mode: 'active',
+    p_user_id: userId,
+    p_pocketbase_writes_blocked: false,
+    p_reason: 'Fallback activated from compatibility endpoint',
+  })
+  return json({ success: true, state, previousHealth: health })
 }
 
 Deno.serve((req) =>

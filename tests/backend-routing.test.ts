@@ -14,7 +14,7 @@ describe('backend route ownership', () => {
   })
 
   it('maps every route in the 65-contract matrix to its Edge Function', () => {
-    expect(routeContracts).toHaveLength(65)
+    expect(routeContracts).toHaveLength(64)
     for (const contract of routeContracts) {
       const concretePath = contract.path.replace(/\{[^}]+\}/g, 'contract-fixture')
       expect(functionNameForPath(concretePath)).toBe(contract.owner)

@@ -79,18 +79,3 @@ export function buyerToken(req: Request): string {
   if (!token) throw new ApiError(401, 'BUYER_TOKEN_REQUIRED')
   return token
 }
-
-export function requireHelpdesk(req: Request): string {
-  const supplied = req.headers.get('X-Helpdesk-Key') ?? ''
-  const configured = Deno.env.get('HELPDESK_KEY') ?? Deno.env.get('HELPDESK_PASSWORD') ?? ''
-  if (!configured || supplied.length !== configured.length) {
-    throw new ApiError(401, 'HELPDESK_ACCESS_DENIED')
-  }
-
-  let mismatch = 0
-  for (let index = 0; index < configured.length; index += 1) {
-    mismatch |= configured.charCodeAt(index) ^ supplied.charCodeAt(index)
-  }
-  if (mismatch !== 0) throw new ApiError(401, 'HELPDESK_ACCESS_DENIED')
-  return supplied
-}
